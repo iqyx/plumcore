@@ -1,0 +1,5 @@
+# Global build configuration
+build:
+    port: plumpot-cellular
+
+

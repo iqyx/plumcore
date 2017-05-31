@@ -1,0 +1,42 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+
+message FileTransferMessage {
+	required bytes session_id = 1 [(nanopb).max_size = 4];
+	oneof content {
+		FileMetadata file_metadata = 2;
+		FileRequest file_request = 3;
+		BlockRequest block_request = 4;
+		BlockResponse block_response = 5;
+	}
+}
+
+message FileMetadata {
+	required uint32 file_size_bytes = 2;
+	optional bytes file_name = 3 [(nanopb).max_size = 32];
+
+	oneof check {
+		bytes crc32 = 4 [(nanopb).max_size = 4];
+		bytes sha2_256 = 5 [(nanopb).max_size = 32];
+	}
+
+	required uint32 piece_size_blocks = 1;
+	required uint32 block_size_bytes = 6;
+}
+
+message FileRequest {
+	required bytes file_name = 1 [(nanopb).max_size = 32];
+}
+
+message BlockRequest {
+	required uint32 piece = 1;
+	required bytes bitmap = 2 [(nanopb).max_size = 32];
+	required uint32 transferred_pieces = 3;
+}
+
+message BlockResponse {
+	required uint32 piece = 1;
+	required uint32 block = 2;
+	required bytes data = 3 [(nanopb).max_size = 32];
+}

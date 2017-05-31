@@ -1,0 +1,41 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+
+
+
+message Ake3dhMessage {
+	required bytes session_id = 1 [(nanopb).max_size = 4];
+	oneof content {
+		EphemeralPublicKeyRequest epk_request = 2;
+		EphemeralPublicKeyResponse epk_response = 3;
+		IdentityPublicKeyRequest ipk_request = 4;
+		IdentityPublicKeyResponse ipk_response = 5;
+		KeyConfirmationRequest kc_request = 6;
+		KeyConfirmationResponse kc_response = 7;
+	}
+}
+
+message EphemeralPublicKeyRequest {
+}
+
+message EphemeralPublicKeyResponse {
+	required bytes ephemeral_pk = 2 [(nanopb).max_size = 32];
+}
+
+message IdentityPublicKeyRequest {
+}
+
+message IdentityPublicKeyResponse {
+	optional bytes identity_pk = 2 [(nanopb).max_size = 32];
+	optional bytes encrypted_identity_pk = 3 [(nanopb).max_size = 32];
+}
+
+message KeyConfirmationRequest {
+	required bytes challenge = 2 [(nanopb).max_size = 32];
+}
+
+message KeyConfirmationResponse {
+	required bytes response = 2 [(nanopb).max_size = 32];
+}
+

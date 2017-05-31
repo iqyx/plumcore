@@ -1,0 +1,12 @@
+[submodule "lib/cli/treecli"]
+	path = lib/cli/treecli
+	url = https://github.com/iqyx/treecli.git
+[submodule "lib/cli/lineedit"]
+	path = lib/cli/lineedit
+	url = https://github.com/iqyx/lineedit.git
+[submodule "lib/other/nanopb"]
+	path = lib/other/nanopb
+	url = https://github.com/nanopb/nanopb.git
+[submodule "lib/libopencm3"]
+	path = lib/libopencm3
+	url = https://github.com/iqyx/libopencm3.git

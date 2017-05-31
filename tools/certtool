@@ -1,0 +1,319 @@
+#!/usr/bin/python
+
+import argparse
+import struct
+import hashlib
+import ed25519
+import base64
+import umesh_cert_pb2
+import os
+
+
+
+def split_count(s, length, delimiter = "\n"):
+	o = ""
+	while len(s) > length:
+		o += s[:length] + delimiter
+		s = s[length:]
+	o += s
+	return o
+
+
+def generate_random(length):
+	return os.urandom(length)
+
+
+def load_message(filename, header):
+	with open(filename, "r") as f:
+		msg_header, msg_body = f.read().split(":", 1)
+		if header != msg_header:
+			raise Exception("Bad header, expecting %s header." % header)
+		msg_body = base64.b64decode(msg_body)
+		return msg_body
+
+
+def generate_key(id_len = 8):
+	new_key = umesh_cert_pb2.Key()
+	new_key.identity = generate_random(id_len)
+	new_key.ed25519_sk = generate_random(32)
+	return new_key
+
+
+def generate_cert(key):
+	new_cert = umesh_cert_pb2.Certificate()
+	new_cert.content.identity = key.identity
+
+	# @todo insert valid_from, valid_to and generated_on
+	# @todo insert contact information
+
+	new_cert.content.ed25519_pk = ed25519.publickey(key.ed25519_sk)
+	return new_cert
+
+
+def sign(cert, key):
+
+	new_signature = umesh_cert_pb2.CertificateSignature()
+	new_signature.signature_data.Clear()
+	new_signature.signature_data.trust_level = umesh_cert_pb2.LOW
+	new_signature.signer_identity = key.identity
+	new_signature.subject_identity = cert.content.identity
+	new_signature.digest_algorithm = umesh_cert_pb2.SHA2_256
+
+	# We need to serialize the certificate to get a message to sign. The serialization
+	# should always generate the same result
+	cert_to_sign = cert.SerializeToString()
+	sig_data_to_sign = new_signature.signature_data.SerializeToString()
+
+	cert_digest = hashlib.sha256(cert_to_sign + sig_data_to_sign).digest()
+	pub_key = ed25519.publickey(key.ed25519_sk)
+	new_signature.ed25519_signature = ed25519.signature(cert_digest, key.ed25519_sk, pub_key)
+
+	return new_signature
+
+
+def add_signature(cert, signature):
+	new_signature = cert.signature.add()
+	new_signature.CopyFrom(signature)
+	return cert
+
+
+def save_message(filename, message, header):
+	msg = header + ":" + base64.b64encode(message.SerializeToString())
+
+	if filename == "-":
+		print split_count(msg, 72)
+	else:
+		with open(filename, "w") as f:
+			f.write(split_count(msg, 72))
+
+
+def text_message(message, header):
+	print "--------------------"
+	print "Message: %s" % header
+	print message
+	print "--------------------"
+
+
+def display_key(key):
+	print "Private key:"
+	print "\tIdentity: %s" % split_count(key.identity.encode("hex"), 4, " ")
+	if key.HasField("ed25519_sk"):
+		print "\tEd25519 secret key:\n\t\t%s" % split_count(split_count(key.ed25519_sk.encode("hex"), 2, " "), 48, "\n\t\t")
+	print ""
+
+
+def display_signature(sig, level = 0):
+	print level * "\t" + "Public key signature:"
+	print level * "\t" + "\tSigner identity: %s" % split_count(sig.signer_identity.encode("hex"), 4, " ")
+	if sig.HasField("subject_identity"):
+		print level * "\t" + "\tSubject identity: %s" % split_count(sig.subject_identity.encode("hex"), 4, " ")
+
+	if sig.signature_data.HasField("valid_from") or sig.signature_data.HasField("valid_to") or sig.signature_data.HasField("signed_on"):
+		print level * "\t" + "\tDate/time information:"
+	if sig.signature_data.HasField("signed_on"):
+		print level * "\t" + "\t\tSigned on:"
+	if sig.signature_data.HasField("valid_from"):
+		print level * "\t" + "\t\tValid from:"
+	if sig.signature_data.HasField("valid_to"):
+		print level * "\t" + "\t\tValid to:"
+
+	if sig.signature_data.HasField("trust_level"):
+		print level * "\t" + "\tSubject trust level: %s" % umesh_cert_pb2.SubjectTrustLevel.Name(sig.signature_data.trust_level)
+
+	print level * "\t" + "\tDigest algorithm: %s" % umesh_cert_pb2.DigestAlgorithm.Name(sig.digest_algorithm)
+	if sig.HasField("ed25519_signature"):
+		print level * "\t" + "\tEd25519 signature:\n\t\t%s" % (level * "\t" + split_count(split_count(sig.ed25519_signature.encode("hex"), 2, " "), 48, "\n\t\t" + level * "\t"))
+
+	print ""
+
+
+def display_certificate(cert):
+	print "Public key certificate:"
+	print "\tIdentity: %s" % split_count(cert.content.identity.encode("hex"), 4, " ")
+
+	if cert.content.HasField("valid_from") or cert.content.HasField("valid_to") or cert.content.HasField("generated_on"):
+		print "\tDate/time information:"
+	if cert.content.HasField("generated_on"):
+		print "\t\tGenerated on:"
+	if cert.content.HasField("valid_from"):
+		print "\t\tValid from:"
+	if cert.content.HasField("valid_to"):
+		print "\t\tValid to:"
+
+	if cert.content.HasField("subject_name") or cert.content.HasField("subject_email") or cert.content.HasField("subject_comment"):
+		print "\tContact information:"
+	if cert.content.HasField("subject_name"):
+		print "\t\tSubject name:"
+	if cert.content.HasField("subject_email"):
+		print "\t\tSubject e-mail:"
+	if cert.content.HasField("subject_comment"):
+		print "\t\tSubject comment:"
+
+	if cert.content.HasField("ed25519_pk"):
+		print "\tEd25519 public key:\n\t\t%s" % split_count(split_count(cert.content.ed25519_pk.encode("hex"), 2, " "), 48, "\n\t\t")
+
+	print ""
+
+	for sig in cert.signature:
+		display_signature(sig, 1)
+
+
+
+
+parser = argparse.ArgumentParser(description = "uMesh certificate manipulation tool")
+
+# Key, certificate and signature loading. If not used, nothing will be loaded.
+parser.add_argument(
+	"--key",
+	metavar = "KEY",
+	dest = "key",
+	type = str,
+	help = "Load key from a file named KEY. Specify \"-\" to load from stdin."
+)
+parser.add_argument(
+	"--cert",
+	metavar = "CERT",
+	dest = "cert",
+	type = str,
+	help = "Load certificate from a file named CERT. Specify \"-\" to load from stdin."
+)
+parser.add_argument(
+	"--signature",
+	metavar = "SIGNATURE",
+	dest = "signature",
+	type = str,
+	help = "Load signature from a file named SIGNATURE. Specify \"-\" to load from stdin."
+)
+
+# Key, certificate and signature generation and manipulation.
+parser.add_argument(
+	"--id-length",
+	dest = "id_length",
+	metavar = "LEN",
+	default = 8,
+	type = int,
+	help = "Length of the generated key identities."
+)
+parser.add_argument(
+	"--gen-key",
+	action = "store_true",
+	dest = "gen_key",
+	help = "Generate new private key."
+)
+parser.add_argument(
+	"--gen-cert",
+	action = "store_true",
+	dest = "gen_cert",
+	help = "Generate a new unsigned certificate from the loaded private key."
+)
+parser.add_argument(
+	"--sign",
+	action = "store_true",
+	dest = "sign",
+	help = "Sign the loaded certificate with the loaded key."
+)
+parser.add_argument(
+	"--add-signature",
+	action = "store_true",
+	dest = "add_signature",
+	help = "Add the loaded signature to the loaded certificate."
+)
+parser.add_argument(
+	"--remove-signature",
+	dest = "remove_signature",
+	metavar = "ID",
+	type = str,
+	help = "Remove signature with the specified ID from the loaded certificate."
+)
+
+# Output saving
+parser.add_argument(
+	"--text",
+	action = "store_true",
+	dest = "text",
+	help = "All output will be generated in a human readable, display only text format."
+)
+parser.add_argument(
+	"--save-key",
+	metavar = "KEY",
+	dest = "save_key",
+	type = str,
+	help = "Save the loaded key to a new file named KEY."
+)
+parser.add_argument(
+	"--save-cert",
+	metavar = "CERT",
+	dest = "save_cert",
+	type = str,
+	help = "Save the loaded certificate to a new file named CERT."
+)
+parser.add_argument(
+	"--save-signature",
+	metavar = "SIGNATURE",
+	dest = "save_signature",
+	type = str,
+	help = "Save the loaded signature to a new file named SIGNATURE."
+)
+
+args = parser.parse_args()
+
+# We have nothing loaded on the beginning
+loaded_key = None
+loaded_cert = None
+loaded_signature = None
+
+# Load a key, cert or a signature if we requested it
+if args.key:
+	loaded_key = umesh_cert_pb2.Key()
+	loaded_key.ParseFromString(load_message(args.key, "key"))
+
+if args.cert:
+	loaded_cert = umesh_cert_pb2.Certificate()
+	loaded_cert.ParseFromString(load_message(args.cert, "cert"))
+
+if args.signature:
+	loaded_signature = umesh_cert_pb2.CertificateSignature()
+	loaded_signature.ParseFromString(load_message(args.signature, "signature"))
+
+
+if args.gen_key:
+	if loaded_key:
+		raise Exception("A key is already loaded, cannot generate new one.")
+	loaded_key = generate_key(id_len = args.id_length)
+
+if args.gen_cert:
+	if loaded_key == None:
+		raise Exception("No key is loaded, use --load-key or --gen-key.")
+	loaded_cert = generate_cert(loaded_key)
+
+if args.sign:
+	if loaded_key == None or loaded_cert == None:
+		raise Exception("No key and certificate is loaded, use --load-key, --gen-key, --load-cert, --gen-cert.")
+	loaded_signature = sign(loaded_cert, loaded_key)
+
+if args.add_signature:
+	if loaded_cert == None or loaded_signature == None:
+		raise Exception("No certificate and signature is loaded, use --load-cert, --gen-cert, --sign, --load-signature.")
+	loaded_cert = add_signature(loaded_cert, loaded_signature);
+
+
+# If a key, cert or signature was loaded or generated, save it either to the stdout (default)
+# or to a file if one of the --save-key, --save-cert or --save-signature was specified.
+if loaded_key:
+	if args.save_key:
+		save_message(args.save_key, loaded_key, "key")
+	if args.text:
+		display_key(loaded_key)
+
+if loaded_cert:
+	if args.save_cert:
+		save_message(args.save_cert, loaded_cert, "cert")
+	if args.text:
+		display_certificate(loaded_cert)
+
+if loaded_signature:
+	if args.save_signature:
+		save_message(args.save_signature, loaded_signature, "signature")
+	if args.text:
+		display_signature(loaded_signature)
+

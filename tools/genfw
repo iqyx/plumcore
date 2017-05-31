@@ -1,0 +1,4 @@
+#!/bin/bash
+
+dd if=/dev/zero bs=1024 count=1 > $2
+cat $1 >> $2

@@ -1,0 +1,33 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+
+message StatusProtoMessage {
+	oneof content {
+		SensorMessage sensor_message = 1;
+		PowerMessage power_message = 2;
+	}
+}
+
+message SensorMessage {
+
+	required bytes id = 1 [(nanopb).max_size = 16];
+
+	optional bytes quantity_name = 2 [(nanopb).max_size = 16];
+	optional bytes quantity_symbol = 3 [(nanopb).max_size = 8];
+	optional bytes unit_name = 4 [(nanopb).max_size = 16];
+	required bytes unit_symbol = 5 [(nanopb).max_size = 8];
+	required float value = 6;
+}
+
+
+message PowerMessage {
+
+	required bytes id = 1 [(nanopb).max_size = 16];
+
+	required uint32 voltage = 2;
+	optional int32 current = 3;
+
+}
+
+

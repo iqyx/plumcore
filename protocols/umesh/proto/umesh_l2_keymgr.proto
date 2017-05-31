@@ -1,0 +1,10 @@
+syntax = "proto2";
+import "nanopb.proto";
+import "ake_3dh.proto";
+
+message L2KeyManagerMessage {
+	oneof content {
+		Ake3dhMessage ake_3dh = 1;
+	}
+}
+
