@@ -32,6 +32,7 @@
 #include <libopencm3/cm3/systick.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/adc.h>
+#include <libopencm3/stm32/i2c.h>
 
 #include "FreeRTOS.h"
 #include "timers.h"
@@ -77,6 +78,7 @@
 #include "uhal/modules/gsm_quectel.h"
 
 #include "umesh_l2_status.h"
+#include "services/sensor_upload.h"
 
 
 /**
@@ -105,6 +107,7 @@ struct module_umesh umesh;
 struct module_fifo_profiler profiler;
 GsmQuectel gsm1;
 struct module_usart gsm1_usart;
+SensorUpload upload1;
 
 
 struct module_power_adc vin1;
@@ -339,6 +342,10 @@ int32_t port_init(void) {
 	gsm_quectel_set_usart(&gsm1, &(gsm1_usart.iface));
 
 	gsm_quectel_start(&gsm1);
+
+	sensor_upload_init(&upload1, gsm_quectel_tcpip(&gsm1), "147.175.187.202", 222);
+	sensor_upload_add_power_device(&upload1, "plumpot1_uxb", &(ubx_voltage.iface), 15000);
+	sensor_upload_add_power_device(&upload1, "plumpot1_vin", &(vin1.iface), 15000);
 
 	interface_directory_init(&interfaces, interface_list);
 

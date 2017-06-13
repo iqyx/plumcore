@@ -1,11 +1,13 @@
 Import("env")
 
 objs = env.Object(source = [
+	File(Glob("interfaces/*.c")),
 	File(Glob("umesh/*.c")),
 	File(Glob("umesh/proto/*.c")),
 ])
 
 env.Append(CPPPATH = [
+	Dir("."),
 	Dir("umesh"),
 	Dir("umesh/proto"),
 ])
