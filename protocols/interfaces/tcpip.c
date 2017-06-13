@@ -51,14 +51,28 @@ tcpip_ret_t tcpip_free(ITcpIp *self) {
 }
 
 
-tcpip_ret_t tcpip_connect(ITcpIp *self, ITcpIpSocket *socket) {
+tcpip_ret_t tcpip_create_client_socket(ITcpIp *self, ITcpIpSocket **socket) {
 	if (u_assert(self != NULL) ||
 	    u_assert(socket != NULL)) {
 		return TCPIP_RET_FAILED;
 	}
 
-	if (self->vmt.connect != NULL) {
-		return self->vmt.connect(self->vmt.context, socket);
+	if (self->vmt.create_client_socket != NULL) {
+		return self->vmt.create_client_socket(self->vmt.context, socket);
+	}
+
+	return TCPIP_RET_OK;
+}
+
+
+tcpip_ret_t tcpip_release_client_socket(ITcpIp *self, ITcpIpSocket *socket) {
+	if (u_assert(self != NULL) ||
+	    u_assert(socket != NULL)) {
+		return TCPIP_RET_FAILED;
+	}
+
+	if (self->vmt.release_client_socket != NULL) {
+		return self->vmt.release_client_socket(self->vmt.context, socket);
 	}
 
 	return TCPIP_RET_OK;
@@ -66,11 +80,13 @@ tcpip_ret_t tcpip_connect(ITcpIp *self, ITcpIpSocket *socket) {
 
 
 
-
 tcpip_ret_t tcpip_socket_init(ITcpIpSocket *self) {
 	if (u_assert(self != NULL)) {
 		return TCPIP_RET_FAILED;
 	}
+
+	memset(self, 0, sizeof(ITcpIpSocket));
+	uhal_interface_init(&self->interface);
 
 	return TCPIP_RET_OK;
 }
@@ -85,23 +101,15 @@ tcpip_ret_t tcpip_socket_free(ITcpIpSocket *self) {
 }
 
 
-tcpip_ret_t tcpip_socket_set_local_address(ITcpIpSocket *self, const char *address, uint16_t port) {
+tcpip_ret_t tcpip_socket_connect(ITcpIpSocket *self, const char *address, uint16_t port) {
 	if (u_assert(self != NULL) ||
-	    u_assert(address != NULL)) {
+	    u_assert(port != NULL)) {
 		return TCPIP_RET_FAILED;
 	}
-	(void)port;
 
-	return TCPIP_RET_OK;
-}
-
-
-tcpip_ret_t tcpip_socket_set_remote_address(ITcpIpSocket *self, const char *address, uint16_t port) {
-	if (u_assert(self != NULL) ||
-	    u_assert(address != NULL)) {
-		return TCPIP_RET_FAILED;
+	if (self->vmt.connect != NULL) {
+		return self->vmt.connect(self->vmt.context, address, port);
 	}
-	(void)port;
 
 	return TCPIP_RET_OK;
 }
@@ -110,6 +118,10 @@ tcpip_ret_t tcpip_socket_set_remote_address(ITcpIpSocket *self, const char *addr
 tcpip_ret_t tcpip_socket_disconnect(ITcpIpSocket *self) {
 	if (u_assert(self != NULL)) {
 		return TCPIP_RET_FAILED;
+	}
+
+	if (self->vmt.disconnect != NULL) {
+		return self->vmt.disconnect(self->vmt.context);
 	}
 
 	return TCPIP_RET_OK;
@@ -122,6 +134,10 @@ tcpip_ret_t tcpip_socket_send(ITcpIpSocket *self, const uint8_t *data, size_t le
 	    u_assert(len > 0) ||
 	    u_assert(written != NULL)) {
 		return TCPIP_RET_FAILED;
+	}
+
+	if (self->vmt.send != NULL) {
+		return self->vmt.send(self->vmt.context, data, len, written);
 	}
 
 	return TCPIP_RET_OK;

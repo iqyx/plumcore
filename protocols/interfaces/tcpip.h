@@ -22,12 +22,14 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "interface.h"
 
 
 typedef enum {
 	TCPIP_RET_OK = 0,
 	TCPIP_RET_FAILED = -1,
+	TCPIP_RET_DISCONNECTED = -2,
 } tcpip_ret_t;
 
 
@@ -38,8 +40,7 @@ typedef enum {
 /** Socket interface */
 
 struct tcpip_socket_vmt {
-	tcpip_ret_t (*set_local_address)(void *context, const char *address, uint16_t port);
-	tcpip_ret_t (*set_remote_address)(void *context, const char *address, uint16_t port);
+	tcpip_ret_t (*connect)(void *context, const char *address, uint16_t port);
 	tcpip_ret_t (*disconnect)(void *context);
 	tcpip_ret_t (*send)(void *context, const uint8_t *data, size_t len, size_t *written);
 
@@ -67,7 +68,8 @@ typedef struct {
 /** Protocol interface */
 
 struct tcpip_vmt {
-	tcpip_ret_t (*connect)(void *context, ITcpIpSocket *socket);
+	tcpip_ret_t (*create_client_socket)(void *context, ITcpIpSocket **socket);
+	tcpip_ret_t (*release_client_socket)(void *context, ITcpIpSocket *socket);
 
 	void *context;
 };
@@ -86,14 +88,14 @@ typedef struct {
 tcpip_ret_t tcpip_init(ITcpIp *self);
 tcpip_ret_t tcpip_free(ITcpIp *self);
 
-/* Assign a socket to the TcpIp interface and connect it. */
-tcpip_ret_t tcpip_connect(ITcpIp *self, ITcpIpSocket *socket);
+tcpip_ret_t tcpip_create_client_socket(ITcpIp *self, ITcpIpSocket **socket);
+tcpip_ret_t tcpip_release_client_socket(ITcpIp *self, ITcpIpSocket *socket);
 
 
 tcpip_ret_t tcpip_socket_init(ITcpIpSocket *self);
 tcpip_ret_t tcpip_socket_free(ITcpIpSocket *self);
-tcpip_ret_t tcpip_socket_set_local_address(ITcpIpSocket *self, const char *address, uint16_t port);
-tcpip_ret_t tcpip_socket_set_remote_address(ITcpIpSocket *self, const char *address, uint16_t port);
+
+tcpip_ret_t tcpip_socket_connect(ITcpIpSocket *self, const char *address, uint16_t port);
 tcpip_ret_t tcpip_socket_disconnect(ITcpIpSocket *self);
 tcpip_ret_t tcpip_socket_send(ITcpIpSocket *self, const uint8_t *data, size_t len, size_t *written);
 
