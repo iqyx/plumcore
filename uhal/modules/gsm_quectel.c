@@ -38,6 +38,7 @@
 /* HAL includes */
 #include "module.h"
 #include "interface_stream.h"
+#include "interfaces/tcpip.h"
 
 #include "gsm_quectel.h"
 
@@ -172,6 +173,14 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 		case GSM_QUECTEL_CMD_PDP_ACTIVATE:
 			strcpy(command_str, "AT+CGACT=1");
 			break;
+		case GSM_QUECTEL_CMD_GET_REGISTRATION:
+			strcpy(command_str, "AT+CREG?");
+			break;
+		case GSM_QUECTEL_CMD_ENABLE_RFTXMON:
+			strcpy(command_str, "AT+QCFG=\"RFTXburst\",1");
+			break;
+
+
 		case GSM_QUECTEL_CMD_IP_SEND:
 			if (self->data_to_send != NULL && self->data_to_send_len > 0) {
 				snprintf(command_str, sizeof(command_str), "AT+QISEND=%u", self->data_to_send_len);
@@ -379,6 +388,10 @@ static void gsm_quectel_process_task(void *p) {
 
 		}
 
+		if (self->current_command == GSM_QUECTEL_CMD_GET_REGISTRATION) {
+		}
+
+
 		if (self->current_command == GSM_QUECTEL_CMD_NONE) {
 			if (!strcmp(buf, "RING")) {
 				/* Incoming call. */
@@ -388,17 +401,6 @@ static void gsm_quectel_process_task(void *p) {
 
 			if (!strncmp(buf, "+", 1)) {
 				//~ u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("URC %s"), buf);
-			}
-
-			if (!strncmp(buf, "+CREG: ", 7)) {
-				if (!strncmp(buf, "+CREG: 1", 8)) {
-					self->registered = true;
-					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("registered to the home network"));
-				} else {
-					self->registered = false;
-					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("not registered"));
-				}
-				continue;
 			}
 
 			if (!strncmp(buf, "+CFUN: ", 7)) {
@@ -411,6 +413,23 @@ static void gsm_quectel_process_task(void *p) {
 				if (!strcmp(buf, "+CFUN: 4")) {
 					self->modem_status = GSM_QUECTEL_MODEM_STATUS_RFKILL;
 				}
+			}
+
+			if (!strncmp(buf, "+CREG: ", 7)) {
+				if (!strncmp(buf, "+CREG: 1", 8)) {
+					self->registered = true;
+					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("registered to the home network"));
+				} else if (!strncmp(buf, "+CREG: 5", 8)) {
+					self->registered = false;
+					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("registered, roaming"));
+				} else if (!strncmp(buf, "+CREG: 2", 8)) {
+					self->registered = false;
+					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("searching"));
+				} else {
+					self->registered = false;
+					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("not registered"));
+				}
+				continue;
 			}
 		}
 	}
@@ -437,11 +456,18 @@ static void gsm_quectel_main_task(void *p) {
 	//~ vTaskDelay(200);
 	command(self, GSM_QUECTEL_CMD_ENABLE_CREG_URC, 300);
 	command(self, GSM_QUECTEL_CMD_DISABLE_ECHO, 300);
+	command(self, GSM_QUECTEL_CMD_ENABLE_RFTXMON, 300);
 
 	/* Main modem loop. */
 	uint32_t cnt = 0;
 	enum gsm_quectel_tcpip_status last_tcpip_status = GSM_QUECTEL_TCPIP_STATUS_UNKNOWN;
 	while (self->can_run) {
+
+		// if ((cnt % 20) == 0) {
+			// if (self->modem_status == GSM_QUECTEL_MODEM_STATUS_FULL) {
+				// command(self, GSM_QUECTEL_CMD_GET_REGISTRATION, 300);
+			// }
+		// }
 
 		/* Get status every 5 seconds. */
 		if ((cnt % 50) == 0) {
@@ -490,8 +516,8 @@ static void gsm_quectel_main_task(void *p) {
 
 				case GSM_QUECTEL_TCPIP_STATUS_IP_STATUS:
 					self->tcpip_ready = true;
-					vTaskDelay(5000);
-					command(self, GSM_QUECTEL_CMD_CONNECT, 75000);
+					// vTaskDelay(5000);
+					// command(self, GSM_QUECTEL_CMD_CONNECT, 75000);
 
 					break;
 
@@ -501,16 +527,16 @@ static void gsm_quectel_main_task(void *p) {
 
 				case GSM_QUECTEL_TCPIP_STATUS_IP_CLOSE:
 					self->tcp_ready = false;
-					vTaskDelay(5000);
-					command(self, GSM_QUECTEL_CMD_CONNECT, 75000);
+					// vTaskDelay(5000);
+					// command(self, GSM_QUECTEL_CMD_CONNECT, 75000);
 					break;
 
 				case GSM_QUECTEL_TCPIP_STATUS_CONNECT_OK:
 					self->tcp_ready = true;
 
-					self->data_to_send = (const uint8_t *)"lalala\n";
-					self->data_to_send_len = 7;
-					command(self, GSM_QUECTEL_CMD_IP_SEND, 1000);
+					// self->data_to_send = (const uint8_t *)"lalala\n";
+					// self->data_to_send_len = 7;
+					// command(self, GSM_QUECTEL_CMD_IP_SEND, 1000);
 
 					break;
 
@@ -534,6 +560,125 @@ static void gsm_quectel_main_task(void *p) {
 	vTaskDelete(NULL);
 }
 
+static tcpip_ret_t gsm_quectel_tcpip_socket_connect(void *context, const char *address, uint16_t port) {
+	if (u_assert(context != NULL) ||
+	    u_assert(address != NULL)) {
+		return TCPIP_RET_FAILED;
+	}
+	(void)port;
+
+	ITcpIp *tcpip = (ITcpIp *)context;
+	GsmQuectel *self = (GsmQuectel *)tcpip->vmt.context;
+
+	if (self->tcpip_ready == false) {
+		return TCPIP_RET_FAILED;
+	}
+
+	/** @todo lock! */
+	self->tcpip_address = address;
+	self->tcpip_remote_port = port;
+	if (command(self, GSM_QUECTEL_CMD_CONNECT, 75000) == GSM_QUECTEL_RET_OK) {
+		/** @todo wait for connected status */
+		return TCPIP_RET_OK;
+	} else {
+		return TCPIP_RET_FAILED;
+	}
+
+	return TCPIP_RET_OK;
+}
+
+
+static tcpip_ret_t gsm_quectel_tcpip_socket_disconnect(void *context) {
+	if (u_assert(context != NULL)) {
+		return TCPIP_RET_FAILED;
+	}
+
+	ITcpIp *tcpip = (ITcpIp *)context;
+	GsmQuectel *self = (GsmQuectel *)tcpip->vmt.context;
+
+	return TCPIP_RET_OK;
+}
+
+
+static tcpip_ret_t gsm_quectel_tcpip_socket_send(void *context, const uint8_t *data, size_t len, size_t *written) {
+	if (u_assert(context != NULL) ||
+	    u_assert(data != NULL) ||
+	    u_assert(len > 0) ||
+	    u_assert(written != NULL)) {
+		return TCPIP_RET_FAILED;
+	}
+
+	ITcpIp *tcpip = (ITcpIp *)context;
+	GsmQuectel *self = (GsmQuectel *)tcpip->vmt.context;
+
+	if (self->tcp_ready == false || self->tcpip_ready == false) {
+		return TCPIP_RET_DISCONNECTED;
+	}
+
+	self->data_to_send = data;
+	self->data_to_send_len = len;
+	if (command(self, GSM_QUECTEL_CMD_IP_SEND, 1000) == GSM_QUECTEL_RET_OK) {
+		*written = len;
+		return TCPIP_RET_OK;
+	} else {
+		return TCPIP_RET_FAILED;
+	}
+
+	return TCPIP_RET_OK;
+
+
+}
+
+
+static tcpip_ret_t gsm_quectel_tcpip_create_client_socket(void *context, ITcpIpSocket **socket) {
+	if (u_assert(context != NULL) ||
+	    u_assert(socket != NULL)) {
+		return TCPIP_RET_FAILED;
+	}
+
+	GsmQuectel *self = (GsmQuectel *)context;
+
+	/* TCP/IP is not accessible yet. */
+	if (self->tcpip_ready == false) {
+		return TCPIP_RET_FAILED;
+	}
+
+	/* A socket is already used. This implementation supports only a single
+	 * socket. New one can be created when the current one is released. */
+	if (self->tcpip_socket_used) {
+		return TCPIP_RET_FAILED;
+	}
+
+	self->tcpip_socket_used = true;
+	tcpip_socket_init(&(self->tcpip_socket));
+	self->tcpip_socket.vmt.context = (void *)&(self->tcpip);
+	self->tcpip_socket.vmt.connect = gsm_quectel_tcpip_socket_connect;
+	self->tcpip_socket.vmt.disconnect = gsm_quectel_tcpip_socket_disconnect;
+	self->tcpip_socket.vmt.send = gsm_quectel_tcpip_socket_send;
+
+	/** @todo init the socket */
+
+	*socket = &(self->tcpip_socket);
+
+	return TCPIP_RET_OK;
+}
+
+
+static tcpip_ret_t gsm_quectel_tcpip_release_client_socket(void *context, ITcpIpSocket *socket) {
+	if (u_assert(context != NULL) ||
+	    u_assert(socket != NULL)) {
+		return TCPIP_RET_FAILED;
+	}
+
+	GsmQuectel *self = (GsmQuectel *)context;
+
+	tcpip_socket_free(&(self->tcpip_socket));
+	self->tcpip_socket_used = false;
+
+	return TCPIP_RET_OK;
+}
+
+
 gsm_quectel_ret_t gsm_quectel_init(GsmQuectel *self) {
 	if (u_assert(self != NULL)) {
 		return GSM_QUECTEL_RET_FAILED;
@@ -551,6 +696,11 @@ gsm_quectel_ret_t gsm_quectel_init(GsmQuectel *self) {
 	if (self->response_lock == NULL) {
 		return GSM_QUECTEL_RET_FAILED;
 	}
+
+	tcpip_init(&(self->tcpip));
+	self->tcpip.vmt.context = (void *)self;
+	self->tcpip.vmt.create_client_socket = gsm_quectel_tcpip_create_client_socket;
+	self->tcpip.vmt.release_client_socket = gsm_quectel_tcpip_release_client_socket;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 
@@ -699,4 +849,13 @@ gsm_quectel_ret_t gsm_quectel_set_usart(GsmQuectel *self, struct interface_strea
 
 	return GSM_QUECTEL_RET_OK;
 
+}
+
+
+ITcpIp *gsm_quectel_tcpip(GsmQuectel *self) {
+	if (u_assert(self != NULL)) {
+		return NULL;
+	}
+
+	return &(self->tcpip);
 }

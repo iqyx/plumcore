@@ -30,6 +30,7 @@
 #include "semphr.h"
 
 #include "interface_stream.h"
+#include "interfaces/tcpip.h"
 
 
 typedef enum {
@@ -53,6 +54,8 @@ enum gsm_quectel_command {
 	GSM_QUECTEL_CMD_PDP_CGDCONT,
 	GSM_QUECTEL_CMD_PDP_ACTIVATE,
 	GSM_QUECTEL_CMD_IP_SEND,
+	GSM_QUECTEL_CMD_GET_REGISTRATION,
+	GSM_QUECTEL_CMD_ENABLE_RFTXMON,
 
 };
 
@@ -89,6 +92,7 @@ typedef struct {
 	Module module;
 
 	struct interface_stream *usart;
+	ITcpIp tcpip;
 
 	uint32_t pwrkey_port;
 	uint32_t pwrkey_pin;
@@ -122,6 +126,10 @@ typedef struct {
 	const uint8_t *data_to_send;
 	size_t data_to_send_len;
 
+	ITcpIpSocket tcpip_socket;
+	volatile bool tcpip_socket_used;
+	const char *tcpip_address;
+	uint16_t tcpip_remote_port;
 
 
 
@@ -138,3 +146,5 @@ gsm_quectel_ret_t gsm_quectel_set_vddext(GsmQuectel *self, uint32_t port, uint32
 
 gsm_quectel_ret_t gsm_quectel_power(GsmQuectel *self, bool power);
 gsm_quectel_ret_t gsm_quectel_set_usart(GsmQuectel *self, struct interface_stream *usart);
+
+ITcpIp *gsm_quectel_tcpip(GsmQuectel *self);
