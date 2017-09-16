@@ -1,0 +1,14 @@
+# SCons related
+*.dblite
+
+# ignore all object files
+*.o
+
+# ignore generated outputs
+*.bin
+*.elf
+*.fw
+*.key
+*.map
+
+bin/
