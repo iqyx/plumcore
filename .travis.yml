@@ -1,7 +1,25 @@
 language: c
 sudo: false
-script: scons
+script:
+  - git submodule init
+  - git submodule update
+  - cd lib/other/nanopb/generator/proto && make && cd ../../../../..
+  - cd lib/libopencm3 && make && cd ../..
+  - scons proto
+  - scons
+
+cache:
+  directories:
+    - $HOME/gcc-arm-none-eabi-6-2017-q2-update
+
+install:
+  - export GCC_DIR=$HOME/gcc-arm-none-eabi-6-2017-q2-update
+  - export GCC_ARCHIVE=$HOME/gcc-arm-none-eabi-6-2017-q2-update-linux.tar.bz2
+  - export GCC_URL=https://developer.arm.com/-/media/Files/downloads/gnu-rm/6-2017q2/gcc-arm-none-eabi-6-2017-q2-update-linux.tar.bz2
+  - if [ ! -e $GCC_DIR/bin/arm-none-eabi-gcc ]; then wget $GCC_URL -O $GCC_ARCHIVE; tar xfj $GCC_ARCHIVE -C $HOME; fi
+  - export PATH=$PATH:$GCC_DIR/bin
+
 addons:
   apt:
     packages:
-    - gcc-arm-embedded
+      - protobuf-compiler

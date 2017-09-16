@@ -105,7 +105,7 @@ env["OBJCOPY"] = "%s-objcopy" % env["TOOLCHAIN"]
 env["OBJDUMP"] = "%s-objdump" % env["TOOLCHAIN"]
 env["SIZE"] = "%s-size" % env["TOOLCHAIN"]
 env["OOCD"] = "openocd"
-env["CREATEFW"] = "../ubload/tools/createfw.py"
+env["CREATEFW"] = "tools/createfw.py"
 
 # Add platform specific things
 env.Append(CPPPATH = [Dir("ports/%s" % env["PORT"])])
