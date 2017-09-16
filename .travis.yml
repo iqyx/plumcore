@@ -1,0 +1,7 @@
+language: c
+sudo: false
+script: scons
+addons:
+  apt:
+    packages:
+    - gcc-arm-embedded
