@@ -31,6 +31,7 @@
 
 #include "interface_stream.h"
 #include "interfaces/tcpip.h"
+#include "interfaces/cellular.h"
 
 
 typedef enum {
@@ -42,10 +43,13 @@ enum gsm_quectel_command {
 	GSM_QUECTEL_CMD_NONE = 0,
 	GSM_QUECTEL_CMD_TEST,
 	GSM_QUECTEL_CMD_GET_IMSI,
+	GSM_QUECTEL_CMD_GET_IMEI,
+	GSM_QUECTEL_CMD_GET_OPERATOR,
 	GSM_QUECTEL_CMD_DISABLE_ECHO,
 	GSM_QUECTEL_CMD_ENABLE_CREG_URC,
 	GSM_QUECTEL_CMD_START_TCPIP,
 	GSM_QUECTEL_CMD_ACTIVATE_CONTEXT,
+	GSM_QUECTEL_CMD_DEACTIVATE_CONTEXT,
 	GSM_QUECTEL_CMD_TCPIP_STAT,
 	GSM_QUECTEL_CMD_ENABLE_TCPIP_MUX,
 	GSM_QUECTEL_CMD_CONNECT,
@@ -114,6 +118,8 @@ typedef struct {
 
 	bool pdp_active;
 	bool registered;
+	enum cellular_modem_status cellular_status;
+	char operator[20];
 
 	volatile enum gsm_quectel_tcpip_status tcpip_status;
 	volatile enum gsm_quectel_modem_status modem_status;
@@ -121,6 +127,7 @@ typedef struct {
 	volatile bool tcp_ready;
 
 	char imsi[20];
+	char imei[20];
 	char local_ip[20];
 
 	const uint8_t *data_to_send;
@@ -131,6 +138,7 @@ typedef struct {
 	const char *tcpip_address;
 	uint16_t tcpip_remote_port;
 
+	ICellular cellular;
 
 
 } GsmQuectel;

@@ -135,7 +135,7 @@ sensor_upload_ret_t sensor_upload_init(SensorUpload *self, ITcpIp *tcpip, const 
 	self->address = address;
 	self->port = port;
 
-	xTaskCreate(sensor_upload_task, "sensor-upload", configMINIMAL_STACK_SIZE + 256, (void *)self, 2, &(self->task));
+	xTaskCreate(sensor_upload_task, "sensor-upload", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		return SENSOR_UPLOAD_RET_FAILED;

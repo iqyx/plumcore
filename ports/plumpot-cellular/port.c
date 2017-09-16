@@ -76,9 +76,12 @@
 #include "uhal/modules/stm32_timer_capsense.h"
 #include "uhal/modules/ax5243.h"
 #include "uhal/modules/gsm_quectel.h"
+#include "uhal/modules/i2c_sensors.h"
 
 #include "umesh_l2_status.h"
 #include "services/sensor_upload.h"
+
+#include "uhal/interfaces/cellular.h"
 
 
 /**
@@ -97,7 +100,6 @@ struct module_spidev_locm3 spi2_flash1;
 struct module_spidev_locm3 spi2_radio1;
 struct module_spi_flash flash1;
 struct module_rtc_locm3 rtc1;
-struct sffs fs;
 struct module_prng_simple prng;
 AdcStm32Locm3 adc1;
 InterfaceDirectory interfaces;
@@ -108,6 +110,8 @@ struct module_fifo_profiler profiler;
 GsmQuectel gsm1;
 struct module_usart gsm1_usart;
 SensorUpload upload1;
+I2cSensors i2c_test;
+struct sffs fs;
 
 
 struct module_power_adc vin1;
@@ -136,6 +140,22 @@ struct hal_interface_descriptor *hal_interfaces[] = {
 
 static struct interface_directory_item interface_list[] = {
 	{
+		.type = INTERFACE_TYPE_SENSOR,
+		.name = "meteo_temp",
+		.interface = &i2c_test.si7021_temp.interface,
+	}, {
+		.type = INTERFACE_TYPE_SENSOR,
+		.name = "meteo_rh",
+		.interface = &i2c_test.si7021_rh.interface,
+	}, {
+		.type = INTERFACE_TYPE_SENSOR,
+		.name = "meteo_lum",
+		.interface = &i2c_test.lum.interface,
+	}, {
+		.type = INTERFACE_TYPE_CELLULAR,
+		.name = "gsm1",
+		.interface = &gsm1.cellular.interface,
+	}, {
 		.type = INTERFACE_TYPE_NONE
 	}
 };
@@ -183,10 +203,6 @@ static void port_radio1_timer_callback(TimerHandle_t timer) {
 
 
 int32_t port_init(void) {
-
-
-
-
 
 	/* Status LEDs. */
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
@@ -246,9 +262,6 @@ int32_t port_init(void) {
 
 	/* Configure GPIO for radio & flash SPI bus (SPI2), enable SPI2 clock and
 	 * run spibus driver using libopencm3 to access it. */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
-	gpio_set(GPIOB, GPIO12);
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14 | GPIO15);
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
 	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
@@ -258,9 +271,11 @@ int32_t port_init(void) {
 	module_spibus_locm3_init(&spi2, "spi2", SPI2);
 	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
 
-
 	/* Initialize SPI device on the SPI2 bus. */
-	module_spidev_locm3_init(&spi2_flash1, "spi2_flash1", &(spi2.iface), GPIOB, 12);
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
+
+	module_spidev_locm3_init(&spi2_flash1, "spi2_flash1", &(spi2.iface), GPIOB, GPIO12);
 	hal_interface_set_name(&(spi2_flash1.iface.descriptor), "spi2_flash1");
 
 	/* Initialize flash device on the SPI2 bus. */
@@ -269,7 +284,7 @@ int32_t port_init(void) {
 
 	/* TODO: move to a dedicated module. */
 	sffs_init(&fs);
-	if (sffs_mount(&fs, &(flash1.iface)) == SFFS_MOUNT_OK) {
+	if (sffs_mount(&fs, &(flash1.iface.descriptor)) == SFFS_MOUNT_OK) {
 		u_log(system_log, LOG_TYPE_INFO, "sffs: filesystem mounted successfully");
 
 		struct sffs_info info;
@@ -304,23 +319,25 @@ int32_t port_init(void) {
 	module_power_adc_init(&vin1, "vin1", &(adc1.iface), &vin1_config);
 	module_power_adc_init(&ubx_voltage, "ubx1", &(adc1.iface), &ubx_voltage_config);
 
-	module_spidev_locm3_init(&spi2_radio1, "spi2_radio1", &(spi2.iface), GPIOB, 2);
-	hal_interface_set_name(&(spi2_radio1.iface.descriptor), "spi2_radio1");
+	// gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
+	// gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO2);
+	// module_spidev_locm3_init(&spi2_radio1, "spi2_radio1", &(spi2.iface), GPIOB, GPIO2);
+	// hal_interface_set_name(&(spi2_radio1.iface.descriptor), "spi2_radio1");
 
-	ax5243_init(&radio1, &(spi2_radio1.iface), 16000000);
-	hal_interface_set_name(&(radio1.iface.descriptor), "radio1");
+	// ax5243_init(&radio1, &(spi2_radio1.iface), 16000000);
+	// hal_interface_set_name(&(radio1.iface.descriptor), "radio1");
 
 
 	/* Start CSMA MAC in the radio1 interface. */
-	module_mac_csma_init(&radio1_mac, "radio1_mac", &(radio1.iface));
-	hal_interface_set_name(&(radio1_mac.iface.descriptor), "radio1_mac");
-	interface_mac_start(&(radio1_mac.iface));
+	// module_mac_csma_init(&radio1_mac, "radio1_mac", &(radio1.iface));
+	// hal_interface_set_name(&(radio1_mac.iface.descriptor), "radio1_mac");
+	// interface_mac_start(&(radio1_mac.iface));
 
 	/* Init the whole uMesh protocol stack (it is a single module). */
-	module_umesh_init(&umesh, "umesh");
-	module_umesh_add_mac(&umesh, &(radio1_mac.iface));
-	module_umesh_set_rng(&umesh, &(prng.iface));
-	module_umesh_set_profiler(&umesh, &(profiler.iface));
+	// module_umesh_init(&umesh, "umesh");
+	// module_umesh_add_mac(&umesh, &(radio1_mac.iface));
+	// module_umesh_set_rng(&umesh, &(prng.iface));
+	// module_umesh_set_profiler(&umesh, &(profiler.iface));
 
 	umesh_l2_status_add_power_device(&(ubx_voltage.iface), "plumpot1_ubx");
 
@@ -343,11 +360,80 @@ int32_t port_init(void) {
 
 	gsm_quectel_start(&gsm1);
 
+	/* I2C test */
+
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO8 | GPIO9);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO8 | GPIO9);
+	gpio_set_af(GPIOB, GPIO_AF4, GPIO8 | GPIO9);
+
+	rcc_periph_clock_enable(RCC_I2C1);
+	i2c_peripheral_disable(I2C1);
+	i2c_reset(I2C1);
+	i2c_set_fast_mode(I2C1);
+	i2c_set_clock_frequency(I2C1, I2C_CR2_FREQ_20MHZ);
+	i2c_set_ccr(I2C1, 35);
+	i2c_set_trise(I2C1, 43);
+	i2c_peripheral_enable(I2C1);
+
+	i2c_sensors_init(&i2c_test, I2C1);
+
 	sensor_upload_init(&upload1, gsm_quectel_tcpip(&gsm1), "147.175.187.202", 222);
 	sensor_upload_add_power_device(&upload1, "plumpot1_uxb", &(ubx_voltage.iface), 15000);
 	sensor_upload_add_power_device(&upload1, "plumpot1_vin", &(vin1.iface), 15000);
+	sensor_upload_add_sensor(&upload1, "plumpot1_temp", &(i2c_test.si7021_temp), 15000);
+	sensor_upload_add_sensor(&upload1, "plumpot1_rh", &(i2c_test.si7021_rh), 15000);
+	sensor_upload_add_sensor(&upload1, "plumpot1_lum", &(i2c_test.lum), 15000);
+
 
 	interface_directory_init(&interfaces, interface_list);
+
+	//~ size_t i = 0;
+	//~ while (true) {
+		//~ while (true) {
+			//~ float v;
+			//~ interface_sensor_value(&(i2c_test.si7021_rh), &v);
+			//~ if ((i % 100) == 0) {
+				//~ u_log(system_log, LOG_TYPE_INFO, "i2c_test value = %u, iter = %u", (unsigned int)v, i);
+			//~ }
+			//~ if ((unsigned int)v == 0) {
+				//~ u_log(system_log, LOG_TYPE_ERROR, "i2c_test error triggered, value = %u, iter = %u", (unsigned int)v, i);
+				//~ break;
+			//~ }
+			//~ i++;
+		//~ }
+		//~ vTaskDelay(1000);
+//~
+		//~ u_log(system_log, LOG_TYPE_INFO, "i2c_test repeating");
+//~
+	//~ }
+
+	struct sffs_file f;
+	const unsigned char test_data[] = {
+		0x99, 0xdd, 0x3c, 0xbd, 0x84, 0x91, 0xd1, 0x9c, 0x63, 0xa0, 0xfd, 0x5a,
+		0x12, 0x32, 0xec, 0x9f, 0x99, 0xf5, 0x6c, 0x26, 0xe1, 0x79, 0xe5, 0x0f,
+		0x1e, 0x76, 0xe0, 0x4b, 0xd4, 0xb7, 0xf7, 0xb5, 0xf4, 0x77, 0xd7, 0x94,
+		0x00, 0xe5, 0xb8, 0x7b, 0xaf, 0x9e, 0x3b, 0x3e, 0x3b, 0x38, 0x1f, 0x1b,
+		0x1e, 0xeb, 0x94, 0x17, 0x1f, 0x96, 0xbf, 0x69, 0x09, 0xff, 0xfe, 0xa0,
+		0x99, 0x5c, 0x23, 0xb9, 0xff, 0xde, 0xdb, 0x61, 0xec, 0xe3, 0x88, 0x1c,
+		0x0e, 0x8a, 0x21, 0x9f, 0x59, 0x4d, 0xfe, 0x9e, 0x9a, 0xc1, 0xb6, 0x96,
+		0xe3, 0x19, 0xe9, 0x39, 0x0f, 0x36, 0xfe, 0xf9, 0x24, 0x29, 0xad, 0xa6,
+		0xca, 0x62, 0x16, 0xed, 0x93, 0x6d, 0x39, 0xa7, 0x61, 0xfe, 0x85, 0x64,
+		0xbb, 0xad, 0x44, 0x9d, 0xc2, 0x87, 0xb2, 0x39, 0xf5, 0xee, 0x3b, 0xa6,
+		0x8a, 0x91, 0xcc, 0x79, 0x70, 0x10, 0x7a, 0xa6, 0x44, 0x26, 0x9e, 0xf4,
+		0x09, 0x4e, 0xd0, 0x93, 0x72, 0x11, 0x41, 0x64, 0x52, 0xb3, 0x05, 0xad,
+		0x9a, 0xdc, 0xd0, 0xcd, 0x71, 0xd2, 0x1e, 0x3f, 0x5d, 0xf3, 0xc8, 0xe5,
+		0x8b, 0x06, 0xf9, 0x01, 0x51, 0xcb, 0x02, 0x7e, 0xc2, 0x6b, 0xd2, 0x67,
+		0xf7, 0x65, 0xf5, 0xcc, 0x74, 0xcf, 0x8a, 0x7c, 0xec, 0xa0, 0xc1, 0x77,
+		0xac, 0x08, 0x0f, 0x43, 0x03, 0x79, 0x3e, 0xf8
+	};
+
+	// sffs_open_id(&fs, &f, 6, SFFS_APPEND);
+
+	// while (1) {
+		// sffs_write(&f, test_data, 200);
+		// u_log(system_log, LOG_TYPE_DEBUG, "200B written");
+	// }
+
 
 	return PORT_INIT_OK;
 }

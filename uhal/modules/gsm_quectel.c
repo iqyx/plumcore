@@ -20,7 +20,13 @@
  */
 
 /* Non-optimal implementation providing a single TCP/UDP socket over
- * a GPRS connection (in ideal conditions). */
+ * a GPRS connection (in ideal conditions).
+ *
+ * Known bugs:
+ *   - power to the modem needs to be restored after accidental (huh)
+ *     poweroff when the module task is running. It happens occasionally
+ *     and it causes the module to hang.
+ */
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -39,6 +45,7 @@
 #include "module.h"
 #include "interface_stream.h"
 #include "interfaces/tcpip.h"
+#include "interfaces/cellular.h"
 
 #include "gsm_quectel.h"
 
@@ -140,6 +147,12 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 		case GSM_QUECTEL_CMD_GET_IMSI:
 			strcpy(command_str, "AT+CIMI");
 			break;
+		case GSM_QUECTEL_CMD_GET_IMEI:
+			strcpy(command_str, "AT+GSN");
+			break;
+		case GSM_QUECTEL_CMD_GET_OPERATOR:
+			strcpy(command_str, "AT+COPS?");
+			break;
 		case GSM_QUECTEL_CMD_DISABLE_ECHO:
 			strcpy(command_str, "ATE0");
 			break;
@@ -151,6 +164,9 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 			break;
 		case GSM_QUECTEL_CMD_ACTIVATE_CONTEXT:
 			strcpy(command_str, "AT+QIACT");
+			break;
+		case GSM_QUECTEL_CMD_DEACTIVATE_CONTEXT:
+			strcpy(command_str, "AT+QIDEACT");
 			break;
 		case GSM_QUECTEL_CMD_TCPIP_STAT:
 			strcpy(command_str, "AT+QISTAT");
@@ -239,7 +255,7 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 			r = GSM_QUECTEL_RET_OK;
 		} else {
 			r = GSM_QUECTEL_RET_FAILED;
-			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("command '%s' caused an error, CME error code = %u"), command_str, self->cme_error_code);
+			// u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("command '%s' caused an error, CME error code = %u"), command_str, self->cme_error_code);
 		}
 	}
 
@@ -297,6 +313,12 @@ static void gsm_quectel_process_task(void *p) {
 			xSemaphoreGive(self->response_lock);
 			continue;
 		}
+		if (!strcmp(buf, "DEACT OK") && self->current_command == GSM_QUECTEL_CMD_DEACTIVATE_CONTEXT) {
+			self->current_command = GSM_QUECTEL_CMD_NONE;
+			self->command_response = GSM_QUECTEL_CMD_RESPONSE_OK;
+			xSemaphoreGive(self->response_lock);
+			continue;
+		}
 		if (!strcmp(buf, "ERROR")) {
 			self->current_command = GSM_QUECTEL_CMD_NONE;
 			self->command_response = GSM_QUECTEL_CMD_RESPONSE_ERROR;
@@ -312,6 +334,11 @@ static void gsm_quectel_process_task(void *p) {
 
 		if (self->current_command == GSM_QUECTEL_CMD_GET_IMSI && len == 15) {
 			strcpy(self->imsi, buf);
+			continue;
+		}
+
+		if (self->current_command == GSM_QUECTEL_CMD_GET_IMEI && len == 15) {
+			strcpy(self->imei, buf);
 			continue;
 		}
 
@@ -389,6 +416,32 @@ static void gsm_quectel_process_task(void *p) {
 		}
 
 		if (self->current_command == GSM_QUECTEL_CMD_GET_REGISTRATION) {
+			if (!strncmp(buf, "+CREG: 2,", 9)) {
+				if (!strncmp(buf, "+CREG: 2,1", 10)) {
+					self->registered = true;
+					self->cellular_status = CELLULAR_MODEM_STATUS_REGISTERED_HOME;
+				} else if (!strncmp(buf, "+CREG: 2,5", 10)) {
+					self->registered = false;
+					self->cellular_status = CELLULAR_MODEM_STATUS_REGISTERED_ROAMING;
+				} else if (!strncmp(buf, "+CREG: 2,2", 10)) {
+					self->registered = false;
+					self->cellular_status = CELLULAR_MODEM_STATUS_SEARCHING;
+				} else {
+					self->registered = false;
+					self->cellular_status = CELLULAR_MODEM_STATUS_NOT_REGISTERED;
+				}
+				continue;
+			}
+		}
+
+		if (self->current_command == GSM_QUECTEL_CMD_GET_OPERATOR) {
+			if (!strncmp(buf, "+COPS: 0,0,", 11)) {
+				strncpy(self->operator, buf + 11, sizeof(self->operator));
+				self->operator[sizeof(self->operator) - 1] = '\0';
+			} else {
+				strcpy(self->operator, "");
+			}
+			continue;
 		}
 
 
@@ -397,10 +450,6 @@ static void gsm_quectel_process_task(void *p) {
 				/* Incoming call. */
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("incoming call"));
 				continue;
-			}
-
-			if (!strncmp(buf, "+", 1)) {
-				//~ u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("URC %s"), buf);
 			}
 
 			if (!strncmp(buf, "+CFUN: ", 7)) {
@@ -413,23 +462,11 @@ static void gsm_quectel_process_task(void *p) {
 				if (!strcmp(buf, "+CFUN: 4")) {
 					self->modem_status = GSM_QUECTEL_MODEM_STATUS_RFKILL;
 				}
+				continue;
 			}
 
-			if (!strncmp(buf, "+CREG: ", 7)) {
-				if (!strncmp(buf, "+CREG: 1", 8)) {
-					self->registered = true;
-					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("registered to the home network"));
-				} else if (!strncmp(buf, "+CREG: 5", 8)) {
-					self->registered = false;
-					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("registered, roaming"));
-				} else if (!strncmp(buf, "+CREG: 2", 8)) {
-					self->registered = false;
-					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("searching"));
-				} else {
-					self->registered = false;
-					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("not registered"));
-				}
-				continue;
+			if (!strncmp(buf, "+", 1)) {
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("URC: %s"), buf);
 			}
 		}
 	}
@@ -463,16 +500,18 @@ static void gsm_quectel_main_task(void *p) {
 	enum gsm_quectel_tcpip_status last_tcpip_status = GSM_QUECTEL_TCPIP_STATUS_UNKNOWN;
 	while (self->can_run) {
 
-		// if ((cnt % 20) == 0) {
-			// if (self->modem_status == GSM_QUECTEL_MODEM_STATUS_FULL) {
-				// command(self, GSM_QUECTEL_CMD_GET_REGISTRATION, 300);
-			// }
-		// }
+		if ((cnt % 20) == 0) {
+			if (self->modem_status == GSM_QUECTEL_MODEM_STATUS_FULL) {
+				command(self, GSM_QUECTEL_CMD_GET_REGISTRATION, 300);
+			}
+		}
 
 		/* Get status every 5 seconds. */
 		if ((cnt % 50) == 0) {
 			if (self->modem_status == GSM_QUECTEL_MODEM_STATUS_FULL) {
 				command(self, GSM_QUECTEL_CMD_GET_IMSI, 300);
+				command(self, GSM_QUECTEL_CMD_GET_IMEI, 300);
+				command(self, GSM_QUECTEL_CMD_GET_OPERATOR, 300);
 			}
 		}
 
@@ -544,6 +583,7 @@ static void gsm_quectel_main_task(void *p) {
 				default:
 					self->tcpip_ready = false;
 					self->tcp_ready = false;
+					command(self, GSM_QUECTEL_CMD_DEACTIVATE_CONTEXT, 40000);
 					break;
 			}
 		}
@@ -679,6 +719,45 @@ static tcpip_ret_t gsm_quectel_tcpip_release_client_socket(void *context, ITcpIp
 }
 
 
+static cellular_ret_t gsm_quectel_cellular_imei(void *context, char *imei) {
+	if (u_assert(context != NULL) ||
+	    u_assert(imei != NULL)) {
+		return CELLULAR_RET_FAILED;
+	}
+
+	GsmQuectel *self = (GsmQuectel *)context;
+	strcpy(imei, self->imei);
+
+	return CELLULAR_RET_OK;
+}
+
+
+static cellular_ret_t gsm_quectel_cellular_status(void *context, enum cellular_modem_status *status) {
+	if (u_assert(context != NULL) ||
+	    u_assert(status != NULL)) {
+		return CELLULAR_RET_FAILED;
+	}
+
+	GsmQuectel *self = (GsmQuectel *)context;
+	*status = self->cellular_status;
+
+	return CELLULAR_RET_OK;
+}
+
+
+static cellular_ret_t gsm_quectel_cellular_get_operator(void *context, char *operator) {
+	if (u_assert(context != NULL) ||
+	    u_assert(operator != NULL)) {
+		return CELLULAR_RET_FAILED;
+	}
+
+	GsmQuectel *self = (GsmQuectel *)context;
+	strcpy(operator, self->operator);
+
+	return CELLULAR_RET_OK;
+}
+
+
 gsm_quectel_ret_t gsm_quectel_init(GsmQuectel *self) {
 	if (u_assert(self != NULL)) {
 		return GSM_QUECTEL_RET_FAILED;
@@ -701,6 +780,12 @@ gsm_quectel_ret_t gsm_quectel_init(GsmQuectel *self) {
 	self->tcpip.vmt.context = (void *)self;
 	self->tcpip.vmt.create_client_socket = gsm_quectel_tcpip_create_client_socket;
 	self->tcpip.vmt.release_client_socket = gsm_quectel_tcpip_release_client_socket;
+
+	cellular_init(&(self->cellular));
+	self->cellular.vmt.context = (void *)self;
+	self->cellular.vmt.imei = gsm_quectel_cellular_imei;
+	self->cellular.vmt.status = gsm_quectel_cellular_status;
+	self->cellular.vmt.get_operator = gsm_quectel_cellular_get_operator;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 
@@ -796,7 +881,8 @@ gsm_quectel_ret_t gsm_quectel_power(GsmQuectel *self, bool power) {
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("powering up"));
 		if (gpio_get(self->vddext_port, self->vddext_pin)) {
 			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("module is already powered up"));
-			return GSM_QUECTEL_RET_OK;
+			gsm_quectel_power(self, false);
+			//~ return GSM_QUECTEL_RET_OK;
 		}
 
 		/* At least 1s pulse on the PWR_KEY line is needed to power up
