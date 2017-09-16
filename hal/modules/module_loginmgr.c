@@ -136,7 +136,7 @@ static void loginmgr_task(void *p) {
 		switch (loginmgr->state) {
 			case LOGINMGR_STATE_BANNER: {
 				vTaskDelay(1000);
-				module_loginmgr_print_handler(ESC_BOLD "\r\nPress any key to activate this console.\r\n\r\n" ESC_DEFAULT, (void *)loginmgr);
+				module_loginmgr_print_handler("\x1b[1m" "\r\nPress any key to activate this console.\r\n\r\n" "\x1b[0m", (void *)loginmgr);
 				/* Wait for anything, don't even check the result. */
 				uint8_t host_buf[1];
 				interface_stream_read(loginmgr->host, host_buf, sizeof(host_buf));
@@ -147,7 +147,7 @@ static void loginmgr_task(void *p) {
 
 			case LOGINMGR_STATE_UNAUTH: {
 				vTaskDelay(1000);
-				module_loginmgr_print_handler(ESC_COLOR_FG_RED "Authentication failed.\r\n\r\n" ESC_DEFAULT, (void *)loginmgr);
+				module_loginmgr_print_handler("\x1b[31m" "Authentication failed.\r\n\r\n" "\x1b[0m", (void *)loginmgr);
 				module_loginmgr_set_state(loginmgr, LOGINMGR_STATE_LOGIN);
 				break;
 			}
@@ -285,9 +285,9 @@ static int32_t module_loginmgr_prompt_callback(struct lineedit *le, void *ctx) {
 	}
 
 	struct module_loginmgr *loginmgr = (struct module_loginmgr *)ctx;
-	module_loginmgr_print_handler(ESC_COLOR_FG_GREEN, ctx);
+	module_loginmgr_print_handler("\x1b[32m", ctx);
 	module_loginmgr_print_handler(loginmgr->le_prompt, ctx);
-	module_loginmgr_print_handler(ESC_DEFAULT, ctx);
+	module_loginmgr_print_handler("\x1b[0m", ctx);
 
 	return 0;
 }
@@ -376,7 +376,7 @@ int32_t module_loginmgr_print_welcome(struct module_loginmgr *loginmgr) {
 	}
 
 	char s[93];
-	module_loginmgr_print_handler(ESC_COLOR_FG_YELLOW ESC_BOLD, (void *)loginmgr);
+	module_loginmgr_print_handler("\x1b[34m" "\x1b[1m", (void *)loginmgr);
 
 	/* Line 1 */
 	module_loginmgr_string_line(s, sizeof(s) - 1, 1);
@@ -415,6 +415,6 @@ int32_t module_loginmgr_print_welcome(struct module_loginmgr *loginmgr) {
 	module_loginmgr_print_handler(s, (void *)loginmgr);
 	module_loginmgr_print_handler("\r\n\r\n", (void *)loginmgr);
 
-	module_loginmgr_print_handler(ESC_DEFAULT, (void *)loginmgr);
+	module_loginmgr_print_handler("\x1b[0m", (void *)loginmgr);
 	return MODULE_LOGINMGR_PRINT_WELCOME_OK;
 }

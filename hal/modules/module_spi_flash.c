@@ -100,7 +100,8 @@ static int32_t module_spi_flash_write_enable(struct module_spi_flash *flash, boo
 #define MODULE_SPI_FLASH_GET_STATUS_OK 0
 #define MODULE_SPI_FLASH_GET_STATUS_FAILED -1
 static int32_t module_spi_flash_get_status(struct module_spi_flash *flash, uint8_t *status) {
-	if (u_assert(flash != NULL && status == NULL)) {
+	if (u_assert(flash != NULL) ||
+	    u_assert(status != NULL)) {
 		return MODULE_SPI_FLASH_GET_STATUS_FAILED;
 	}
 

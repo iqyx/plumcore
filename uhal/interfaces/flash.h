@@ -33,11 +33,22 @@ typedef enum {
 } flash_ret_t;
 
 struct flash_info {
+
+	/* Capacity of the flash memory is defined in Bytes. */
 	uint64_t capacity;
+
+	/* Flash page is a memory block which can be read or written at once. */
 	uint32_t page_size_bytes;
+
+	/* Sector and Block are memory blocks which can be erased. Usually there
+	 * are more pages in a sector and more sectors in a block. */
 	uint32_t sector_size_pages;
 	uint32_t block_size_sectors;
+
+	/* JEDEC flash ID. */
 	uint32_t id;
+
+	/* String information about the flash manufacturer and part number. */
 	char *manufacturer;
 	char *part;
 };

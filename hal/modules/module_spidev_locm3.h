@@ -35,7 +35,7 @@ struct module_spidev_locm3 {
 	struct interface_spibus *spibus;
 
 	uint32_t cs_port;
-	uint8_t cs_pin;
+	uint32_t cs_pin;
 };
 
 

@@ -54,6 +54,7 @@
 #include "ucli_system.c"
 #include "ucli_files.c"
 #include "device_sensor.c"
+#include "device_cellular.c"
 
 
 /* Helper defines to make the command tree more clear. */
@@ -164,6 +165,22 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					},
 				},
+				Node {
+					Name "cellular",
+					Commands {
+						Command {
+							Name "print",
+							Exec device_cellular_print,
+						},
+						End
+					},
+					DSubnodes {
+						DNode {
+							Name "cellularN",
+							.create = device_cellular_cellularN_create,
+						}
+					}
+				},
 				End
 			},
 		},
@@ -227,3 +244,4 @@ const struct treecli_node *system_cli_tree = Node {
 		End
 	}
 };
+

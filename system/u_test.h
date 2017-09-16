@@ -23,13 +23,10 @@
 #define _U_TEST_H_
 
 #include <stdbool.h>
-/** @todo Should the lineedit dependency be removed? Tests cannot be run without
- *        the CLI which needs lineedit. */
-#include "lineedit.h"
 
 
-#define U_TEST_OK ESC_COLOR_FG_GREEN ESC_BOLD "OK" ESC_DEFAULT
-#define U_TEST_FAILED ESC_COLOR_FG_RED ESC_BOLD "Failed" ESC_DEFAULT
+#define U_TEST_OK "\x1b[32m" "\x1b[1m" "OK" "\x1b[0m"
+#define U_TEST_FAILED "\x1b[31m" "\x1b[1m" "Failed" "\x1b[0m"
 
 /**
  * Call the u_test_check function with the test invocation function name as the

@@ -38,6 +38,7 @@ typedef enum {
 enum interface_directory_type {
 	INTERFACE_TYPE_NONE = 0,
 	INTERFACE_TYPE_SENSOR,
+	INTERFACE_TYPE_CELLULAR,
 };
 
 struct interface_directory_item {

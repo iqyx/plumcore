@@ -23,10 +23,35 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include "lineedit.h"
 
 #include "interface_stream.h"
 #include "cli_table_helper.h"
+
+#define ESC_CURSOR_UP "\x1b[A"
+#define ESC_CURSOR_DOWN "\x1b[B"
+#define ESC_CURSOR_RIGHT "\x1b[C"
+#define ESC_CURSOR_LEFT "\x1b[D"
+#define ESC_DEFAULT "\x1b[0m"
+#define ESC_BOLD "\x1b[1m"
+#define ESC_CURSOR_SAVE "\x1b[s"
+#define ESC_CURSOR_RESTORE "\x1b[u"
+#define ESC_ERASE_LINE_END "\x1b[K"
+#define ESC_COLOR_FG_BLACK "\x1b[30m"
+#define ESC_COLOR_FG_RED "\x1b[31m"
+#define ESC_COLOR_FG_GREEN "\x1b[32m"
+#define ESC_COLOR_FG_YELLOW "\x1b[33m"
+#define ESC_COLOR_FG_BLUE "\x1b[34m"
+#define ESC_COLOR_FG_MAGENTA "\x1b[35m"
+#define ESC_COLOR_FG_CYAN "\x1b[36m"
+#define ESC_COLOR_FG_WHITE "\x1b[37m"
+
+#define CLI_TABLE_HEADER_STYLE     ESC_ERASE_LINE_END ESC_COLOR_FG_WHITE ESC_BOLD
+#define CLI_TABLE_SEPARATOR_STYLE  ESC_ERASE_LINE_END ESC_COLOR_FG_WHITE ESC_BOLD
+#define CLI_TABLE_LINE_STYLE       ESC_ERASE_LINE_END ESC_COLOR_FG_WHITE
+#define CLI_TABLE_VERTICAL_LINE    ' '
+#define CLI_TABLE_HORIZONTAL_LINE  '-'
+#define CLI_TABLE_LINE_CROSSING    '+'
+#define CLI_TABLE_EXPAND           ' '
 
 
 static void table_compute_expand(const struct cli_table_cell *cols, const struct cli_table_cell *cell, size_t content_size, size_t *left_expand, size_t *right_expand) {

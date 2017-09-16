@@ -56,7 +56,7 @@ int main(void) {
 	port_early_init();
 	u_log_init();
 
-	xTaskCreate(init_task, "init", configMINIMAL_STACK_SIZE + 256, NULL, 1, NULL);
+	xTaskCreate(init_task, "init", configMINIMAL_STACK_SIZE + 512, NULL, 1, NULL);
 	xTaskCreate(test_task, "test", configMINIMAL_STACK_SIZE + 256, NULL, 1, NULL);
 	vTaskStartScheduler();
 

@@ -30,18 +30,6 @@
 
 #include "interface_stream.h"
 
-#ifndef ESC_COLOR_FG_WHITE
-#error ESC_ERASE_LINE_END
-#endif
-
-#define CLI_TABLE_HEADER_STYLE     ESC_ERASE_LINE_END ESC_COLOR_FG_WHITE ESC_BOLD
-#define CLI_TABLE_SEPARATOR_STYLE  ESC_ERASE_LINE_END ESC_COLOR_FG_WHITE ESC_BOLD
-#define CLI_TABLE_LINE_STYLE       ESC_ERASE_LINE_END ESC_COLOR_FG_WHITE
-#define CLI_TABLE_VERTICAL_LINE    ' '
-#define CLI_TABLE_HORIZONTAL_LINE  '-'
-#define CLI_TABLE_LINE_CROSSING    '+'
-#define CLI_TABLE_EXPAND           ' '
-
 
 enum cli_table_cell_alignment {
 	ALIGN_LEFT = 0,

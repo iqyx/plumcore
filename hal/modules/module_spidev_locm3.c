@@ -68,7 +68,7 @@ static int32_t module_spidev_locm3_select(void *context) {
 	}
 
 	struct module_spidev_locm3 *spidev = (struct module_spidev_locm3 *)context;
-	gpio_clear(spidev->cs_port, 1 << spidev->cs_pin);
+	gpio_clear(spidev->cs_port, spidev->cs_pin);
 
 	return INTERFACE_SPIDEV_SELECT_OK;
 }
@@ -80,7 +80,7 @@ static int32_t module_spidev_locm3_deselect(void *context) {
 	}
 
 	struct module_spidev_locm3 *spidev = (struct module_spidev_locm3 *)context;
-	gpio_set(spidev->cs_port, 1 << spidev->cs_pin);
+	gpio_set(spidev->cs_port, spidev->cs_pin);
 
 	return INTERFACE_SPIDEV_DESELECT_OK;
 }
@@ -107,7 +107,7 @@ int32_t module_spidev_locm3_init(struct module_spidev_locm3 *spidev, const char 
 	spidev->cs_port = cs_port;
 	spidev->cs_pin = cs_pin;
 	spidev->spibus = spibus;
-	module_spidev_locm3_deselect((void *)spidev);
+	// module_spidev_locm3_deselect((void *)spidev);
 
 	u_log(system_log, LOG_TYPE_INFO, "%s: SPI device initialized on bus %s", spidev->module.name, spidev->spibus->descriptor.name);
 

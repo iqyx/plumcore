@@ -29,7 +29,7 @@
 #include "system_log.h"
 #include "port.h"
 #include "interface_stream.h"
-#include "lineedit.h"
+// #include "lineedit.h"
 #include "interface_rtc.h"
 
 
@@ -120,46 +120,46 @@ static void u_log_print_handler(struct log_cbuffer *buf, uint32_t pos, void *ctx
 		interface_rtc_datetime_to_str(rtc, s, sizeof(s), &datetime);
 	}
 
-	u_log_stream_print(stream, "\r" ESC_ERASE_LINE_END);
+	u_log_stream_print(stream, "\r" "\x1b[K");
 	u_log_stream_print(stream, "[");
 	u_log_stream_print(stream, s);
 	u_log_stream_print(stream, "] ");
 
-	u_log_stream_print(stream, ESC_BOLD);
+	u_log_stream_print(stream, "\x1b[1m");
 	switch (header & 0x0f) {
 		case LOG_TYPE_NULL:
 			u_log_stream_print(stream, "\r\n");
 			return;
 
 		case LOG_TYPE_INFO:
-			u_log_stream_print(stream, ESC_COLOR_FG_BLUE "INFO: ");
+			u_log_stream_print(stream, "\x1b[34m" "INFO: ");
 			break;
 
 		case LOG_TYPE_DEBUG:
-			u_log_stream_print(stream, ESC_COLOR_FG_GREEN "DEBUG: ");
+			u_log_stream_print(stream, "\x1b[32m" "DEBUG: ");
 			break;
 
 		case LOG_TYPE_WARN:
-			u_log_stream_print(stream, ESC_COLOR_FG_YELLOW "WARNING: ");
+			u_log_stream_print(stream, "\x1b[33m" "WARNING: ");
 			break;
 
 		case LOG_TYPE_ERROR:
-			u_log_stream_print(stream, ESC_COLOR_FG_MAGENTA "ERROR: ");
+			u_log_stream_print(stream, "\x1b[35m" "ERROR: ");
 			break;
 
 		case LOG_TYPE_CRIT:
-			u_log_stream_print(stream, ESC_COLOR_FG_RED "CRITICAL: ");
+			u_log_stream_print(stream, "\x1b[31m" "CRITICAL: ");
 			break;
 
 		case LOG_TYPE_ASSERT:
-			u_log_stream_print(stream, ESC_COLOR_FG_RED "ASSERT: ");
+			u_log_stream_print(stream, "\x1b[31m" "ASSERT: ");
 			break;
 
 		default:
 			u_log_stream_print(stream, "?: ");
 			break;
 	}
-	u_log_stream_print(stream, ESC_DEFAULT);
+	u_log_stream_print(stream, "\x1b[0m");
 	u_log_stream_print(stream, msg);
 	u_log_stream_print(stream, "\r\n");
 }
