@@ -12,3 +12,5 @@
 *.map
 
 bin/
+
+version.h
