@@ -23,3 +23,14 @@ addons:
   apt:
     packages:
       - protobuf-compiler
+
+deploy:
+  provider: releases
+  api_key:
+    secure: FDoxUZ6d1e0lUA7NrtuvmtK+QU4VN5fGtyB2uUKW8/yV6petaGLMfTKgO0F0y7fEAF2VAxmYM7C3R1W+zl7jXhPz7YBO0QOJPatk/yQX7Mn9NHbCNPROW8KpSzlu+Ma6pFE21MZ+yvk6ugKa5gHZs+9wOEmbdqpk5Szpl0vA/b+EoDYGAdEwTfp/1e973XQX4pHcgd8sLftruDfuNfaEfVbgdRsIHyp7Rqxrgh2aksd0GQEuqIFq8YzztvX8Ir6BU8YJnZHvYvG4cL64LlMuLkMj2GDdUPMZpd7DLLkIliaz9irgP7m5dIvA6i8071ks1lpTRFE29klw5VBn/cLNcRTqSNCIXr1IPiP5vNJmscwk4tbOcjXPl29cz8Eue/r7XSciIqFK4xuiJXfv1oeFFxvpMKpm+tEdo5BQqiW9FL+6LZXIZdOjNgrs7cbOrH/6EHbQlGOE+v3ta4rlV6aAFywYGXfN/99E2HFpG02AYdMZvrRwPdpCSLUTwiAo1g3Fsig5H2v5qwFTcURtV4FxcK2ucEXolVGHqQSBnbqCRITyUKpf6lhW+JiV5tCaR9iWUfR6bfGZ+JrSoJYYdDmabOiHw8grPu9m8Afs5YkCuDglDm8Rp7hMtZ5d51Vqq2v+Op+Y+ZiQRBUs+muKZT94j0Zvu9kFAn6HbaVawvxcc2M=
+  file_glob: true
+  file:
+    bin/*.fw
+    bin/*.elf
+  on:
+    tags: true
