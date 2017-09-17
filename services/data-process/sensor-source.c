@@ -70,16 +70,42 @@ static void dp_sensor_source_task(void *p) {
 }
 
 
-dp_ret_t dp_sensor_source_init(struct dp_sensor_source *self, const char *name) {
+static struct dp_input *get_input_by_name(const char *name, void *context) {
+	(void)name;
+	(void)context;
+
+	/* No inputs, always return NULL. */
+	return NULL;
+}
+
+
+static struct dp_output *get_output_by_name(const char *name, void *context) {
+	if (name == NULL) {
+		return NULL;
+	}
+
+	struct dp_sensor_source *self = (struct dp_sensor_source *)context;
+	if (!strcmp(name, "out") || !strcmp(name, "default")) {
+		return &(self->out);
+	}
+
+	return NULL;
+}
+
+
+dp_ret_t dp_sensor_source_init(struct dp_sensor_source *self) {
 	if (u_assert(self != NULL)) {
 		return DATA_PROCESS_RET_FAILED;
 	}
 
 	memset(self, 0, sizeof(struct dp_sensor_source));
 
-	self->name = name;
 	self->interval_ms = 1000;
 	dp_output_init(&self->out, DP_DATA_TYPE_FLOAT);
+	self->descriptor.get_input_by_name = get_input_by_name;
+	self->descriptor.get_output_by_name = get_output_by_name;
+	self->descriptor.context = (void *)self;
+
 	self->initialized = true;
 
 	return DATA_PROCESS_RET_OK;

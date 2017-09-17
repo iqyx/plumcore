@@ -5,6 +5,7 @@
 #include "port.h"
 #include "services/data-process/data-process.h"
 #include "services/data-process/sensor-source.h"
+#include "services/data-process/log-sink.h"
 
 static const struct cli_table_cell service_data_process_node_table[] = {
 	{.type = TYPE_STRING, .size = 16, .alignment = ALIGN_RIGHT}, /* name */
@@ -49,8 +50,25 @@ static int32_t service_data_process_sensor_source_add(struct treecli_parser *par
 	if (new == NULL) {
 		return 1;
 	}
-	dp_sensor_source_init(new, "new-node");
+	dp_sensor_source_init(new);
 	dp_graph_add_node(&data_process_graph, (void *)new, DP_NODE_SENSOR_SOURCE, "new-node");
+
+	/* Move to the newly created d-subnode. */
+	treecli_parser_parse_line(parser, "new-node");
+
+	return 0;
+}
+
+
+static int32_t service_data_process_log_sink_add(struct treecli_parser *parser, void *exec_context) {
+	(void)exec_context;
+
+	struct dp_log_sink *new = malloc(sizeof(struct dp_log_sink));
+	if (new == NULL) {
+		return 1;
+	}
+	dp_log_sink_init(new, DP_DATA_TYPE_FLOAT);
+	dp_graph_add_node(&data_process_graph, (void *)new, DP_NODE_LOG_SINK, "new-node");
 
 	/* Move to the newly created d-subnode. */
 	treecli_parser_parse_line(parser, "new-node");
@@ -199,6 +217,126 @@ static int32_t service_data_process_sensor_source_N_enabled_set(struct treecli_p
 }
 
 
+static int32_t service_data_process_log_sink_N_name_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
+	(void)ctx;
+	(void)value;
+
+	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
+	size_t current_index = 0;
+	struct dp_graph_node *graph_node = data_process_graph.nodes;
+	while (graph_node != NULL) {
+		if (graph_node->type == DP_NODE_LOG_SINK) {
+			if (index == current_index) {
+				strncpy(graph_node->name, buf, len);
+				graph_node->name[len] = '\0';
+
+				return 0;
+			}
+			current_index++;
+		}
+		graph_node = graph_node->next;
+	}
+
+	return 0;
+}
+
+
+static int32_t service_data_process_log_sink_N_enabled_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
+	(void)len;
+	(void)ctx;
+	(void)value;
+
+	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
+	size_t current_index = 0;
+	struct dp_graph_node *graph_node = data_process_graph.nodes;
+	while (graph_node != NULL) {
+		if (graph_node->type == DP_NODE_LOG_SINK) {
+			if (index == current_index) {
+
+				struct dp_log_sink *s = (struct dp_log_sink *)graph_node->node;
+				bool e = *(bool *)buf;
+
+				if (e) {
+					if (s->running) {
+						u_log(system_log, LOG_TYPE_ERROR, "cannot enable a running node");
+					} else {
+						dp_log_sink_start(s);
+					}
+				} else {
+					if (s->running) {
+						dp_log_sink_stop(s);
+					} else {
+						u_log(system_log, LOG_TYPE_ERROR, "cannot disable a stopped node");
+					}
+				}
+
+				return 0;
+			}
+			current_index++;
+		}
+		graph_node = graph_node->next;
+	}
+
+	return 0;
+}
+
+
+static int32_t service_data_process_log_sink_N_input_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
+	(void)len;
+	(void)ctx;
+	(void)value;
+
+	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
+	size_t current_index = 0;
+	struct dp_graph_node *graph_node = data_process_graph.nodes;
+	while (graph_node != NULL) {
+		if (graph_node->type == DP_NODE_LOG_SINK) {
+			if (index == current_index) {
+
+				struct dp_log_sink *s = (struct dp_log_sink *)graph_node->node;
+				char name[40];
+				char *output_name = name;
+				strncpy(name, buf, len);
+				name[len] = '\0';
+				/* Find the semicolon. */
+				while (*output_name && (*output_name != ':')) {
+					output_name++;
+				}
+				if (*output_name == ':') {
+					*output_name = '\0';
+					output_name++;
+				} else {
+					u_log(system_log, LOG_TYPE_ERROR, "malformed output name %s (should be node:output)", name);
+					return 1;
+				}
+
+				struct dp_graph_node *output_node = data_process_graph.nodes;
+				struct dp_output *o = NULL;
+				while (output_node != NULL) {
+					if (!strcmp(name, output_node->name)) {
+						struct dp_graph_node_descriptor *descriptor = (struct dp_graph_node_descriptor *)output_node->node;
+						o = descriptor->get_output_by_name(output_name, descriptor->context);
+						break;
+					}
+					output_node = output_node->next;
+				}
+				if (o == NULL) {
+					u_log(system_log, LOG_TYPE_ERROR, "output %s:%s not found", name, output_name);
+					return 2;
+				}
+
+				dp_connect_input_to_output(&(s->in), o);
+				return 0;
+			}
+			current_index++;
+		}
+		graph_node = graph_node->next;
+	}
+
+	return 0;
+}
+
+
 static int32_t service_data_process_sensor_source_N_sensor_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
 	(void)len;
 	(void)ctx;
@@ -289,6 +427,26 @@ static const struct treecli_value *service_data_process_sensor_source_N_values[]
 };
 
 
+static const struct treecli_value *service_data_process_log_sink_N_values[] = {
+	&(const struct treecli_value) {
+		.name = "name",
+		.set = service_data_process_log_sink_N_name_set,
+		.value_type = TREECLI_VALUE_STR,
+	},
+	&(const struct treecli_value) {
+		.name = "enabled",
+		.set = service_data_process_log_sink_N_enabled_set,
+		.value_type = TREECLI_VALUE_BOOL,
+	},
+	&(const struct treecli_value) {
+		.name = "input",
+		.set = service_data_process_log_sink_N_input_set,
+		.value_type = TREECLI_VALUE_STR,
+	},
+	NULL
+};
+
+
 static int32_t service_data_process_sensor_source_create(struct treecli_parser *parser, uint32_t index, struct treecli_node *node, void *ctx) {
 	(void)ctx;
 	(void)parser;
@@ -341,6 +499,7 @@ static int32_t service_data_process_log_sink_create(struct treecli_parser *parse
 		if (graph_node->type == DP_NODE_LOG_SINK) {
 			if (index == current_index) {
 				strcpy(node->name, graph_node->name);
+				node->values = &service_data_process_log_sink_N_values;
 				return 0;
 			}
 			current_index++;

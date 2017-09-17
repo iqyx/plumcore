@@ -254,6 +254,7 @@ const struct treecli_node *system_cli_tree = Node {
 							Commands {
 								Command {
 									Name "add",
+									Exec service_data_process_log_sink_add,
 								},
 								Command {
 									Name "print",

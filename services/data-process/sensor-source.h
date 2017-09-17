@@ -42,9 +42,7 @@
 
 
 struct dp_sensor_source {
-	/** @todo insert the node descriptor here. */
-
-	const char *name;
+	struct dp_graph_node_descriptor descriptor;
 
 	struct dp_output out;
 
@@ -60,7 +58,7 @@ struct dp_sensor_source {
 };
 
 
-dp_ret_t dp_sensor_source_init(struct dp_sensor_source *self, const char *name);
+dp_ret_t dp_sensor_source_init(struct dp_sensor_source *self);
 dp_ret_t dp_sensor_source_free(struct dp_sensor_source *self);
 dp_ret_t dp_sensor_source_start(struct dp_sensor_source *self);
 dp_ret_t dp_sensor_source_stop(struct dp_sensor_source *self);

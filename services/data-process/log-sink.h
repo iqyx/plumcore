@@ -23,3 +23,37 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * A data-process framework sink node to write values to the system log.
+ */
+
+#pragma once
+
+#include "stdint.h"
+#include "stdbool.h"
+#include "stdlib.h"
+
+#include "FreeRTOS.h"
+#include "task.h"
+
+#include "data-process.h"
+
+
+struct dp_log_sink {
+	struct dp_graph_node_descriptor descriptor;
+
+	enum dp_data_type type;
+	struct dp_input in;
+
+	bool initialized;
+	volatile bool can_run;
+	volatile bool running;
+	TaskHandle_t task;
+};
+
+
+dp_ret_t dp_log_sink_init(struct dp_log_sink *self, enum dp_data_type type);
+dp_ret_t dp_log_sink_free(struct dp_log_sink *self);
+dp_ret_t dp_log_sink_start(struct dp_log_sink *self);
+dp_ret_t dp_log_sink_stop(struct dp_log_sink *self);
+
