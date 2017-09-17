@@ -55,6 +55,7 @@
 #include "ucli_files.c"
 #include "device_sensor.c"
 #include "device_cellular.c"
+#include "service_data_process.c"
 
 
 /* Helper defines to make the command tree more clear. */
@@ -186,6 +187,96 @@ const struct treecli_node *system_cli_tree = Node {
 		},
 		Node {
 			Name "service",
+			Subnodes {
+				Node {
+					Name "data-process",
+					Commands {
+						Command {
+							Name "print",
+							Exec service_data_process_print,
+						},
+						Command {
+							Name "export",
+							Exec service_data_process_print,
+						},
+						End
+
+					},
+					Subnodes {
+						Node {
+							Name "sensor-source",
+							Commands {
+								Command {
+									Name "add",
+									Exec service_data_process_sensor_source_add,
+								},
+								Command {
+									Name "print",
+								},
+								Command {
+									Name "export",
+									Exec service_data_process_sensor_source_export,
+								},
+								End
+							},
+							DSubnodes {
+								DNode {
+									Name "nodeN",
+									.create = service_data_process_sensor_source_create,
+								},
+								End
+							},
+						},
+						Node {
+							Name "statistics-node",
+							Commands {
+								Command {
+									Name "add",
+								},
+								Command {
+									Name "print",
+								},
+								Command {
+									Name "export",
+								},
+								End
+							},
+							DSubnodes {
+								DNode {
+									Name "nodeN",
+									.create = service_data_process_statistics_node_create,
+								},
+								End
+							},
+						},
+						Node {
+							Name "log-sink",
+							Commands {
+								Command {
+									Name "add",
+								},
+								Command {
+									Name "print",
+								},
+								Command {
+									Name "export",
+								},
+								End
+							},
+							DSubnodes {
+								DNode {
+									Name "nodeN",
+									.create = service_data_process_log_sink_create,
+								},
+								End
+							},
+						},
+						End,
+					}
+				},
+				End
+
+			}
 		},
 		Node {
 			Name "interface",

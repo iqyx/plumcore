@@ -85,7 +85,7 @@ service_cli_ret_t service_cli_start(ServiceCli *self) {
 		return SERVICE_CLI_RET_FAILED;
 	}
 
-	xTaskCreate(cli_task, "service-cli", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, NULL);
+	xTaskCreate(cli_task, "service-cli", configMINIMAL_STACK_SIZE + 384, (void *)self, 1, NULL);
 
 	return SERVICE_CLI_RET_OK;
 }

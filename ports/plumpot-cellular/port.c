@@ -93,6 +93,8 @@
 #include "interfaces/servicelocator.h"
 #include "services/plocator.h"
 
+#include "services/data-process/data-process.h"
+
 
 /**
  * Port specific global variables and singleton instances.
@@ -558,6 +560,8 @@ int32_t port_init(void) {
 	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_current", &(solar_charger1.battery_current), 120000);
 	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_charge", &(solar_charger1.battery_charge), 120000);
 	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_temp", &(solar_charger1.battery_temperature), 120000);
+
+	dp_graph_init(&data_process_graph);
 
 	return PORT_INIT_OK;
 }
