@@ -37,6 +37,13 @@
 /* There is a single flow graph in the system (now). */
 struct dp_graph data_process_graph;
 
+const char *dp_node_type_str[] = {
+	"constant-source",
+	"sensor-source",
+	"statistics",
+	"log-sink",
+};
+
 
 dp_ret_t dp_graph_init(struct dp_graph *self) {
 	if (u_assert(self != NULL)) {

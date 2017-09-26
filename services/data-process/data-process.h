@@ -139,6 +139,8 @@ enum dp_node_type {
 	DP_NODE_LOG_SINK,
 };
 
+extern const char *dp_node_type_str[];
+
 struct dp_graph_node_descriptor {
 	struct dp_input *(*get_input_by_name)(const char *name, void *context);
 	struct dp_output *(*get_output_by_name)(const char *name, void *context);

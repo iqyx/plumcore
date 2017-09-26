@@ -21,5 +21,27 @@
 
 #pragma once
 
+#include "lib/cli/treecli/treecli_parser.h"
+
+/* Helper defines to make the command tree more clear. */
+
+#define End NULL
+
+#define Subnodes .subnodes = &(const struct treecli_node*[])
+#define DSubnodes .dsubnodes = &(const struct treecli_dnode*[])
+#define Commands .commands = &(const struct treecli_command*[])
+#define Values .values = &(const struct treecli_value*[])
+
+#define Node &(const struct treecli_node)
+#define DNode &(const struct treecli_dnode)
+#define Command &(const struct treecli_command)
+#define Value &(const struct treecli_value)
+
+#define Name .name =
+#define Exec .exec =
+#define Type .value_type =
+
+
+
 extern const struct treecli_node *system_cli_tree;
 
