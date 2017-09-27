@@ -45,7 +45,7 @@
 #include "u_assert.h"
 #include "u_log.h"
 
-/* Common functions and helper for CLI service. */
+/* Common functions and helpers for the CLI service. */
 #include "cli_table_helper.h"
 #include "services/cli.h"
 
@@ -67,6 +67,7 @@
 /**
  * Tables for printing.
  */
+
 const struct cli_table_cell service_data_process_node_table[] = {
 	{.type = TYPE_STRING, .size = 16, .alignment = ALIGN_RIGHT}, /* name */
 	{.type = TYPE_STRING, .size = 16, .alignment = ALIGN_RIGHT}, /* type */
@@ -88,6 +89,7 @@ const struct cli_table_cell service_data_process_sensor_source_table[] = {
 /**
  * Subtrees.
  */
+
 const struct treecli_node *service_data_process_sensor_source_N = Node {
 	Name "N",
 	Commands {
@@ -149,6 +151,7 @@ const struct treecli_node *service_data_process_log_sink_N = Node {
 /**
  * Find a next node of type @p type starting from the @p current node.
  */
+
 static struct dp_graph_node *find_node(struct dp_graph_node *current, enum dp_node_type type) {
 	while (current != NULL) {
 		if (current->type == type) {
@@ -163,6 +166,7 @@ static struct dp_graph_node *find_node(struct dp_graph_node *current, enum dp_no
 /**
  * Find a next node of type @p type with an @p index (counting from zero) from the @p current node.
  */
+
 static struct dp_graph_node *find_node_by_index(struct dp_graph_node *current, enum dp_node_type type, size_t index) {
 	size_t i = 0;
 	while ((current = find_node(current, type)) != NULL) {
@@ -202,7 +206,6 @@ int32_t service_data_process_print(struct treecli_parser *parser, void *exec_con
 
 		node = node->next;
 	}
-
 	return 0;
 }
 
@@ -248,7 +251,6 @@ int32_t service_data_process_sensor_source_print(struct treecli_parser *parser, 
 
 		node = node->next;
 	}
-
 	return 0;
 }
 
@@ -272,7 +274,6 @@ int32_t service_data_process_sensor_source_export(struct treecli_parser *parser,
 
 		node = node->next;
 	}
-
 	return 0;
 }
 
@@ -310,7 +311,6 @@ int32_t service_data_process_sensor_source_N_export(struct treecli_parser *parse
 		snprintf(line, sizeof(line), "sensor = %s\r\n", name);
 		module_cli_output(line, parser->context);
 	}
-
 	return 0;
 }
 
@@ -345,7 +345,6 @@ int32_t service_data_process_statistics_node_create(struct treecli_parser *parse
 	if (graph_node == NULL) {
 		return -1;
 	}
-
 	strcpy(node->name, graph_node->name);
 	return 0;
 }
@@ -360,7 +359,6 @@ int32_t service_data_process_log_sink_create(struct treecli_parser *parser, uint
 	if (graph_node == NULL) {
 		return -1;
 	}
-
 	strcpy(node->name, graph_node->name);
 	node->values = service_data_process_log_sink_N->values;
 	return 0;
@@ -383,7 +381,6 @@ int32_t service_data_process_sensor_source_add(struct treecli_parser *parser, vo
 	}
 	dp_sensor_source_init(new);
 	dp_graph_add_node(&data_process_graph, (void *)new, DP_NODE_SENSOR_SOURCE, "new-node");
-
 	return 0;
 }
 
@@ -413,22 +410,12 @@ int32_t service_data_process_sensor_source_N_name_set(struct treecli_parser *par
 	(void)ctx;
 	(void)value;
 
-	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
-	size_t current_index = 0;
-	struct dp_graph_node *graph_node = data_process_graph.nodes;
-	while (graph_node != NULL) {
-		if (graph_node->type == DP_NODE_SENSOR_SOURCE) {
-			if (index == current_index) {
-				strncpy(graph_node->name, buf, len);
-				graph_node->name[len] = '\0';
-
-				return 0;
-			}
-			current_index++;
-		}
-		graph_node = graph_node->next;
+	struct dp_graph_node *graph_node = find_node_by_index(data_process_graph.nodes, DP_NODE_SENSOR_SOURCE, DNODE_INDEX(parser, -1));
+	if (graph_node == NULL) {
+		return -1;
 	}
-
+	strncpy(graph_node->name, buf, len);
+	graph_node->name[len] = '\0';
 	return 0;
 }
 
@@ -438,37 +425,26 @@ int32_t service_data_process_sensor_source_N_enabled_set(struct treecli_parser *
 	(void)ctx;
 	(void)value;
 
-	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
-	size_t current_index = 0;
-	struct dp_graph_node *graph_node = data_process_graph.nodes;
-	while (graph_node != NULL) {
-		if (graph_node->type == DP_NODE_SENSOR_SOURCE) {
-			if (index == current_index) {
-
-				struct dp_sensor_source *s = (struct dp_sensor_source *)graph_node->node;
-				bool e = *(bool *)buf;
-
-				if (e) {
-					if (s->running) {
-						u_log(system_log, LOG_TYPE_ERROR, "cannot enable a running node");
-					} else {
-						dp_sensor_source_start(s);
-					}
-				} else {
-					if (s->running) {
-						dp_sensor_source_stop(s);
-					} else {
-						u_log(system_log, LOG_TYPE_ERROR, "cannot disable a stopped node");
-					}
-				}
-
-				return 0;
-			}
-			current_index++;
-		}
-		graph_node = graph_node->next;
+	struct dp_graph_node *graph_node = find_node_by_index(data_process_graph.nodes, DP_NODE_SENSOR_SOURCE, DNODE_INDEX(parser, -1));
+	if (graph_node == NULL) {
+		return -1;
 	}
+	struct dp_sensor_source *s = (struct dp_sensor_source *)graph_node->node;
+	bool e = *(bool *)buf;
 
+	if (e) {
+		if (s->running) {
+			u_log(system_log, LOG_TYPE_ERROR, "cannot enable a running node");
+		} else {
+			dp_sensor_source_start(s);
+		}
+	} else {
+		if (s->running) {
+			dp_sensor_source_stop(s);
+		} else {
+			u_log(system_log, LOG_TYPE_ERROR, "cannot disable a stopped node");
+		}
+	}
 	return 0;
 }
 
@@ -477,22 +453,12 @@ int32_t service_data_process_log_sink_N_name_set(struct treecli_parser *parser, 
 	(void)ctx;
 	(void)value;
 
-	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
-	size_t current_index = 0;
-	struct dp_graph_node *graph_node = data_process_graph.nodes;
-	while (graph_node != NULL) {
-		if (graph_node->type == DP_NODE_LOG_SINK) {
-			if (index == current_index) {
-				strncpy(graph_node->name, buf, len);
-				graph_node->name[len] = '\0';
-
-				return 0;
-			}
-			current_index++;
-		}
-		graph_node = graph_node->next;
+	struct dp_graph_node *graph_node = find_node_by_index(data_process_graph.nodes, DP_NODE_LOG_SINK, DNODE_INDEX(parser, -1));
+	if (graph_node == NULL) {
+		return -1;
 	}
-
+	strncpy(graph_node->name, buf, len);
+	graph_node->name[len] = '\0';
 	return 0;
 }
 
@@ -502,37 +468,25 @@ int32_t service_data_process_log_sink_N_enabled_set(struct treecli_parser *parse
 	(void)ctx;
 	(void)value;
 
-	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
-	size_t current_index = 0;
-	struct dp_graph_node *graph_node = data_process_graph.nodes;
-	while (graph_node != NULL) {
-		if (graph_node->type == DP_NODE_LOG_SINK) {
-			if (index == current_index) {
-
-				struct dp_log_sink *s = (struct dp_log_sink *)graph_node->node;
-				bool e = *(bool *)buf;
-
-				if (e) {
-					if (s->running) {
-						u_log(system_log, LOG_TYPE_ERROR, "cannot enable a running node");
-					} else {
-						dp_log_sink_start(s);
-					}
-				} else {
-					if (s->running) {
-						dp_log_sink_stop(s);
-					} else {
-						u_log(system_log, LOG_TYPE_ERROR, "cannot disable a stopped node");
-					}
-				}
-
-				return 0;
-			}
-			current_index++;
-		}
-		graph_node = graph_node->next;
+	struct dp_graph_node *graph_node = find_node_by_index(data_process_graph.nodes, DP_NODE_LOG_SINK, DNODE_INDEX(parser, -1));
+	if (graph_node == NULL) {
+		return -1;
 	}
-
+	struct dp_log_sink *s = (struct dp_log_sink *)graph_node->node;
+	bool e = *(bool *)buf;
+	if (e) {
+		if (s->running) {
+			u_log(system_log, LOG_TYPE_ERROR, "cannot enable a running node");
+		} else {
+			dp_log_sink_start(s);
+		}
+	} else {
+		if (s->running) {
+			dp_log_sink_stop(s);
+		} else {
+			u_log(system_log, LOG_TYPE_ERROR, "cannot disable a stopped node");
+		}
+	}
 	return 0;
 }
 
@@ -542,53 +496,42 @@ int32_t service_data_process_log_sink_N_input_set(struct treecli_parser *parser,
 	(void)ctx;
 	(void)value;
 
-	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
-	size_t current_index = 0;
-	struct dp_graph_node *graph_node = data_process_graph.nodes;
-	while (graph_node != NULL) {
-		if (graph_node->type == DP_NODE_LOG_SINK) {
-			if (index == current_index) {
-
-				struct dp_log_sink *s = (struct dp_log_sink *)graph_node->node;
-				char name[40];
-				char *output_name = name;
-				strncpy(name, buf, len);
-				name[len] = '\0';
-				/* Find the semicolon. */
-				while (*output_name && (*output_name != ':')) {
-					output_name++;
-				}
-				if (*output_name == ':') {
-					*output_name = '\0';
-					output_name++;
-				} else {
-					u_log(system_log, LOG_TYPE_ERROR, "malformed output name %s (should be node:output)", name);
-					return 1;
-				}
-
-				struct dp_graph_node *output_node = data_process_graph.nodes;
-				struct dp_output *o = NULL;
-				while (output_node != NULL) {
-					if (!strcmp(name, output_node->name)) {
-						struct dp_graph_node_descriptor *descriptor = (struct dp_graph_node_descriptor *)output_node->node;
-						o = descriptor->get_output_by_name(output_name, descriptor->context);
-						break;
-					}
-					output_node = output_node->next;
-				}
-				if (o == NULL) {
-					u_log(system_log, LOG_TYPE_ERROR, "output %s:%s not found", name, output_name);
-					return 2;
-				}
-
-				dp_connect_input_to_output(&(s->in), o);
-				return 0;
-			}
-			current_index++;
-		}
-		graph_node = graph_node->next;
+	struct dp_graph_node *graph_node = find_node_by_index(data_process_graph.nodes, DP_NODE_LOG_SINK, DNODE_INDEX(parser, -1));
+	if (graph_node == NULL) {
+		return -1;
+	}
+	struct dp_log_sink *s = (struct dp_log_sink *)graph_node->node;
+	char name[40];
+	char *output_name = name;
+	strncpy(name, buf, len);
+	name[len] = '\0';
+	/* Find the semicolon. */
+	while (*output_name && (*output_name != ':')) {
+		output_name++;
+	}
+	if (*output_name == ':') {
+		*output_name = '\0';
+		output_name++;
+	} else {
+		u_log(system_log, LOG_TYPE_ERROR, "malformed output name %s (should be node:output)", name);
+		return 1;
 	}
 
+	struct dp_graph_node *output_node = data_process_graph.nodes;
+	struct dp_output *o = NULL;
+	while (output_node != NULL) {
+		if (!strcmp(name, output_node->name)) {
+			struct dp_graph_node_descriptor *descriptor = (struct dp_graph_node_descriptor *)output_node->node;
+			o = descriptor->get_output_by_name(output_name, descriptor->context);
+			break;
+		}
+		output_node = output_node->next;
+	}
+	if (o == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, "output %s:%s not found", name, output_name);
+		return 2;
+	}
+	dp_connect_input_to_output(&(s->in), o);
 	return 0;
 }
 
@@ -598,6 +541,7 @@ int32_t service_data_process_sensor_source_N_sensor_set(struct treecli_parser *p
 	(void)ctx;
 	(void)value;
 
+	/* Find the sensor first. */
 	ISensor *sensor = NULL;
 	enum interface_directory_type t;
 	for (size_t i = 0; (t = interface_directory_get_type(&interfaces, i)) != INTERFACE_TYPE_NONE; i++) {
@@ -608,27 +552,17 @@ int32_t service_data_process_sensor_source_N_sensor_set(struct treecli_parser *p
 			}
 		}
 	}
-
 	if (sensor == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, "no sensor interface was found");
 		return 1;
 	}
 
-	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
-	size_t current_index = 0;
-	struct dp_graph_node *graph_node = data_process_graph.nodes;
-	while (graph_node != NULL) {
-		if (graph_node->type == DP_NODE_SENSOR_SOURCE) {
-			if (index == current_index) {
-				struct dp_sensor_source *s = (struct dp_sensor_source *)graph_node->node;
-				dp_sensor_source_set_sensor(s, sensor);
-				return 0;
-			}
-			current_index++;
-		}
-		graph_node = graph_node->next;
+	struct dp_graph_node *graph_node = find_node_by_index(data_process_graph.nodes, DP_NODE_SENSOR_SOURCE, DNODE_INDEX(parser, -1));
+	if (graph_node == NULL) {
+		return -1;
 	}
-
+	struct dp_sensor_source *s = (struct dp_sensor_source *)graph_node->node;
+	dp_sensor_source_set_sensor(s, sensor);
 	return 0;
 }
 
@@ -638,25 +572,13 @@ int32_t service_data_process_sensor_source_N_interval_set(struct treecli_parser 
 	(void)ctx;
 	(void)value;
 
-	size_t index = parser->pos.levels[parser->pos.depth - 1].dnode_index;
-	size_t current_index = 0;
-	struct dp_graph_node *graph_node = data_process_graph.nodes;
-	while (graph_node != NULL) {
-		if (graph_node->type == DP_NODE_SENSOR_SOURCE) {
-			if (index == current_index) {
-				struct dp_sensor_source *s = (struct dp_sensor_source *)graph_node->node;
-				uint32_t interval = *(uint32_t *)buf;
-				dp_sensor_source_interval(s, interval);
-				return 0;
-			}
-			current_index++;
-		}
-		graph_node = graph_node->next;
+	struct dp_graph_node *graph_node = find_node_by_index(data_process_graph.nodes, DP_NODE_SENSOR_SOURCE, DNODE_INDEX(parser, -1));
+	if (graph_node == NULL) {
+		return -1;
 	}
-
+	struct dp_sensor_source *s = (struct dp_sensor_source *)graph_node->node;
+	uint32_t interval = *(uint32_t *)buf;
+	dp_sensor_source_interval(s, interval);
 	return 0;
 }
-
-
-
 

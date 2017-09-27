@@ -44,6 +44,7 @@ extern const struct treecli_node *service_data_process_sensor_source_N;
 /**
  * Informational and printing commands.
  */
+
 int32_t service_data_process_print(struct treecli_parser *parser, void *exec_context);
 int32_t service_data_process_sensor_source_print(struct treecli_parser *parser, void *exec_context);
 
@@ -51,6 +52,7 @@ int32_t service_data_process_sensor_source_print(struct treecli_parser *parser, 
 /**
  * Configuration exporting commands.
  */
+
 int32_t service_data_process_sensor_source_export(struct treecli_parser *parser, void *exec_context);
 int32_t service_data_process_sensor_source_N_export(struct treecli_parser *parser, void *exec_context);
 
