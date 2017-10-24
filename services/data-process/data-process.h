@@ -43,6 +43,7 @@
  *   - flash memory circular FIFO buffer (to overcome connectivity problems)
  *   - raw flash memory logging
  *   - simple graph sink
+ *   - text serializer (concatenate and format multiple inputs to CSV lines)
  */
 
 #pragma once
@@ -137,6 +138,7 @@ enum dp_node_type {
 	DP_NODE_SENSOR_SOURCE,
 	DP_NODE_STATISTICS_NODE,
 	DP_NODE_LOG_SINK,
+	DP_NODE_CSV_SERIALIZE,
 };
 
 extern const char *dp_node_type_str[];

@@ -14,6 +14,8 @@ Current **development version is 0.5.0** (develop branch). Current **stable vers
 - DataProcess service for data processing using flow graphs
 - Refactoring of the CLI service to be more concise and readable. Splitting
   CLI service's code into multiple submodules.
+- DataProcess tcp-client node
+- DataProcess text-serialize node
 
 
 
