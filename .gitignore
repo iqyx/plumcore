@@ -3,6 +3,11 @@
 
 # ignore all object files
 *.o
+*.pyc
+
+# ignore generated protobuf files
+*.pb.h
+*.pb.c
 
 # ignore generated outputs
 *.bin
