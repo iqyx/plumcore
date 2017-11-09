@@ -59,7 +59,8 @@ def make_ver(target, source, env):
 def build_proto(target, source, env):
 	for s in source:
 		print "Building proto %s" % s
-		os.system("protoc --plugin=lib/other/nanopb/generator/protoc-gen-nanopb --proto_path=umesh/proto --nanopb_out=umesh/proto --proto_path=lib/other/nanopb/generator/proto %s" % s)
+		d = os.path.dirname(str(s))
+		os.system("protoc --plugin=lib/other/nanopb/generator/protoc-gen-nanopb --proto_path=%s --nanopb_out=%s --proto_path=lib/other/nanopb/generator/proto %s" % (d, d, s))
 
 
 # Create default environment and export it. It will be modified later
@@ -206,7 +207,10 @@ fwimage = env.Command("bin/umeshfw_%s.fw" % env["PORT"], rawbin, """
 """)
 
 proto = env.Command(
-	source = [File(Glob("umesh/proto/*.proto"))],
+	source = [
+		File(Glob("protocols/umesh/proto/*.proto")),
+		File(Glob("protocols/uxb/*.proto")),
+	],
 	target = "protoc",
 	action = build_proto
 )
