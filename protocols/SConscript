@@ -4,11 +4,13 @@ objs = env.Object(source = [
 	File(Glob("interfaces/*.c")),
 	File(Glob("umesh/*.c")),
 	File(Glob("umesh/proto/*.c")),
+	File(Glob("uxb/*.c")),
 ])
 
 env.Append(CPPPATH = [
 	Dir("."),
 	Dir("umesh"),
+	Dir("uxb"),
 	Dir("umesh/proto"),
 ])
 

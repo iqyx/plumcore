@@ -1,0 +1,15 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+
+message SolarChargerResponse {
+
+	optional int32 battery_voltage_mv = 10;
+	optional int32 battery_current_ma = 11;
+	optional int32 board_temperature_mc = 12;
+	optional int32 battery_temperature_mc = 13;
+	optional int32 battery_charge_mah = 14;
+	optional int32 battery_float_voltage_mv = 15;
+	optional int32 input_min_voltage_mv = 16;
+}
+
