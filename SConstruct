@@ -147,6 +147,7 @@ env.Append(CFLAGS = [
 	"-g",
 	#~ "-flto",
 	"-fno-common",
+	"-fdiagnostics-color=always",
 	"-ffunction-sections",
 	"-fdata-sections",
 	"--std=c99",
