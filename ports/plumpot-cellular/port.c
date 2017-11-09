@@ -33,6 +33,7 @@
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/adc.h>
 #include <libopencm3/stm32/i2c.h>
+#include <libopencm3/stm32/exti.h>
 
 #include "FreeRTOS.h"
 #include "timers.h"
@@ -82,6 +83,13 @@
 #include "services/sensor_upload.h"
 
 #include "uhal/interfaces/cellular.h"
+#include "uxb_locm3.h"
+#include "uhal/modules/solar_charger.h"
+
+#include "protocols/uxb/solar_charger_iface.pb.h"
+#include "pb_decode.h"
+
+#include "services/watchdog.h"
 
 
 /**
@@ -112,6 +120,13 @@ struct module_usart gsm1_usart;
 SensorUpload upload1;
 I2cSensors i2c_test;
 struct sffs fs;
+UxbMasterLocm3 uxb;
+UxbInterface uxb_iface1;
+UxbSlot uxb_slot1;
+uint8_t slot1_buffer[256];
+uxb_master_locm3_ret_t uxb_ret;
+SolarCharger solar_charger1;
+Watchdog watchdog;
 
 
 struct module_power_adc vin1;
@@ -155,6 +170,22 @@ static struct interface_directory_item interface_list[] = {
 		.type = INTERFACE_TYPE_CELLULAR,
 		.name = "gsm1",
 		.interface = &gsm1.cellular.interface,
+	}, {
+		.type = INTERFACE_TYPE_SENSOR,
+		.name = "charger_board_temp",
+		.interface = &solar_charger1.board_temperature.interface,
+	}, {
+		.type = INTERFACE_TYPE_SENSOR,
+		.name = "charger_bat_voltage",
+		.interface = &solar_charger1.battery_voltage.interface,
+	}, {
+		.type = INTERFACE_TYPE_SENSOR,
+		.name = "charger_bat_current",
+		.interface = &solar_charger1.battery_current.interface,
+	}, {
+		.type = INTERFACE_TYPE_SENSOR,
+		.name = "charger_bat_charge",
+		.interface = &solar_charger1.battery_charge.interface,
 	}, {
 		.type = INTERFACE_TYPE_NONE
 	}
@@ -387,53 +418,70 @@ int32_t port_init(void) {
 
 	interface_directory_init(&interfaces, interface_list);
 
-	//~ size_t i = 0;
-	//~ while (true) {
-		//~ while (true) {
-			//~ float v;
-			//~ interface_sensor_value(&(i2c_test.si7021_rh), &v);
-			//~ if ((i % 100) == 0) {
-				//~ u_log(system_log, LOG_TYPE_INFO, "i2c_test value = %u, iter = %u", (unsigned int)v, i);
-			//~ }
-			//~ if ((unsigned int)v == 0) {
-				//~ u_log(system_log, LOG_TYPE_ERROR, "i2c_test error triggered, value = %u, iter = %u", (unsigned int)v, i);
-				//~ break;
-			//~ }
-			//~ i++;
-		//~ }
-		//~ vTaskDelay(1000);
-//~
-		//~ u_log(system_log, LOG_TYPE_INFO, "i2c_test repeating");
-//~
-	//~ }
+	/* Initialize the UXB bus. */
+	rcc_periph_clock_enable(RCC_SPI1);
+	rcc_periph_clock_enable(RCC_TIM9);
 
-	struct sffs_file f;
-	const unsigned char test_data[] = {
-		0x99, 0xdd, 0x3c, 0xbd, 0x84, 0x91, 0xd1, 0x9c, 0x63, 0xa0, 0xfd, 0x5a,
-		0x12, 0x32, 0xec, 0x9f, 0x99, 0xf5, 0x6c, 0x26, 0xe1, 0x79, 0xe5, 0x0f,
-		0x1e, 0x76, 0xe0, 0x4b, 0xd4, 0xb7, 0xf7, 0xb5, 0xf4, 0x77, 0xd7, 0x94,
-		0x00, 0xe5, 0xb8, 0x7b, 0xaf, 0x9e, 0x3b, 0x3e, 0x3b, 0x38, 0x1f, 0x1b,
-		0x1e, 0xeb, 0x94, 0x17, 0x1f, 0x96, 0xbf, 0x69, 0x09, 0xff, 0xfe, 0xa0,
-		0x99, 0x5c, 0x23, 0xb9, 0xff, 0xde, 0xdb, 0x61, 0xec, 0xe3, 0x88, 0x1c,
-		0x0e, 0x8a, 0x21, 0x9f, 0x59, 0x4d, 0xfe, 0x9e, 0x9a, 0xc1, 0xb6, 0x96,
-		0xe3, 0x19, 0xe9, 0x39, 0x0f, 0x36, 0xfe, 0xf9, 0x24, 0x29, 0xad, 0xa6,
-		0xca, 0x62, 0x16, 0xed, 0x93, 0x6d, 0x39, 0xa7, 0x61, 0xfe, 0x85, 0x64,
-		0xbb, 0xad, 0x44, 0x9d, 0xc2, 0x87, 0xb2, 0x39, 0xf5, 0xee, 0x3b, 0xa6,
-		0x8a, 0x91, 0xcc, 0x79, 0x70, 0x10, 0x7a, 0xa6, 0x44, 0x26, 0x9e, 0xf4,
-		0x09, 0x4e, 0xd0, 0x93, 0x72, 0x11, 0x41, 0x64, 0x52, 0xb3, 0x05, 0xad,
-		0x9a, 0xdc, 0xd0, 0xcd, 0x71, 0xd2, 0x1e, 0x3f, 0x5d, 0xf3, 0xc8, 0xe5,
-		0x8b, 0x06, 0xf9, 0x01, 0x51, 0xcb, 0x02, 0x7e, 0xc2, 0x6b, 0xd2, 0x67,
-		0xf7, 0x65, 0xf5, 0xcc, 0x74, 0xcf, 0x8a, 0x7c, 0xec, 0xa0, 0xc1, 0x77,
-		0xac, 0x08, 0x0f, 0x43, 0x03, 0x79, 0x3e, 0xf8
-	};
+	/* Setup a timer for precise UXB protocol delays. */
+	timer_reset(TIM9);
+	timer_set_mode(TIM9, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
+	timer_continuous_mode(TIM9);
+	timer_direction_up(TIM9);
+	timer_disable_preload(TIM9);
+	timer_enable_update_event(TIM9);
+	timer_set_prescaler(TIM9, (rcc_ahb_frequency / 1000000) - 1);
+	timer_set_period(TIM9, 65535);
+	timer_enable_counter(TIM9);
 
-	// sffs_open_id(&fs, &f, 6, SFFS_APPEND);
+	uxb_master_locm3_init(&uxb, &(struct uxb_master_locm3_config) {
+		.spi_port = SPI1,
+		.spi_af = GPIO_AF5,
+		.sck_port = GPIOB, .sck_pin = GPIO3,
+		.miso_port = GPIOB, .miso_pin = GPIO4,
+		.mosi_port = GPIOB, .mosi_pin = GPIO5,
+		.frame_port = GPIOA, .frame_pin = GPIO15,
+		.delay_timer = TIM9,
+		.delay_timer_freq_mhz = 1,
+		.control_prescaler = SPI_CR1_BR_FPCLK_DIV_16,
+		.data_prescaler = SPI_CR1_BR_FPCLK_DIV_16,
+	});
 
-	// while (1) {
-		// sffs_write(&f, test_data, 200);
-		// u_log(system_log, LOG_TYPE_DEBUG, "200B written");
-	// }
+	nvic_enable_irq(NVIC_EXTI15_10_IRQ);
+	rcc_periph_clock_enable(RCC_SYSCFG);
+	exti_select_source(EXTI15, GPIOA);
+	exti_set_trigger(EXTI15, EXTI_TRIGGER_FALLING);
+	exti_enable_request(EXTI15);
 
+	uxb_interface_init(&uxb_iface1);
+	uxb_interface_set_address(
+		&uxb_iface1,
+		(uint8_t[]){0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+		(uint8_t[]){0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22}
+	);
+	uxb_master_locm3_add_interface(&uxb, &uxb_iface1);
+
+	uxb_slot_init(&uxb_slot1);
+	uxb_slot_set_slot_number(&uxb_slot1, 0);
+	uxb_slot_set_slot_buffer(&uxb_slot1, slot1_buffer, sizeof(slot1_buffer));
+	uxb_interface_add_slot(&uxb_iface1, &uxb_slot1);
+
+	solar_charger_init(&solar_charger1, &uxb_iface1);
+
+	watchdog_init(&watchdog, 5000, 0);
+
+	vTaskDelay(10);
+
+	u_log(system_log, LOG_TYPE_DEBUG, "device descriptor:");
+	for (uint8_t i = 1; i < 20; i++) {
+		uxb_slot_send_data(&uxb_slot1, &i, 1, false);
+		vTaskDelay(20);
+		if (uxb_slot1.len == 1 && uxb_slot1.buffer[0] == 0) {
+			break;
+		}
+		/* Zero terminate at the maximum key-value pair length. */
+		uxb_slot1.buffer[63] = '\0';
+		u_log(system_log, LOG_TYPE_DEBUG, "    %s", uxb_slot1.buffer);
+	}
 
 	return PORT_INIT_OK;
 }
@@ -463,4 +511,12 @@ void usart1_isr(void) {
 
 void usart2_isr(void) {
 	module_usart_interrupt_handler(&gsm1_usart);
+}
+
+void exti15_10_isr(void) {
+	exti_reset_request(EXTI15);
+
+	exti_disable_request(EXTI15);
+	uxb_ret = uxb_master_locm3_frame_irq(&uxb);
+	exti_enable_request(EXTI15);
 }
