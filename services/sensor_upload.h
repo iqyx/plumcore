@@ -28,7 +28,7 @@
 #include "interface_power.h"
 
 
-#define SENSOR_UPLOAD_MAX_SENSORS 8
+#define SENSOR_UPLOAD_MAX_SENSORS 12
 
 typedef enum {
 	SENSOR_UPLOAD_RET_OK = 0,

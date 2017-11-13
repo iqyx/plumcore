@@ -187,6 +187,10 @@ static struct interface_directory_item interface_list[] = {
 		.name = "charger_bat_charge",
 		.interface = &solar_charger1.battery_charge.interface,
 	}, {
+		.type = INTERFACE_TYPE_SENSOR,
+		.name = "charger_bat_temp",
+		.interface = &solar_charger1.battery_temperature.interface,
+	}, {
 		.type = INTERFACE_TYPE_NONE
 	}
 };
@@ -408,13 +412,17 @@ int32_t port_init(void) {
 
 	i2c_sensors_init(&i2c_test, I2C1);
 
-	sensor_upload_init(&upload1, gsm_quectel_tcpip(&gsm1), "147.175.187.202", 222);
-	sensor_upload_add_power_device(&upload1, "plumpot1_uxb", &(ubx_voltage.iface), 15000);
-	sensor_upload_add_power_device(&upload1, "plumpot1_vin", &(vin1.iface), 15000);
-	sensor_upload_add_sensor(&upload1, "plumpot1_temp", &(i2c_test.si7021_temp), 15000);
-	sensor_upload_add_sensor(&upload1, "plumpot1_rh", &(i2c_test.si7021_rh), 15000);
-	sensor_upload_add_sensor(&upload1, "plumpot1_lum", &(i2c_test.lum), 15000);
+	sensor_upload_init(&upload1, gsm_quectel_tcpip(&gsm1), "147.175.187.202", 6008);
+	sensor_upload_add_power_device(&upload1, "plumpot1_uxb", &(ubx_voltage.iface), 60000);
+	sensor_upload_add_power_device(&upload1, "plumpot1_vin", &(vin1.iface), 60000);
+	sensor_upload_add_sensor(&upload1, "plumpot1_temp", &(i2c_test.si7021_temp), 60000);
+	sensor_upload_add_sensor(&upload1, "plumpot1_rh", &(i2c_test.si7021_rh), 60000);
+	sensor_upload_add_sensor(&upload1, "plumpot1_lum", &(i2c_test.lum), 60000);
 
+	sensor_upload_add_sensor(&upload1, "charger_board_temp", &(solar_charger1.board_temperature), 60000);
+	sensor_upload_add_sensor(&upload1, "charger_bat_voltage", &(solar_charger1.battery_voltage), 60000);
+	sensor_upload_add_sensor(&upload1, "charger_bat_current", &(solar_charger1.battery_current), 60000);
+	sensor_upload_add_sensor(&upload1, "charger_bat_charge", &(solar_charger1.battery_charge), 60000);
 
 	interface_directory_init(&interfaces, interface_list);
 

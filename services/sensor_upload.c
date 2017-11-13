@@ -82,7 +82,7 @@ static void sensor_upload_task(void *p) {
 							if (self->sensors[i].sensor) {
 								float value;
 								interface_sensor_value(self->sensors[i].sensor, &value);
-								snprintf(line, sizeof(line), "%s=%u\n", self->sensors[i].name, (uint32_t)value);
+								snprintf(line, sizeof(line), "%s=%d\n", self->sensors[i].name, (int32_t)value);
 							}
 							if (self->sensors[i].power) {
 								interface_power_measure(self->sensors[i].power);

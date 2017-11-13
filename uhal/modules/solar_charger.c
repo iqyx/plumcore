@@ -57,11 +57,13 @@ static void read_values(SolarCharger *self) {
 		self->battery_current_ma = msg.battery_current_ma;
 		self->battery_charge_mah = msg.battery_charge_mah;
 		self->board_temperature_mc = msg.board_temperature_mc;
+		self->battery_temperature_mc = msg.battery_temperature_mc;
 	} else {
 		self->battery_voltage_mv = 0;
 		self->battery_current_ma = 0;
 		self->battery_charge_mah = 0;
 		self->board_temperature_mc = 0;
+		self->battery_temperature_mc = 0;
 	}
 }
 
@@ -182,6 +184,35 @@ static interface_sensor_ret_t battery_charge_mah_value(void *context, float *val
 }
 
 
+static interface_sensor_ret_t battery_temperature_mc_info(void *context, ISensorInfo *info) {
+	if (u_assert(context != NULL) ||
+	    u_assert(info != NULL)) {
+		return INTERFACE_SENSOR_RET_FAILED;
+	}
+
+	info->quantity_name = "Temperature";
+	info->quantity_symbol = "t";
+	info->unit_name = "Degree Celsius";
+	info->unit_symbol = "°C";
+
+	return INTERFACE_SENSOR_RET_OK;
+}
+
+
+static interface_sensor_ret_t battery_temperature_mc_value(void *context, float *value) {
+	if (u_assert(context != NULL) ||
+	    u_assert(value != NULL)) {
+		return INTERFACE_SENSOR_RET_FAILED;
+	}
+
+	SolarCharger *self = (SolarCharger *)context;
+	read_values(self);
+	*value = self->battery_temperature_mc;
+
+	return INTERFACE_SENSOR_RET_OK;
+}
+
+
 solar_charger_ret_t solar_charger_init(SolarCharger *self, UxbInterface *uxb) {
 	if (u_assert(self != NULL)) {
 		return SOLAR_CHARGER_RET_FAILED;
@@ -215,6 +246,11 @@ solar_charger_ret_t solar_charger_init(SolarCharger *self, UxbInterface *uxb) {
 	self->battery_charge.vmt.info = battery_charge_mah_info;
 	self->battery_charge.vmt.value = battery_charge_mah_value;
 	self->battery_charge.vmt.context = (void *)self;
+
+	interface_sensor_init(&(self->battery_temperature));
+	self->battery_temperature.vmt.info = battery_temperature_mc_info;
+	self->battery_temperature.vmt.value = battery_temperature_mc_value;
+	self->battery_temperature.vmt.context = (void *)self;
 
 	return SOLAR_CHARGER_RET_OK;
 }

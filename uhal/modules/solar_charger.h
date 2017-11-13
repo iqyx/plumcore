@@ -41,6 +41,7 @@ typedef struct {
 	ISensor battery_voltage;
 	ISensor battery_current;
 	ISensor battery_charge;
+	ISensor battery_temperature;
 
 	UxbInterface *uxb;
 	UxbSlot stat_slot;
@@ -50,6 +51,7 @@ typedef struct {
 	int32_t battery_voltage_mv;
 	int32_t battery_current_ma;
 	int32_t battery_charge_mah;
+	int32_t battery_temperature_mc;
 
 } SolarCharger;
 
