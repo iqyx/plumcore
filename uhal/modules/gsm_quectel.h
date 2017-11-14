@@ -60,6 +60,8 @@ enum gsm_quectel_command {
 	GSM_QUECTEL_CMD_IP_SEND,
 	GSM_QUECTEL_CMD_GET_REGISTRATION,
 	GSM_QUECTEL_CMD_ENABLE_RFTXMON,
+	GSM_QUECTEL_CMD_IP_RECV,
+	GSM_QUECTEL_CMD_IP_RECV_METHOD,
 
 };
 
@@ -132,6 +134,11 @@ typedef struct {
 
 	const uint8_t *data_to_send;
 	size_t data_to_send_len;
+
+	uint8_t *data_to_receive;
+	size_t data_to_receive_len;
+	size_t data_to_receive_read;
+	SemaphoreHandle_t data_waiting;
 
 	ITcpIpSocket tcpip_socket;
 	volatile bool tcpip_socket_used;
