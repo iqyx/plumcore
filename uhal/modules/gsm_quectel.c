@@ -175,7 +175,7 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 			strcpy(command_str, "AT+QIMUX=1");
 			break;
 		case GSM_QUECTEL_CMD_CONNECT:
-			strcpy(command_str, "AT+QIOPEN=\"TCP\",\"147.175.187.202\",222");
+			strcpy(command_str, "AT+QIOPEN=\"TCP\",\"147.175.187.202\",6008");
 			break;
 		case GSM_QUECTEL_CMD_GET_IP:
 			strcpy(command_str, "AT+QILOCIP");
@@ -196,10 +196,19 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 			strcpy(command_str, "AT+QCFG=\"RFTXburst\",1");
 			break;
 
+		case GSM_QUECTEL_CMD_IP_RECV_METHOD:
+			strcpy(command_str, "AT+QINDI=1");
+			break;
 
 		case GSM_QUECTEL_CMD_IP_SEND:
 			if (self->data_to_send != NULL && self->data_to_send_len > 0) {
 				snprintf(command_str, sizeof(command_str), "AT+QISEND=%u", self->data_to_send_len);
+			}
+			break;
+
+		case GSM_QUECTEL_CMD_IP_RECV:
+			if (self->data_to_receive != NULL && self->data_to_receive_len > 0) {
+				snprintf(command_str, sizeof(command_str), "AT+QIRD=0,1,0,%u", self->data_to_receive_len);
 			}
 			break;
 
@@ -434,6 +443,38 @@ static void gsm_quectel_process_task(void *p) {
 			}
 		}
 
+		if (self->current_command == GSM_QUECTEL_CMD_IP_RECV) {
+			if (!strncmp(buf, "+QIRD:", 6)) {
+				/* Parse the QIRD response to find out length of the data. */
+				size_t i = strlen(buf);
+				while (buf[i] != ',' && i > 0) {
+					i--;
+				}
+				if (i == 0) {
+					continue;
+				}
+				/* Move one character right, the number of bytes field starts there. Read it. */
+				i++;
+				uint32_t len = 0;
+				sscanf(&(buf[i]), "%u", &len);
+
+				/* CR and LF is being processed by the previous readline command. Read the
+				 * exact number of bytes now. */
+				while (len > 0) {
+					/** @todo make reading more optimal */
+					int r = interface_stream_read_timeout(self->usart, self->data_to_receive, 1, 100);
+					if (r == 1) {
+						/* If the byte was correctly read, append it to the buffer. */
+						self->data_to_receive++;
+						len--;
+						self->data_to_receive_read++;
+					}
+				}
+			}
+			continue;
+		}
+
+
 		if (self->current_command == GSM_QUECTEL_CMD_GET_OPERATOR) {
 			if (!strncmp(buf, "+COPS: 0,0,", 11)) {
 				strncpy(self->operator, buf + 11, sizeof(self->operator));
@@ -465,6 +506,13 @@ static void gsm_quectel_process_task(void *p) {
 				continue;
 			}
 
+			if (!strncmp(buf, "+QIRDI:", 7)) {
+				xSemaphoreGive(self->data_waiting);
+				continue;
+			}
+
+
+
 			if (!strncmp(buf, "+", 1)) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("URC: %s"), buf);
 			}
@@ -494,6 +542,7 @@ static void gsm_quectel_main_task(void *p) {
 	command(self, GSM_QUECTEL_CMD_ENABLE_CREG_URC, 300);
 	command(self, GSM_QUECTEL_CMD_DISABLE_ECHO, 300);
 	command(self, GSM_QUECTEL_CMD_ENABLE_RFTXMON, 300);
+	command(self, GSM_QUECTEL_CMD_IP_RECV_METHOD, 300);
 
 	/* Main modem loop. */
 	uint32_t cnt = 0;
@@ -665,8 +714,47 @@ static tcpip_ret_t gsm_quectel_tcpip_socket_send(void *context, const uint8_t *d
 	}
 
 	return TCPIP_RET_OK;
+}
 
 
+static tcpip_ret_t gsm_quectel_tcpip_socket_receive(void *context, const uint8_t *data, size_t len, size_t *read) {
+	if (u_assert(context != NULL) ||
+	    u_assert(data != NULL) ||
+	    u_assert(len > 0) ||
+	    u_assert(read != NULL)) {
+		return TCPIP_RET_FAILED;
+	}
+
+	ITcpIp *tcpip = (ITcpIp *)context;
+	GsmQuectel *self = (GsmQuectel *)tcpip->vmt.context;
+
+	if (self->tcp_ready == false || self->tcpip_ready == false) {
+		return TCPIP_RET_DISCONNECTED;
+	}
+
+
+	/* Fill in the socket buffer to receive the data. */
+	self->data_to_receive = data;
+	self->data_to_receive_len = len;
+	self->data_to_receive_read = 0;
+	*read = 0;
+	while (1) {
+		if (command(self, GSM_QUECTEL_CMD_IP_RECV, 300) == GSM_QUECTEL_RET_OK) {
+			if (self->data_to_receive_read == 0) {
+				/* Wait on the semaphore until some data is ready. */
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("waiting for data"));
+				xSemaphoreTake(self->data_waiting, portMAX_DELAY);
+				continue;
+			} else {
+				*read = self->data_to_receive_read;
+				return TCPIP_RET_OK;
+			}
+		} else {
+			return TCPIP_RET_FAILED;
+		}
+	}
+
+	return TCPIP_RET_OK;
 }
 
 
@@ -695,6 +783,7 @@ static tcpip_ret_t gsm_quectel_tcpip_create_client_socket(void *context, ITcpIpS
 	self->tcpip_socket.vmt.connect = gsm_quectel_tcpip_socket_connect;
 	self->tcpip_socket.vmt.disconnect = gsm_quectel_tcpip_socket_disconnect;
 	self->tcpip_socket.vmt.send = gsm_quectel_tcpip_socket_send;
+	self->tcpip_socket.vmt.receive = gsm_quectel_tcpip_socket_receive;
 
 	/** @todo init the socket */
 
@@ -773,6 +862,11 @@ gsm_quectel_ret_t gsm_quectel_init(GsmQuectel *self) {
 
 	self->response_lock = xSemaphoreCreateBinary();
 	if (self->response_lock == NULL) {
+		return GSM_QUECTEL_RET_FAILED;
+	}
+
+	self->data_waiting = xSemaphoreCreateBinary();
+	if (self->data_waiting == NULL) {
 		return GSM_QUECTEL_RET_FAILED;
 	}
 

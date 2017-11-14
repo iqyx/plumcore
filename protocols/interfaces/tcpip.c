@@ -142,3 +142,19 @@ tcpip_ret_t tcpip_socket_send(ITcpIpSocket *self, const uint8_t *data, size_t le
 
 	return TCPIP_RET_OK;
 }
+
+
+tcpip_ret_t tcpip_socket_receive(ITcpIpSocket *self, uint8_t *data, size_t len, size_t *read) {
+	if (u_assert(self != NULL) ||
+	    u_assert(data != NULL) ||
+	    u_assert(len > 0) ||
+	    u_assert(read != NULL)) {
+		return TCPIP_RET_FAILED;
+	}
+
+	if (self->vmt.receive != NULL) {
+		return self->vmt.receive(self->vmt.context, data, len, read);
+	}
+
+	return TCPIP_RET_OK;
+}

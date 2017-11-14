@@ -43,6 +43,7 @@ struct tcpip_socket_vmt {
 	tcpip_ret_t (*connect)(void *context, const char *address, uint16_t port);
 	tcpip_ret_t (*disconnect)(void *context);
 	tcpip_ret_t (*send)(void *context, const uint8_t *data, size_t len, size_t *written);
+	tcpip_ret_t (*receive)(void *context, uint8_t *data, size_t len, size_t *read);
 
 	void *context;
 };
@@ -98,5 +99,6 @@ tcpip_ret_t tcpip_socket_free(ITcpIpSocket *self);
 tcpip_ret_t tcpip_socket_connect(ITcpIpSocket *self, const char *address, uint16_t port);
 tcpip_ret_t tcpip_socket_disconnect(ITcpIpSocket *self);
 tcpip_ret_t tcpip_socket_send(ITcpIpSocket *self, const uint8_t *data, size_t len, size_t *written);
+tcpip_ret_t tcpip_socket_receive(ITcpIpSocket *self, uint8_t *data, size_t len, size_t *read);
 
 
