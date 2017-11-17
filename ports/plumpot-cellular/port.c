@@ -90,6 +90,8 @@
 #include "pb_decode.h"
 
 #include "services/watchdog.h"
+#include "services/mqtt_tcpip.h"
+#include "services/mqtt_sensor_upload.h"
 
 
 /**
@@ -127,7 +129,8 @@ uint8_t slot1_buffer[256];
 uxb_master_locm3_ret_t uxb_ret;
 SolarCharger solar_charger1;
 Watchdog watchdog;
-
+Mqtt mqtt;
+MqttSensorUpload mqtt_sensor;
 
 struct module_power_adc vin1;
 struct module_power_adc_config vin1_config = {
@@ -412,6 +415,7 @@ int32_t port_init(void) {
 
 	i2c_sensors_init(&i2c_test, I2C1);
 
+/*
 	sensor_upload_init(&upload1, gsm_quectel_tcpip(&gsm1), "147.175.187.202", 6008);
 	sensor_upload_add_power_device(&upload1, "plumpot1_uxb", &(ubx_voltage.iface), 60000);
 	sensor_upload_add_power_device(&upload1, "plumpot1_vin", &(vin1.iface), 60000);
@@ -422,7 +426,13 @@ int32_t port_init(void) {
 	sensor_upload_add_sensor(&upload1, "charger_board_temp", &(solar_charger1.board_temperature), 60000);
 	sensor_upload_add_sensor(&upload1, "charger_bat_voltage", &(solar_charger1.battery_voltage), 60000);
 	sensor_upload_add_sensor(&upload1, "charger_bat_current", &(solar_charger1.battery_current), 60000);
-	sensor_upload_add_sensor(&upload1, "charger_bat_charge", &(solar_charger1.battery_charge), 60000);
+	sensor_upload_add_sensor(&upload1, "charger_bat_charge", &(solar_charger1.battery_charge), 5000);
+*/
+
+	mqtt_init(&mqtt, gsm_quectel_tcpip(&gsm1));
+	mqtt_set_client_id(&mqtt, "plumpot1");
+	mqtt_set_ping_interval(&mqtt, 60000);
+	mqtt_connect(&mqtt, "iot.eclipse.org", 1883);
 
 	interface_directory_init(&interfaces, interface_list);
 
@@ -475,7 +485,7 @@ int32_t port_init(void) {
 
 	solar_charger_init(&solar_charger1, &uxb_iface1);
 
-	watchdog_init(&watchdog, 5000, 0);
+	watchdog_init(&watchdog, 20000, 0);
 
 	vTaskDelay(10);
 
@@ -490,6 +500,21 @@ int32_t port_init(void) {
 		uxb_slot1.buffer[63] = '\0';
 		u_log(system_log, LOG_TYPE_DEBUG, "    %s", uxb_slot1.buffer);
 	}
+
+	// mqtt_cli_init(&mqtt_cli, &mqtt, system_cli_tree);
+	// mqtt_cli_start(&mqtt_cli);
+
+	mqtt_sensor_upload_init(&mqtt_sensor, &mqtt);
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_temp", &(i2c_test.si7021_temp), 120000);
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_rh", &(i2c_test.si7021_rh), 120000);
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_lum", &(i2c_test.lum), 120000);
+
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_board_temp", &(solar_charger1.board_temperature), 120000);
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_voltage", &(solar_charger1.battery_voltage), 120000);
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_current", &(solar_charger1.battery_current), 120000);
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_charge", &(solar_charger1.battery_charge), 120000);
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_temp", &(solar_charger1.battery_temperature), 120000);
+
 
 	return PORT_INIT_OK;
 }
