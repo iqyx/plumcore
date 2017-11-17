@@ -175,7 +175,7 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 			strcpy(command_str, "AT+QIMUX=1");
 			break;
 		case GSM_QUECTEL_CMD_CONNECT:
-			strcpy(command_str, "AT+QIOPEN=\"TCP\",\"147.175.187.202\",6008");
+			strcpy(command_str, "AT+QIOPEN=\"TCP\",\"198.41.30.241\",1883");
 			break;
 		case GSM_QUECTEL_CMD_GET_IP:
 			strcpy(command_str, "AT+QILOCIP");
@@ -195,9 +195,11 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 		case GSM_QUECTEL_CMD_ENABLE_RFTXMON:
 			strcpy(command_str, "AT+QCFG=\"RFTXburst\",1");
 			break;
-
 		case GSM_QUECTEL_CMD_IP_RECV_METHOD:
 			strcpy(command_str, "AT+QINDI=1");
+			break;
+		case GSM_QUECTEL_CMD_IP_CLOSE:
+			strcpy(command_str, "AT+QICLOSE");
 			break;
 
 		case GSM_QUECTEL_CMD_IP_SEND:
@@ -317,6 +319,12 @@ static void gsm_quectel_process_task(void *p) {
 			continue;
 		}
 		if (!strcmp(buf, "SEND OK") && self->current_command == GSM_QUECTEL_CMD_IP_SEND) {
+			self->current_command = GSM_QUECTEL_CMD_NONE;
+			self->command_response = GSM_QUECTEL_CMD_RESPONSE_OK;
+			xSemaphoreGive(self->response_lock);
+			continue;
+		}
+		if (!strcmp(buf, "CLOSE OK") && self->current_command == GSM_QUECTEL_CMD_IP_CLOSE) {
 			self->current_command = GSM_QUECTEL_CMD_NONE;
 			self->command_response = GSM_QUECTEL_CMD_RESPONSE_OK;
 			xSemaphoreGive(self->response_lock);
@@ -458,8 +466,10 @@ static void gsm_quectel_process_task(void *p) {
 				uint32_t len = 0;
 				sscanf(&(buf[i]), "%u", &len);
 
-				/* CR and LF is being processed by the previous readline command. Read the
-				 * exact number of bytes now. */
+				/* CR is being processed by the previous readline command. Read the LF byte. */
+				interface_stream_read_timeout(self->usart, self->data_to_receive, 1, 100);
+
+				/* Read the exact number of bytes now. */
 				while (len > 0) {
 					/** @todo make reading more optimal */
 					int r = interface_stream_read_timeout(self->usart, self->data_to_receive, 1, 100);
@@ -685,6 +695,12 @@ static tcpip_ret_t gsm_quectel_tcpip_socket_disconnect(void *context) {
 	ITcpIp *tcpip = (ITcpIp *)context;
 	GsmQuectel *self = (GsmQuectel *)tcpip->vmt.context;
 
+	if (command(self, GSM_QUECTEL_CMD_IP_CLOSE, 300) == GSM_QUECTEL_RET_OK) {
+		return TCPIP_RET_OK;
+	} else {
+		return TCPIP_RET_FAILED;
+	}
+
 	return TCPIP_RET_OK;
 }
 
@@ -742,9 +758,12 @@ static tcpip_ret_t gsm_quectel_tcpip_socket_receive(void *context, const uint8_t
 		if (command(self, GSM_QUECTEL_CMD_IP_RECV, 300) == GSM_QUECTEL_RET_OK) {
 			if (self->data_to_receive_read == 0) {
 				/* Wait on the semaphore until some data is ready. */
-				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("waiting for data"));
-				xSemaphoreTake(self->data_waiting, portMAX_DELAY);
-				continue;
+				if (xSemaphoreTake(self->data_waiting, 100) == pdFALSE) {
+					*read = 0;
+					return TCPIP_RET_NODATA;
+				} else {
+					continue;
+				}
 			} else {
 				*read = self->data_to_receive_read;
 				return TCPIP_RET_OK;
@@ -910,7 +929,7 @@ gsm_quectel_ret_t gsm_quectel_start(GsmQuectel *self) {
 
 	self->can_run = true;
 
-	xTaskCreate(gsm_quectel_process_task, "gsm_quectel_p", configMINIMAL_STACK_SIZE + 256, (void *)self, 2, &(self->process_task));
+	xTaskCreate(gsm_quectel_process_task, "gsm_quectel_p", configMINIMAL_STACK_SIZE + 384, (void *)self, 2, &(self->process_task));
 	if (self->process_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create module task (command processing)"));
 		return GSM_QUECTEL_RET_FAILED;

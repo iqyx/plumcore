@@ -30,6 +30,7 @@ typedef enum {
 	TCPIP_RET_OK = 0,
 	TCPIP_RET_FAILED = -1,
 	TCPIP_RET_DISCONNECTED = -2,
+	TCPIP_RET_NODATA = -3,
 } tcpip_ret_t;
 
 
