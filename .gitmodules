@@ -10,3 +10,6 @@
 [submodule "lib/libopencm3"]
 	path = lib/libopencm3
 	url = https://github.com/iqyx/libopencm3.git
+[submodule "lib/other/wolfmqtt"]
+	path = lib/other/wolfmqtt
+	url = https://github.com/wolfSSL/wolfMQTT.git
