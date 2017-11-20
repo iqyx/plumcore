@@ -59,11 +59,11 @@ static void clear_reconnect_timeout(Mqtt *self) {
 
 
 static uint32_t get_reconnect_timeout(Mqtt *self) {
-	// self->reconnect_timeout_ms *= 2;
-	// if (self->reconnect_timeout_ms >= MQTT_RECONNECT_TIMEOUT_MAX_MS) {
-		// self->reconnect_timeout_ms = MQTT_RECONNECT_TIMEOUT_MAX_MS;
-	// }
-	return MQTT_INITIAL_RECONNECT_TIMEOUT_MS;
+	self->reconnect_timeout_ms *= 2;
+	if (self->reconnect_timeout_ms >= MQTT_RECONNECT_TIMEOUT_MAX_MS) {
+		self->reconnect_timeout_ms = MQTT_RECONNECT_TIMEOUT_MAX_MS;
+	}
+	return self->reconnect_timeout_ms;
 }
 
 
@@ -220,7 +220,6 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 			rc = MqttClient_NetConnect(&self->mqtt_client, "", 0, 100, false, NULL);
 			if (rc == MQTT_CODE_SUCCESS) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("TCP connection to the broker at %s:%u created"), self->address, self->port);
-				clear_reconnect_timeout(self);
 				self->state = MQTT_STATE_PROTO_CONNECTING;
 			} else {
 				/* Cannot connect the underlying TCP socket. Log the error, wait a bit and repeat. */
@@ -241,13 +240,13 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 
 			/* Repeat the call to process all received data. */
 			int rc = 0;
-			while ((rc = MqttClient_Connect(&self->mqtt_client, &self->mqtt_connect) == MQTT_CODE_CONTINUE)) {
-				;
-			}
-			self->time_from_last_ping_ms = 0;
-			if (rc == MQTT_CODE_SUCCESS) {
+			rc = MqttClient_Connect(&self->mqtt_client, &self->mqtt_connect);
+			if (rc == MQTT_CODE_CONTINUE) {
+				/* Try to connect again. */
+				break;
+			} else if (rc == MQTT_CODE_SUCCESS) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("MQTT protocol connected successfully"));
-				clear_reconnect_timeout(self);
+				self->time_from_last_ping_ms = 0;
 				self->state = MQTT_STATE_CONNECTED;
 			} else {
 				/* If there is a protocol error while trying to connect, disconnect the socket and
@@ -288,7 +287,6 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 			if (rc == MQTT_CODE_SUCCESS) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("subscribed to a topic name='%s', qos=%d"), sub.topics[0].topic_filter, sub.topics[0].qos);
 				q->subscribed = true;
-				clear_reconnect_timeout(self);
 				self->state = MQTT_STATE_CONNECTED;
 			} else {
 				/* We were not able to subscribe to a topic. Try again, but increase the delay. */
@@ -300,6 +298,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 
 
 		case MQTT_STATE_CONNECTED: {
+			clear_reconnect_timeout(self);
 
 			if (self->time_from_last_ping_ms >= self->ping_interval_ms) {
 				self->state = MQTT_STATE_PING;
@@ -409,8 +408,13 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 			return MQTT_RET_FAILED;
 	}
 
-	if (last_state != self->state && mqtt_debug) {
-		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("state '%s' -> '%s'"), mqtt_state_strings[last_state], mqtt_state_strings[self->state]);
+	if (last_state == self->state) {
+		self->state_time++;
+	} else {
+		self->state_time = 0;
+		if (mqtt_debug) {
+			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("state '%s' -> '%s'"), mqtt_state_strings[last_state], mqtt_state_strings[self->state]);
+		}
 	}
 
 	return MQTT_RET_OK;
@@ -422,22 +426,11 @@ static void mqtt_task(void *p) {
 
 	while (true) {
 		mqtt_step(self);
-
-/*
-		while (1) {
-			msg.retain = 0;
-			msg.qos = MQTT_QOS_0;
-			msg.duplicate = 0;
-			msg.topic_name = "qyx/test";
-			msg.packet_id = get_packet_id(self);
-			msg.buffer = "test";
-			msg.total_len = 5;
-
-			rc = MqttClient_Publish(&self->mqtt_client, &msg);
-			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("published %s"), MqttClient_ReturnCodeToString(rc));
-			vTaskDelay(2000);
+		if (self->state_time >= MQTT_STATE_TIMEOUT && self->state != MQTT_STATE_CONNECTED && self->state != MQTT_STATE_NO_SOCKET && self->state != MQTT_STATE_INIT) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("state timeout %u"), self->state_time);
+			self->state = MQTT_STATE_DISCONNECT;
+			self->state_time = 0;
 		}
-*/
 	}
 
 	vTaskDelete(NULL);

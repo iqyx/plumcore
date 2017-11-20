@@ -36,6 +36,7 @@
 #define MQTT_INITIAL_RECONNECT_TIMEOUT_MS 1000
 #define MQTT_RECONNECT_TIMEOUT_MAX_MS 30000
 #define MQTT_MAX_TOPICS_TO_SUBSCRIBE 1
+#define MQTT_STATE_TIMEOUT 100
 
 
 struct mqtt;
@@ -94,6 +95,7 @@ typedef struct mqtt {
 	Module module;
 
 	enum mqtt_state state;
+	uint32_t state_time;
 
 	const char *address;
 	uint16_t port;
