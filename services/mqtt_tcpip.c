@@ -39,7 +39,6 @@
 #endif
 #define MODULE_NAME "mqtt"
 
-static const bool mqtt_debug = false;
 static const char *mqtt_state_strings[] = {
 	"NONE",
 	"INIT",
@@ -53,11 +52,10 @@ static const char *mqtt_state_strings[] = {
 	"PUBLISH",
 };
 
-static void clear_reconnect_timeout(Mqtt *self) {
-	self->reconnect_timeout_ms = MQTT_INITIAL_RECONNECT_TIMEOUT_MS;
-}
 
-
+/* Helper function to get time interval in which the next reconnection attempt
+ * should be executed. It performs a basic exponential backoff algo (multiply by 2)
+ * to avoid excessive data traffic when the remote broker server does not respond. */
 static uint32_t get_reconnect_timeout(Mqtt *self) {
 	self->reconnect_timeout_ms *= 2;
 	if (self->reconnect_timeout_ms >= MQTT_RECONNECT_TIMEOUT_MAX_MS) {
@@ -67,6 +65,14 @@ static uint32_t get_reconnect_timeout(Mqtt *self) {
 }
 
 
+/* When the MQTT protocol is successfully conneceted, return the reconnect interval
+ * back to the initial value. */
+static void clear_reconnect_timeout(Mqtt *self) {
+	self->reconnect_timeout_ms = MQTT_INITIAL_RECONNECT_TIMEOUT_MS;
+}
+
+
+/* Return a new and fresh MQTT packet ID as dictated in the spec. */
 static int get_packet_id(Mqtt *self) {
 	self->last_packet_id++;
 	if (self->last_packet_id >= MQTT_MAX_PACKET_ID) {
@@ -76,19 +82,17 @@ static int get_packet_id(Mqtt *self) {
 }
 
 
-static int net_tls_cb(MqttClient *client) {
-	(void)client;
-	return MQTT_CODE_SUCCESS;
-}
-
+/* Callback functions for the WolfMQTT library (MqttNet) follow. */
 
 static int net_connect(void *context, const char *host, word16 port, int timeout_ms) {
-	ITcpIpSocket *socket = (ITcpIpSocket *)context;
+	Mqtt *self = (Mqtt *)context;
+
+	/* We do not need the timeout value as the ITcpIp interface doesn't support
+	 * timeout setting yet. */
 	(void)timeout_ms;
 
-	if (tcpip_socket_connect(socket, host, port) == TCPIP_RET_OK) {
-
-		if (mqtt_debug) {
+	if (tcpip_socket_connect(self->socket, host, port) == TCPIP_RET_OK) {
+		if (self->debug) {
 			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("connected"));
 		}
 		return MQTT_CODE_SUCCESS;
@@ -98,12 +102,12 @@ static int net_connect(void *context, const char *host, word16 port, int timeout
 
 
 static int net_write(void *context, const byte *buf, int buf_len, int timeout_ms) {
-	ITcpIpSocket *socket = (ITcpIpSocket *)context;
+	Mqtt *self = (Mqtt *)context;
 	/* Ignored, socket write is blocking and waits until all data is written. */
 	(void)timeout_ms;
 
 	size_t written;
-	while (tcpip_socket_send(socket, buf, buf_len, &written) != TCPIP_RET_OK) {
+	while (tcpip_socket_send(self->socket, buf, buf_len, &written) != TCPIP_RET_OK) {
 		vTaskDelay(200);
 	}
 	return written;
@@ -111,12 +115,12 @@ static int net_write(void *context, const byte *buf, int buf_len, int timeout_ms
 
 
 static int net_read(void *context, byte *buf, int buf_len, int timeout_ms) {
-	ITcpIpSocket *socket = (ITcpIpSocket *)context;
+	Mqtt *self = (Mqtt *)context;
 	/* Ignored, we cannot set socket read timeout yet. */
 	(void)timeout_ms;
 
 	size_t read;
-	tcpip_ret_t ret = tcpip_socket_receive(socket, buf, buf_len, &read);
+	tcpip_ret_t ret = tcpip_socket_receive(self->socket, buf, buf_len, &read);
 	if (ret == TCPIP_RET_OK) {
 		return read;
 	} else if (ret == TCPIP_RET_NODATA) {
@@ -125,13 +129,16 @@ static int net_read(void *context, byte *buf, int buf_len, int timeout_ms) {
 		return MQTT_CODE_ERROR_NETWORK;
 	}
 
+	/* Handle other errors. */
 	return MQTT_CODE_CONTINUE;
 }
 
 
 static int net_disconnect(void *context) {
-	ITcpIpSocket *socket = (ITcpIpSocket *)context;
-	tcpip_socket_disconnect(socket);
+	Mqtt *self = (Mqtt *)context;
+
+	/* Do not check the return value. */
+	tcpip_socket_disconnect(self->socket);
 	return MQTT_CODE_SUCCESS;
 }
 
@@ -141,6 +148,7 @@ static int mqtt_msg(MqttClient *client, MqttMessage *message, byte msg_new, byte
 	(void)msg_new;
 	(void)msg_done;
 
+	/** @todo do not convert the topic to  null terminated string, use memcmp instead if strcmp */
 	char topic[64];
 	size_t len = message->topic_name_len;
 	if (len >= sizeof(topic)) {
@@ -149,6 +157,8 @@ static int mqtt_msg(MqttClient *client, MqttMessage *message, byte msg_new, byte
 	memcpy(topic, message->topic_name, len);
 	topic[len] = '\0';
 
+	/* Iterate over all subscriptions and try to match the topic. */
+	/** @todo more advanced topic matching */
 	QueueSubscribe *q = self->subscribes;
 	while (q != NULL) {
 		if (!strcmp(topic, q->topic_name)) {
@@ -164,7 +174,7 @@ static int mqtt_msg(MqttClient *client, MqttMessage *message, byte msg_new, byte
 		q = q->next;
 	}
 
-	if (mqtt_debug) {
+	if (self->debug) {
 		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("message received topic='%s', len=%u"), topic, message->total_len);
 	}
 
@@ -172,8 +182,8 @@ static int mqtt_msg(MqttClient *client, MqttMessage *message, byte msg_new, byte
 }
 
 
+/* Performs a single step in the main state machine. */
 static mqtt_ret_t mqtt_step(Mqtt *self) {
-
 	enum mqtt_state last_state = self->state;
 	switch (self->state) {
 		case MQTT_STATE_INIT:
@@ -183,7 +193,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 
 		case MQTT_STATE_NO_SOCKET:
 			if (tcpip_create_client_socket(self->tcpip, &(self->socket)) == TCPIP_RET_OK) {
-				if (mqtt_debug) {
+				if (self->debug) {
 					u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("socket created"));
 				}
 				self->state = MQTT_STATE_NET_CONNECTING;
@@ -191,7 +201,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 				/* A new socket cannot be acquired. Either the tcpip interface is
 				 * busy or the maximum number of socket has been reached. Wait a bit as we
 				 * cannot do anything more without a valid socket. */
-				if (mqtt_debug) {
+				if (self->debug) {
 					u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("cannot create socket"));
 				}
 				/* Wait a constant delay as this step does not create any network traffic. */
@@ -202,7 +212,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 		case MQTT_STATE_NET_CONNECTING: {
 
 			/* Initialize the MqttNet structure first. */
-			self->mqtt_net.context = (void *)self->socket;
+			self->mqtt_net.context = (void *)self;
 			self->mqtt_net.connect = net_connect;
 			self->mqtt_net.disconnect = net_disconnect;
 			self->mqtt_net.read = net_read;
@@ -270,28 +280,29 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 				break;
 			}
 
-			self->topics_to_subscribe_count = 1;
-			self->topics_to_subscribe[0].qos = q->qos;
-			self->topics_to_subscribe[0].topic_filter = q->topic_name;
+			MqttTopic topics_to_subscribe[1] = {
+				{
+					.qos = q->qos,
+					.topic_filter = q->topic_name,
+				}
+			};
 
-			MqttSubscribe sub;
-			memset(&sub, 0, sizeof(MqttSubscribe));
-			sub.topic_count = self->topics_to_subscribe_count;
-			sub.topics = self->topics_to_subscribe;
-			sub.packet_id = get_packet_id(self);
+			MqttSubscribe sub = {
+				.topic_count = 1,
+				.topics = topics_to_subscribe,
+				.packet_id = get_packet_id(self),
+			};
 
 			int rc = MqttClient_Subscribe(&self->mqtt_client, &sub);
 			if (rc == MQTT_CODE_CONTINUE) {
 				break;
-			}
-			if (rc == MQTT_CODE_SUCCESS) {
+			} else if (rc == MQTT_CODE_SUCCESS) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("subscribed to a topic name='%s', qos=%d"), sub.topics[0].topic_filter, sub.topics[0].qos);
 				q->subscribed = true;
 				self->state = MQTT_STATE_CONNECTED;
 			} else {
-				/* We were not able to subscribe to a topic. Try again, but increase the delay. */
+				/* We were not able to subscribe to a topic. Try again. */
 				u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot subscribe to a topic name='%s', qos=%d, '%s'"), sub.topics[0].topic_filter, sub.topics[0].qos, MqttClient_ReturnCodeToString(rc));
-				vTaskDelay(get_reconnect_timeout(self));
 			}
 			break;
 		}
@@ -300,16 +311,19 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 		case MQTT_STATE_CONNECTED: {
 			clear_reconnect_timeout(self);
 
+			/* Check if a MQTT Ping needs to be sent. */
 			if (self->time_from_last_ping_ms >= self->ping_interval_ms) {
 				self->state = MQTT_STATE_PING;
 				break;
 			}
 
+			/* If there is a newly added subscription, process it. */
 			if (self->new_subscription) {
 				self->state = MQTT_STATE_SUBSCRIBE;
 				break;
 			}
 
+			/* If a new message has to be published, publish it. */
 			QueuePublish *q = self->publishes;
 			while (q != NULL) {
 				if (q->new_message) {
@@ -319,9 +333,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 				q = q->next;
 			}
 
-			/** @todo check if there is a subscription request */
-			/** @todo check if there is a publish request */
-
+			/* Otherwise wait for a message. */
 			int rc = MqttClient_WaitMessage(&self->mqtt_client, 100);
 			self->time_from_last_ping_ms += 100;
 			if (rc == MQTT_CODE_CONTINUE) {
@@ -341,13 +353,12 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 		}
 
 		case MQTT_STATE_PING: {
-
 			int rc = MqttClient_Ping(&self->mqtt_client);
 			if (rc == MQTT_CODE_CONTINUE) {
 				break;
 			}
 			if (rc == MQTT_CODE_SUCCESS) {
-				if (mqtt_debug) {
+				if (self->debug) {
 					u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("MQTT ping '%s'"), MqttClient_ReturnCodeToString(rc));
 				}
 				self->time_from_last_ping_ms = 0;
@@ -361,8 +372,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 		}
 
 		case MQTT_STATE_PUBLISH: {
-
-			/* Find a first message ready to be sent. */
+			/* Find the first message ready to be sent. */
 			QueuePublish *q = self->publishes;
 			while (q != NULL) {
 				if (q->new_message) {
@@ -388,7 +398,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 
 			int rc = MqttClient_Publish(&self->mqtt_client, &msg);
 			if (rc == MQTT_CODE_SUCCESS) {
-				if (mqtt_debug) {
+				if (self->debug) {
 					u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("published to topic name='%s', qos=%d"), msg.topic_name, msg.qos);
 				}
 				q->new_message = false;
@@ -412,7 +422,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 		self->state_time++;
 	} else {
 		self->state_time = 0;
-		if (mqtt_debug) {
+		if (self->debug) {
 			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("state '%s' -> '%s'"), mqtt_state_strings[last_state], mqtt_state_strings[self->state]);
 		}
 	}
@@ -424,7 +434,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 static void mqtt_task(void *p) {
 	Mqtt *self = (Mqtt *)p;
 
-	while (true) {
+	while (self->can_run) {
 		mqtt_step(self);
 		if (self->state_time >= MQTT_STATE_TIMEOUT && self->state != MQTT_STATE_CONNECTED && self->state != MQTT_STATE_NO_SOCKET && self->state != MQTT_STATE_INIT) {
 			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("state timeout %u"), self->state_time);
@@ -434,7 +444,6 @@ static void mqtt_task(void *p) {
 	}
 
 	vTaskDelete(NULL);
-
 }
 
 
@@ -446,11 +455,13 @@ mqtt_ret_t mqtt_init(Mqtt *self, ITcpIp *tcpip) {
 
 	memset(self, 0, sizeof(Mqtt));
 	self->tcpip = tcpip;
-	self->state = MQTT_STATE_INIT;
 	self->client_id = "noname";
 	clear_reconnect_timeout(self);
 	self->ping_interval_ms = 60000;
+	self->debug = false;
+	self->state = MQTT_STATE_INIT;
 
+	self->can_run = true;
 	xTaskCreate(mqtt_task, "mqtt", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
@@ -462,7 +473,12 @@ mqtt_ret_t mqtt_init(Mqtt *self, ITcpIp *tcpip) {
 
 
 mqtt_ret_t mqtt_free(Mqtt *self) {
+	if (u_assert(self != NULL)) {
+		return MQTT_RET_FAILED;
+	}
 
+	/* Delete the task. It may take some time. Return immediately. */
+	self->can_run = false;
 
 	return MQTT_RET_OK;
 }
