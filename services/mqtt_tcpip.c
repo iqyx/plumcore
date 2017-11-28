@@ -110,6 +110,7 @@ static int net_write(void *context, const byte *buf, int buf_len, int timeout_ms
 	while (tcpip_socket_send(self->socket, buf, buf_len, &written) != TCPIP_RET_OK) {
 		vTaskDelay(200);
 	}
+
 	return written;
 }
 
@@ -257,6 +258,15 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 			} else if (rc == MQTT_CODE_SUCCESS) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("MQTT protocol connected successfully"));
 				self->time_from_last_ping_ms = 0;
+
+				/* Mark all existing subscriptions as new to correctly resubscribe. */
+				QueueSubscribe *q = self->subscribes;
+				while (q != NULL) {
+					q->subscribed = false;
+					q = q->next;
+				}
+				self->new_subscription = true;
+
 				self->state = MQTT_STATE_CONNECTED;
 			} else {
 				/* If there is a protocol error while trying to connect, disconnect the socket and
@@ -280,23 +290,29 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 				break;
 			}
 
-			MqttTopic topics_to_subscribe[1] = {
-				{
-					.qos = q->qos,
-					.topic_filter = q->topic_name,
+			MqttTopic topics_to_subscribe[1];
+			memset(topics_to_subscribe, 0, sizeof(topics_to_subscribe));
+			topics_to_subscribe[0].qos = q->qos;
+			topics_to_subscribe[0].topic_filter = q->topic_name;
+
+			MqttSubscribe sub;
+			memset(&sub, 0, sizeof(sub));
+			sub.topic_count = 1;
+			sub.topics = topics_to_subscribe;
+			sub.packet_id = get_packet_id(self);
+
+			/* We cannot simply return in case of rc == CONTINUE because the next call of the MqttClient_Subscribe
+			 * function must have the same parameters. We try multiple times instead with the same sub structure
+			 * and return success/fail afterwards. */
+			uint32_t count = 0;
+			int rc = 0;
+			while ((rc = MqttClient_Subscribe(&self->mqtt_client, &sub)) == MQTT_CODE_CONTINUE) {
+				count++;
+				if (count >= 5) {
+					break;
 				}
-			};
-
-			MqttSubscribe sub = {
-				.topic_count = 1,
-				.topics = topics_to_subscribe,
-				.packet_id = get_packet_id(self),
-			};
-
-			int rc = MqttClient_Subscribe(&self->mqtt_client, &sub);
-			if (rc == MQTT_CODE_CONTINUE) {
-				break;
-			} else if (rc == MQTT_CODE_SUCCESS) {
+			}
+			if (rc == MQTT_CODE_SUCCESS) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("subscribed to a topic name='%s', qos=%d"), sub.topics[0].topic_filter, sub.topics[0].qos);
 				q->subscribed = true;
 				self->state = MQTT_STATE_CONNECTED;
