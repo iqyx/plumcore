@@ -1,7 +1,7 @@
-/**
- * uMeshFw entry point and custom FreeRTOS hooks
+/*
+ * plumCore entry point and custom FreeRTOS hooks
  *
- * Copyright (C) 2015, Marek Koza, qyx@krtko.org
+ * Copyright (C) 2015-2017, Marek Koza, qyx@krtko.org
  *
  * This file is part of uMesh node firmware (http://qyx.krtko.org/projects/umesh)
  *
@@ -23,30 +23,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <libopencm3/stm32/gpio.h>
-#include <libopencm3/stm32/pwr.h>
-#include <libopencm3/cm3/scb.h>
 #include "FreeRTOS.h"
 #include "task.h"
 #include "port.h"
+#include "system.h"
 
 #include "u_assert.h"
 #include "u_log.h"
+
+#ifdef MODULE_NAME
+#undef MODULE_NAME
+#endif
+#define MODULE_NAME "system"
 
 
 static void init_task(void *p) {
 	(void)p;
 
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing port-specific components..."));
 	port_init();
 
-	vTaskDelete(NULL);
-}
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing services..."));
+	system_init();
 
-
-static void test_task(void *p) {
-	(void)p;
-
-	vTaskDelay(1000);
 	vTaskDelete(NULL);
 }
 
@@ -57,11 +56,12 @@ int main(void) {
 	u_log_init();
 
 	xTaskCreate(init_task, "init", configMINIMAL_STACK_SIZE + 512, NULL, 1, NULL);
-	xTaskCreate(test_task, "test", configMINIMAL_STACK_SIZE + 256, NULL, 1, NULL);
 	vTaskStartScheduler();
 
 	/* Not reachable. */
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("scheduler failed"));
 	while (1) {
+		/* Cycle forever. The watchdog will reset the board soon. */
 		;
 	}
 }
@@ -69,14 +69,20 @@ int main(void) {
 
 void vApplicationMallocFailedHook(void);
 void vApplicationMallocFailedHook(void) {
-	;
+	/* This error should not cause system malfunction. The service or module must
+	 * handle allocation errors properly and the rest of the system should not
+	 * be compromised. */
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("failed to allocate memory"));
 }
 
 
 void vApplicationStackOverflowHook(TaskHandle_t pxTask, char *pcTaskName);
 void vApplicationStackOverflowHook(TaskHandle_t pxTask, char *pcTaskName) {
 	(void)pxTask;
-	u_log(system_log, LOG_TYPE_CRIT, "core: stack overflow detected in task '%s'", pcTaskName);
+
+	/* This is somewhat tough to deal with. Cycle forever and let the watchdog
+	 * reset the board. */
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("stack overflow detected in task '%s'"), pcTaskName);
 	while (1) {
 		;
 	}
@@ -106,21 +112,21 @@ void sys_tick_handler(void) {
 
 void hard_fault_hook(uint32_t *stack) __attribute__((used));
 void hard_fault_hook(uint32_t *stack) {
-	u_log(system_log, LOG_TYPE_CRIT, "core: processor hard fault at 0x%08x", stack[6]);
-	u_log(system_log, LOG_TYPE_CRIT, "core: r0 = 0x%08x, r1 = 0x%08x, r2 = 0x%08x, r3 = 0x%08x", stack[0], stack[1], stack[2], stack[3]);
-	u_log(system_log, LOG_TYPE_CRIT, "core: r12 = 0x%08x, lr = 0x%08x, pc = 0x%08x, psr = 0x%08x", stack[4], stack[5], stack[6], stack[7]);
-	u_log(system_log, LOG_TYPE_CRIT, "core: cfsr = 0x%08x, hfsr = 0x%08x, dfsr = 0x%08x, afsr = 0x%08x",
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("processor hard fault at 0x%08x"), stack[6]);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("r0 = 0x%08x, r1 = 0x%08x, r2 = 0x%08x, r3 = 0x%08x"), stack[0], stack[1], stack[2], stack[3]);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("r12 = 0x%08x, lr = 0x%08x, pc = 0x%08x, psr = 0x%08x"), stack[4], stack[5], stack[6], stack[7]);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("cfsr = 0x%08x, hfsr = 0x%08x, dfsr = 0x%08x, afsr = 0x%08x"),
 		(*((volatile unsigned long *)(0xE000ED28))),
 		(*((volatile unsigned long *)(0xE000ED2C))),
 		(*((volatile unsigned long *)(0xE000ED30))),
 		(*((volatile unsigned long *)(0xE000ED3C)))
 	);
-	u_log(system_log, LOG_TYPE_CRIT, "core: mmar = 0x%08x, bfar = 0x%08x",
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("mmar = 0x%08x, bfar = 0x%08x"),
 		(*((volatile unsigned long *)(0xE000ED34))),
 		(*((volatile unsigned long *)(0xE000ED38)))
 	);
 
-	/* TODO: try to recover from hardfault - suspend/kill this task only
+	/** @todo try to recover from the hardfault - suspend/kill this task only
 	 * and do a context switch. Task may be restarted later by the process
 	 * manager or the whole system can be restarted by the watchdog. */
 	while (1) {
