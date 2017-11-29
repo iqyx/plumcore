@@ -203,6 +203,8 @@ int32_t port_early_init(void) {
 	/* Relocate the vector table first. */
 	SCB_VTOR = 0x00010400;
 
+	/** @todo set HSI as the system clock */
+
 	rcc_set_hpre(RCC_CFGR_HPRE_DIV_NONE);
 	rcc_set_ppre1(RCC_CFGR_PPRE_DIV_NONE);
 	rcc_set_ppre2(RCC_CFGR_PPRE_DIV_NONE);
@@ -223,14 +225,29 @@ int32_t port_early_init(void) {
 	rcc_periph_clock_enable(RCC_GPIOB);
 	rcc_periph_clock_enable(RCC_GPIOC);
 
-	/* USART1 is used as a system console. */
+	/* Timer 11 needs to be initialized prior to startint the scheduler. It is
+	 * used as a reference clock for getting task statistics. */
+	rcc_periph_clock_enable(RCC_TIM11);
+
+	/* Initialize the serial console here to display the boot log properly. */
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6);
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO7);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO6);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO7);
+	gpio_set_af(GPIOB, GPIO_AF7, GPIO6);
+	gpio_set_af(GPIOB, GPIO_AF7, GPIO7);
+
+	/* Main system console is created on the first USART interface. Enable
+	 * USART clocks and interrupts and start the corresponding HAL module. */
 	rcc_periph_clock_enable(RCC_USART1);
 	nvic_enable_irq(NVIC_USART1_IRQ);
 	nvic_set_priority(NVIC_USART1_IRQ, 6 * 16);
 
-	/* Timer 11 needs to be initialized prior to startint the scheduler. It is
-	 * used as a reference clock for getting task statistics. */
-	rcc_periph_clock_enable(RCC_TIM11);
+	module_usart_init(&console, "console", USART1);
+	hal_interface_set_name(&(console.iface.descriptor), "console");
+
+	/* Console is now initialized, set its stream to be used as u_log output. */
+	u_log_set_stream(&(console.iface));
 
 	return PORT_EARLY_INIT_OK;
 }
@@ -242,87 +259,67 @@ static void port_radio1_timer_callback(TimerHandle_t timer) {
 
 int32_t port_init(void) {
 
-	/* Status LEDs. */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
-
-	/* Serial console. */
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6);
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO7);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO6);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO7);
-	gpio_set_af(GPIOB, GPIO_AF7, GPIO6);
-	gpio_set_af(GPIOB, GPIO_AF7, GPIO7);
-
-
-	/* Radio module (SPI). */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO2);
-	gpio_set(GPIOB, GPIO2);
-
-
 	/* Analog inputs (battery measurement). */
 	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO5 | GPIO6);
-
-
-	/* Main system console is created on the first USART interface. USART1 clock
-	 * is already enabled. */
-	module_usart_init(&console, "console", USART1);
-	hal_interface_set_name(&(console.iface.descriptor), "console");
-
-	/* Console is now initialized, set its stream to be used as u_log
-	 * output. */
-	u_log_set_stream(&(console.iface));
 
 	/* Initialize the Real-time clock. */
 	module_rtc_locm3_init(&rtc1, "rtc1");
 	hal_interface_set_name(&(rtc1.iface.descriptor), "rtc1");
 	u_log_set_rtc(&(rtc1.iface));
+	/** @todo advertise the RTC device */
 
+	/* Status LEDs. */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
 	module_led_init(&led_stat, "led_stat");
 	module_led_set_port(&led_stat, GPIOB, GPIO10);
 	interface_led_loop(&(led_stat.iface), 0x0);
 	hal_interface_set_name(&(led_stat.iface.descriptor), "led_stat");
+	/** @todo advertise the LED device */
 
+	/** @todo simple prng device needs an ADC to seed */
 	module_prng_simple_init(&prng, "prng");
 	hal_interface_set_name(&(prng.iface.descriptor), "prng");
 
+	/** @todo profiler is a generic system service, move it to the system init */
 	module_fifo_profiler_init(&profiler, "profiler", TIM3, 100);
 	hal_interface_set_name(&(profiler.iface.descriptor), "profiler");
 	module_fifo_profiler_stream_enable(&profiler, &(console.iface));
 
-
+	/** @todo CLI and the login manager are generic system services, move them */
 	/* Start login manager in the main system console. */
+	/** @todo get the console dependency from the service locator */
 	module_loginmgr_init(&console_loginmgr, "login1", &(console.iface));
 	hal_interface_set_name(&(console_loginmgr.iface.descriptor), "login1");
-
 	service_cli_init(&console_cli, &(console_loginmgr.iface), system_cli_tree);
 	service_cli_start(&console_cli);
+
+	/* wtf? */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO2);
+	gpio_set(GPIOB, GPIO2);
 
 	/* Configure GPIO for radio & flash SPI bus (SPI2), enable SPI2 clock and
 	 * run spibus driver using libopencm3 to access it. */
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14 | GPIO15);
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
 	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
-
 	rcc_periph_clock_enable(RCC_SPI2);
-
 	module_spibus_locm3_init(&spi2, "spi2", SPI2);
 	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
 
 	/* Initialize SPI device on the SPI2 bus. */
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
-
 	module_spidev_locm3_init(&spi2_flash1, "spi2_flash1", &(spi2.iface), GPIOB, GPIO12);
 	hal_interface_set_name(&(spi2_flash1.iface.descriptor), "spi2_flash1");
 
 	/* Initialize flash device on the SPI2 bus. */
 	module_spi_flash_init(&flash1, "flash1", &(spi2_flash1.iface));
 	hal_interface_set_name(&(flash1.iface.descriptor), "flash1");
+	/** @todo advertise the flash device, does not mount here */
 
-	/* TODO: move to a dedicated module. */
 	sffs_init(&fs);
-	if (sffs_mount(&fs, &(flash1.iface.descriptor)) == SFFS_MOUNT_OK) {
+	if (sffs_mount(&fs, &(flash1.iface)) == SFFS_MOUNT_OK) {
 		u_log(system_log, LOG_TYPE_INFO, "sffs: filesystem mounted successfully");
 
 		struct sffs_info info;
@@ -357,6 +354,7 @@ int32_t port_init(void) {
 	module_power_adc_init(&vin1, "vin1", &(adc1.iface), &vin1_config);
 	module_power_adc_init(&ubx_voltage, "ubx1", &(adc1.iface), &ubx_voltage_config);
 
+	/* Initialize the radio interface. */
 	// gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
 	// gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO2);
 	// module_spidev_locm3_init(&spi2_radio1, "spi2_radio1", &(spi2.iface), GPIOB, GPIO2);
@@ -364,8 +362,9 @@ int32_t port_init(void) {
 
 	// ax5243_init(&radio1, &(spi2_radio1.iface), 16000000);
 	// hal_interface_set_name(&(radio1.iface.descriptor), "radio1");
+	/** @todo advertise the radio interface */
 
-
+	/** @todo MAC and L3/L4 protocols are generic services, move them */
 	/* Start CSMA MAC in the radio1 interface. */
 	// module_mac_csma_init(&radio1_mac, "radio1_mac", &(radio1.iface));
 	// hal_interface_set_name(&(radio1_mac.iface.descriptor), "radio1_mac");
@@ -376,34 +375,38 @@ int32_t port_init(void) {
 	// module_umesh_add_mac(&umesh, &(radio1_mac.iface));
 	// module_umesh_set_rng(&umesh, &(prng.iface));
 	// module_umesh_set_profiler(&umesh, &(profiler.iface));
+	// umesh_l2_status_add_power_device(&(ubx_voltage.iface), "plumpot1_ubx");
 
-	umesh_l2_status_add_power_device(&(ubx_voltage.iface), "plumpot1_ubx");
-
+	/* Initialize the Quectel GSM/GPRS module. It requires some GPIO to turn on/off. */
 	gsm_quectel_init(&gsm1);
 	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO9);
 	gsm_quectel_set_pwrkey(&gsm1, GPIOA, GPIO9);
 	gpio_mode_setup(GPIOC, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO13);
 	gsm_quectel_set_vddext(&gsm1, GPIOC, GPIO13);
 
+	/* Now initialize the USART2 port connected directly to the GSM modem. */
 	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
 	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
 	gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
 	rcc_periph_clock_enable(RCC_USART2);
 	nvic_enable_irq(NVIC_USART2_IRQ);
 	nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
-
 	module_usart_init(&gsm1_usart, "gsm1_usart", USART2);
 	hal_interface_set_name(&(gsm1_usart.iface.descriptor), "gsm1_usart");
+
+	/* Do not adverzise the USART interface as it is unusable for anything else.
+	 * Start the GSM driver on the USART instead. */
 	gsm_quectel_set_usart(&gsm1, &(gsm1_usart.iface));
-
 	gsm_quectel_start(&gsm1);
+	/** @todo the modem provides cellular and tcpip interfaces, advertise them */
 
-	/* I2C test */
-
+	/* Initialize the onboard I2C port. No resonable I2C bus/device implementation
+	 * exists now, initialize just the i2c_sensors module directly.  */
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO8 | GPIO9);
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO8 | GPIO9);
 	gpio_set_af(GPIOB, GPIO_AF4, GPIO8 | GPIO9);
 
+	/** @todo move to the i2c_sensors module */
 	rcc_periph_clock_enable(RCC_I2C1);
 	i2c_peripheral_disable(I2C1);
 	i2c_reset(I2C1);
@@ -415,6 +418,7 @@ int32_t port_init(void) {
 
 	i2c_sensors_init(&i2c_test, I2C1);
 
+	/** @todo generic service, move to the system init */
 /*
 	sensor_upload_init(&upload1, gsm_quectel_tcpip(&gsm1), "147.175.187.202", 6008);
 	sensor_upload_add_power_device(&upload1, "plumpot1_uxb", &(ubx_voltage.iface), 60000);
@@ -429,11 +433,14 @@ int32_t port_init(void) {
 	sensor_upload_add_sensor(&upload1, "charger_bat_charge", &(solar_charger1.battery_charge), 5000);
 */
 
+	/** @todo generic service, move tot he system init */
 	mqtt_init(&mqtt, gsm_quectel_tcpip(&gsm1));
 	mqtt_set_client_id(&mqtt, "plumpot1");
 	mqtt_set_ping_interval(&mqtt, 60000);
 	mqtt_connect(&mqtt, "iot.eclipse.org", 1883);
+	/** @todo advertise the mqtt interface */
 
+	/** @todo revork & move to the beginning */
 	interface_directory_init(&interfaces, interface_list);
 
 	/* Initialize the UXB bus. */
@@ -470,6 +477,9 @@ int32_t port_init(void) {
 	exti_set_trigger(EXTI15, EXTI_TRIGGER_FALLING);
 	exti_enable_request(EXTI15);
 
+	/** @todo revork the UXB interface. There should be a service continuously scanning the
+	 * bus and discovering new devices. They should be advertised automatically. If a driver
+	 * for a particular device/interface exists, it should be initialized. */
 	uxb_interface_init(&uxb_iface1);
 	uxb_interface_set_address(
 		&uxb_iface1,
@@ -485,10 +495,11 @@ int32_t port_init(void) {
 
 	solar_charger_init(&solar_charger1, &uxb_iface1);
 
+	/** @todo the watchdog is port-dependent. Rename the module accordingly and keep it here. */
 	watchdog_init(&watchdog, 20000, 0);
 
+	/** @todo remove */
 	vTaskDelay(10);
-
 	u_log(system_log, LOG_TYPE_DEBUG, "device descriptor:");
 	for (uint8_t i = 1; i < 20; i++) {
 		uxb_slot_send_data(&uxb_slot1, &i, 1, false);
@@ -504,6 +515,7 @@ int32_t port_init(void) {
 	// mqtt_cli_init(&mqtt_cli, &mqtt, system_cli_tree);
 	// mqtt_cli_start(&mqtt_cli);
 
+	/** @todo generic service move to the system init */
 	mqtt_sensor_upload_init(&mqtt_sensor, &mqtt);
 	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_temp", &(i2c_test.si7021_temp), 120000);
 	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_rh", &(i2c_test.si7021_rh), 120000);
@@ -515,7 +527,6 @@ int32_t port_init(void) {
 	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_charge", &(solar_charger1.battery_charge), 120000);
 	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_temp", &(solar_charger1.battery_temperature), 120000);
 
-
 	return PORT_INIT_OK;
 }
 
@@ -523,14 +534,12 @@ int32_t port_init(void) {
 /* Configure dedicated timer (tim3) for runtime task statistics. It should be later
  * redone to use one of the system monotonic clocks with interface_clock. */
 void port_task_timer_init(void) {
-
 	timer_reset(TIM11);
 	/* The timer should run at 1MHz */
 	timer_set_prescaler(TIM11, 1599);
 	timer_continuous_mode(TIM11);
 	timer_set_period(TIM11, UINT16_MAX);
 	timer_enable_counter(TIM11);
-
 }
 
 
@@ -538,13 +547,16 @@ uint32_t port_task_timer_get_value(void) {
 	return timer_get_counter(TIM11);
 }
 
+
 void usart1_isr(void) {
 	module_usart_interrupt_handler(&console);
 }
 
+
 void usart2_isr(void) {
 	module_usart_interrupt_handler(&gsm1_usart);
 }
+
 
 void exti15_10_isr(void) {
 	exti_reset_request(EXTI15);
