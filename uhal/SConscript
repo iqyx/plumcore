@@ -9,7 +9,7 @@ env.Command(
 		"interfaces/adc.c",
 		"interfaces/adc.h"
 	],
-	action = "tools/interface_generator.py $SOURCE"
+	action = "python tools/interface_generator.py $SOURCE"
 )
 
 

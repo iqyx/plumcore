@@ -1,12 +1,18 @@
 language: c
 sudo: false
 script:
+  - git fetch --depth=1
+  - git fetch --unshallow
+  - git fetch origin '+refs/heads/master:refs/heads/master'
+  - git fetch origin '+refs/heads/develop:refs/heads/develop'
+  - git fetch --tags
+  - git checkout -qf $TRAVIS_BRANCH
   - git submodule init
   - git submodule update
   - cd lib/other/nanopb/generator/proto && make && cd ../../../../..
   - cd lib/libopencm3 && make && cd ../..
-  - scons proto
-  - scons
+  - python /usr/bin/scons proto
+  - python /usr/bin/scons
 
 cache:
   directories:
@@ -17,6 +23,8 @@ before_install:
   - source ~/virtualenv/python2.7/bin/activate
 
 install:
+  - pip install gitpython
+  - pip install pyyaml
   - mkdir -p $HOME/protobuf && pushd $HOME/protobuf
     && curl -LO 'https://github.com/google/protobuf/releases/download/v3.4.0/protoc-3.4.0-linux-x86_64.zip'
     && unzip protoc-3.4.0-linux-x86_64.zip

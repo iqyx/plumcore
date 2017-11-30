@@ -37,7 +37,7 @@ Export("env")
 # Some helpers to make the build looks pretty
 SConscript("pretty.SConscript")
 
-env.Append(ENV = {"PATH": os.environ["PATH"]})
+env.Append(ENV = os.environ)
 
 ## @todo Check for the nanopb installation. Request download and build of the library
 ##       if it is not properly initialized.
