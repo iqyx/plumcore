@@ -1,10 +1,24 @@
+import os
+
 Import("env")
+
+# Build all interface files from the YAML definitions
+env.Command(
+	source = Glob("interfaces/*.yaml"),
+	target = [
+		"interfaces/adc.c",
+		"interfaces/adc.h"
+	],
+	action = "tools/interface_generator.py $SOURCE"
+)
+
 
 objs = env.Object(source = [
 	File(Glob("common/*.c")),
 	File(Glob("interfaces/*.c")),
 	File(Glob("modules/*.c")),
 ])
+
 
 # Do not append uHal subdirectories to the CPPPATH variable.
 # Header files should be referenced with #include <uhal/interfaces/...>

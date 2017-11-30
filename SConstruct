@@ -29,30 +29,15 @@ import os
 import time
 import yaml
 
+# Create default environment and export it. It will be modified later
+# by port-specific and other build scripts.
+env = Environment()
+Export("env")
 
-## @todo Move somewhere else
-class term_format:
-	default = "\x1b[0m"
-	bold = "\x1b[1m"
-	black = "\x1b[30m"
-	red = "\x1b[31m"
-	green = "\x1b[32m"
-	yellow = "\x1b[33m"
-	blue = "\x1b[34m"
-	magenta = "\x1b[35m"
-	cyan = "\x1b[36m"
-	white = "\x1b[37m"
+# Some helpers to make the build looks pretty
+SConscript("pretty.SConscript")
 
-def cformat(s):
-	return s.format(c = term_format)
-
-def make_ver(target, source, env):
-	for t in target:
-		with open(str(t), "w") as f:
-			f.write("#define UMESH_VERSION \"%s, %s, %s\"\n" % (env["GIT_BRANCH"], env["GIT_REV"], env["GIT_DATE"]))
-			f.write("#define UMESH_BUILD_DATE \"%s\"\n" % env["BUILD_DATE"])
-
-	return None
+env.Append(ENV = {"PATH": os.environ["PATH"]})
 
 ## @todo Check for the nanopb installation. Request download and build of the library
 ##       if it is not properly initialized.
@@ -63,39 +48,22 @@ def build_proto(target, source, env):
 		os.system("protoc --plugin=lib/other/nanopb/generator/protoc-gen-nanopb --proto_path=%s --nanopb_out=%s --proto_path=lib/other/nanopb/generator/proto %s" % (d, d, s))
 
 
-# Create default environment and export it. It will be modified later
-# by port-specific and other build scripts.
-env = Environment()
-Export("env")
 
 # Load build configuration
 env["CONFIG"] = yaml.load(file("config/default.yaml", "r"))
-# print env["CONFIG"]
-env["PORT"] = env["CONFIG"]["build"]["port"]
+env["PORT"] = env["CONFIG"]["build"]["port"];
 
-# Get PATH directories from os environment
-## @todo remove
-env.Append(ENV = {"PATH": os.environ["PATH"] + ":/opt/gcc-arm-none-eabi-4.9/bin/"})
+# Examine the Git repository and build the version string
+SConscript("version.SConscript")
 
-# Get some statistics from git repo about currently built sources
-## @todo provide some defaults if this is not a git repository
-env["GIT_BRANCH"] = os.popen("git rev-parse --abbrev-ref HEAD").read().rstrip()
-env["GIT_REV"] = os.popen("git rev-parse --short HEAD").read().rstrip()
-env["GIT_DATE"] = os.popen("git log -1 --format=%ci").read().rstrip()
+env["PORTFILE"] = "bin/plumcore-" + env["PORT"] + "-" + env["VERSION"]
 
-# create build version information
-#~ env["BUILD_DATE"] = time.ctime(time.time())
-env["BUILD_DATE"] = time.strftime("%F %T %Z", time.localtime())
-
-if ARGUMENTS.get('VERBOSE') != "1":
-	env['CCCOMSTR'] = cformat("Compiling {c.green}$TARGET{c.default}")
-	env['LINKCOMSTR'] = cformat("Linking {c.bold}{c.green}$TARGET{c.default}")
-	env['ARCOMSTR'] = cformat("{c.green}{c.bold}Creating library $TARGET{c.default}")
 
 objs = []
 
-# Run port-specific SConscript file
 objs.append(SConscript("ports/%s/SConscript" % env["PORT"]))
+
+
 
 env["CC"] = "%s-gcc" % env["TOOLCHAIN"]
 env["CXX"] = "%s-g++" % env["TOOLCHAIN"]
@@ -107,9 +75,6 @@ env["OBJDUMP"] = "%s-objdump" % env["TOOLCHAIN"]
 env["SIZE"] = "%s-size" % env["TOOLCHAIN"]
 env["OOCD"] = "openocd"
 env["CREATEFW"] = "tools/createfw.py"
-
-# Add platform specific things
-env.Append(CPPPATH = [Dir("ports/%s" % env["PORT"])])
 
 # Add uMeshFw HAL
 env.Append(CPPPATH = [
@@ -130,8 +95,8 @@ objs.append(SConscript("lib/SConscript"))
 objs.append(SConscript("services/SConscript"))
 
 
+# Required to allow including things like "services/cli.h"
 env.Append(CPPPATH = [Dir(".")])
-
 
 env.Append(LINKFLAGS = [
 	env["CFLAGS"],
@@ -139,7 +104,7 @@ env.Append(LINKFLAGS = [
 	"-nostartfiles",
 	"--specs=nano.specs",
 	"-T", env["LDSCRIPT"],
-	"-Wl,-Map=bin/umeshfw_%s.map" % env["PORT"],
+	"-Wl,-Map=%s.map" % env["PORTFILE"],
 	"-Wl,--gc-sections",
 ])
 
@@ -176,35 +141,26 @@ env.Append(CFLAGS = [
 	"-Wstrict-prototypes",
 ])
 
-
-
-# show banner and build configuration
-print cformat("{c.bold}{c.blue}uMeshFw branch %s, revision %s, date %s{c.default}\n" % (env["GIT_BRANCH"], env["GIT_REV"], env["GIT_DATE"]))
-print cformat("{c.bold}Build configuration:{c.default}")
-print cformat("\tbuild date = %s" % env["BUILD_DATE"])
-print cformat("\tport = %s" % env["PORT"])
-print cformat("\ttoolchain = %s" % env["TOOLCHAIN"])
-print ""
-
 # link the whole thing
-elf = env.Program(source = objs, target = "bin/umeshfw_%s.elf" % env["PORT"], LIBS = [env["LIBOCM3"], "c", "gcc", "nosys"])
+elf = env.Program(
+	source = objs,
+	target = [
+		File(env["PORTFILE"] + ".elf"),
+		File(env["PORTFILE"] + ".map"),
+	],
+	LIBS = [
+		env["LIBOCM3"],
+		"c",
+		"gcc",
+		"nosys",
+	]
+)
 
-env.Append(BUILDERS = {"MakeVer": env.Builder(action = make_ver)})
-version = env.MakeVer(target = "ports/%s/version.h" % env["PORT"], source = None)
-Depends(elf, version)
+# Create the firmware image file
+env["FW_SIGNING_KEY"] = env["CONFIG"]["firmware"]["signing-key"];
+env["FW_CREATE_KEY"] = env["CONFIG"]["firmware"]["create-key"];
 
-# convert to raw binary and create fw image
-rawbin = env.Command("bin/umeshfw_%s.bin" % env["PORT"], elf, "$OBJCOPY -O binary $SOURCE $TARGET")
-fwimage = env.Command("bin/umeshfw_%s.fw" % env["PORT"], rawbin, """
-	$CREATEFW \
-	--base 0x08010000 \
-	--input $SOURCE \
-	--output $TARGET \
-	--check \
-	--sign bin/test_key.key \
-	--version 0.1.0 \
-	--compatibility "qnode4 0.x.x"
-""")
+SConscript("firmware.SConscript")
 
 proto = env.Command(
 	source = [
@@ -217,20 +173,24 @@ proto = env.Command(
 
 elfsize = env.Command(source = elf, target = "elfsize", action = "$SIZE $SOURCE")
 
-program = env.Command(source = fwimage, target = "program", action = """
+program = env.Command(
+	source = env["PORTFILE"] + ".fw",
+	target = "program",
+	action = """
 	$OOCD \
 	-s /usr/share/openocd/scripts/ \
 	-f interface/%s.cfg \
 	-f target/%s.cfg \
 	-c "init" \
 	-c "reset init" \
-	-c "flash write_image erase %s 0x08010000 bin" \
+	-c "flash write_image erase $SOURCE 0x08010000 bin" \
 	-c "reset" \
 	-c "shutdown"
-""" % (env["OOCD_INTERFACE"], env["OOCD_TARGET"], str(fwimage[0])))
+	""" % (env["OOCD_INTERFACE"], env["OOCD_TARGET"])
+)
 
 # And do something by default.
-env.Alias("umeshfw", fwimage)
+env.Alias("umeshfw", source = env["PORTFILE"] + ".fw")
 env.Alias("proto", proto);
-Default(elf, elfsize, rawbin, fwimage)
+Default(env["PORTFILE"] + ".fw")
 

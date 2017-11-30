@@ -41,13 +41,13 @@ static void module_power_adc_measure(struct module_power_adc *self) {
 
 	if (self->config->measure_voltage) {
 		int32_t voltage;
-		interface_adc_sample(self->adc, self->config->voltage_channel, &voltage);
+		iadc_sample(self->adc, self->config->voltage_channel, &voltage);
 		self->voltage = voltage * self->config->voltage_multiplier / self->config->voltage_divider / 1000;
 	}
 
 	if (self->config->measure_current) {
 		int32_t current;
-		interface_adc_sample(self->adc, self->config->current_channel, &current);
+		iadc_sample(self->adc, self->config->current_channel, &current);
 		self->current = current * self->config->current_multiplier / self->config->current_divider / 1000;
 	}
 }

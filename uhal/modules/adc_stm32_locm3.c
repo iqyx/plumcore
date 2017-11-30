@@ -45,7 +45,7 @@
 static adc_stm32_locm3_ret_t sample(void *context, uint32_t input, int32_t *sample) {
 	if (u_assert(context != NULL) ||
 	    u_assert(sample != NULL)) {
-		return INTERFACE_ADC_RET_FAILED;
+		return IADC_RET_FAILED;
 	}
 	/* struct module_adc_stm32_locm3 *self = (struct module_adc_stm32_locm3 *)context; */
 
@@ -80,7 +80,7 @@ static adc_stm32_locm3_ret_t sample(void *context, uint32_t input, int32_t *samp
 	int32_t reading = adc_read_regular(ADC1);
 	*sample = (int32_t)((uint64_t)reading * (uint64_t)vdda_uv / 4096ull);
 
-	return INTERFACE_ADC_RET_OK;
+	return IADC_RET_OK;
 }
 
 adc_stm32_locm3_ret_t adc_stm32_locm3_init(AdcStm32Locm3 *self, uint32_t adc) {
@@ -91,7 +91,7 @@ adc_stm32_locm3_ret_t adc_stm32_locm3_init(AdcStm32Locm3 *self, uint32_t adc) {
 	memset(self, 0, sizeof(AdcStm32Locm3));
 	uhal_module_init(&self->module);
 
-	interface_adc_init(&(self->iface));
+	iadc_init(&(self->iface));
 	self->iface.vmt.context = (void *)self;
 	self->iface.vmt.sample = sample;
 
