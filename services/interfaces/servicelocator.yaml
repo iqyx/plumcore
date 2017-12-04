@@ -34,6 +34,14 @@ methods:
         - name: result
           type: "Interface **"
 
+    query_name_type:
+        - name: name
+          type: "char *"
+        - name: type
+          type: enum iservicelocator_type
+        - name: result
+          type: "Interface **"
+
     query_type_id:
         - name: type
           type: enum iservicelocator_type
