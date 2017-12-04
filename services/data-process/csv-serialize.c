@@ -65,7 +65,7 @@ dp_ret_t dp_csv_serialize_stop(struct dp_csv_serialize *self) {
 }
 
 
-dp_ret_t dp_csv_serialize_add_input(struct dp_csv_serialize *self, struct dp_input *input, const char *name) {
+dp_ret_t dp_csv_serialize_add_input(struct dp_csv_serialize *self, struct dp_input **input, const char *name) {
 
 
 }
