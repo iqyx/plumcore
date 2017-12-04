@@ -52,8 +52,8 @@
 /* Helper defines for tree construction. */
 #include "services/cli/system_cli_tree.h"
 
-/* Interface directory singleton. */
-#include "interface_directory.h"
+#include "services/interfaces/servicelocator.h"
+#include "uhal/interfaces/sensor.h"
 #include "port.h"
 
 /* Includes of the service itself. */
@@ -295,22 +295,19 @@ int32_t service_data_process_sensor_source_N_export(struct treecli_parser *parse
 	snprintf(line, sizeof(line), "enabled = %u\r\n", (unsigned int)s->running);
 	module_cli_output(line, parser->context);
 
-	const char *name = NULL;
-	enum interface_directory_type t;
-	for (size_t i = 0; (t = interface_directory_get_type(&interfaces, i)) != INTERFACE_TYPE_NONE; i++) {
-		if (t == INTERFACE_TYPE_SENSOR) {
-			ISensor *sensor = (ISensor *)interface_directory_get_interface(&interfaces, i);
-			if (sensor == s->sensor) {
-				name = interface_directory_get_name(&interfaces, i);
-				break;
-			}
 
+	Interface *interface;
+	for (size_t i = 0; (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_SENSOR, i, &interface)) != ISERVICELOCATOR_RET_FAILED; i++) {
+		ISensor *sensor = (ISensor *)interface;
+		const char *name = "";
+		iservicelocator_get_name(locator, interface, &name);
+
+		if (sensor == s->sensor) {
+			snprintf(line, sizeof(line), "sensor = %s\r\n", name);
+			module_cli_output(line, parser->context);
 		}
 	}
-	if (name != NULL) {
-		snprintf(line, sizeof(line), "sensor = %s\r\n", name);
-		module_cli_output(line, parser->context);
-	}
+
 	return 0;
 }
 
@@ -541,29 +538,30 @@ int32_t service_data_process_sensor_source_N_sensor_set(struct treecli_parser *p
 	(void)ctx;
 	(void)value;
 
-	/* Find the sensor first. */
-	ISensor *sensor = NULL;
-	enum interface_directory_type t;
-	for (size_t i = 0; (t = interface_directory_get_type(&interfaces, i)) != INTERFACE_TYPE_NONE; i++) {
-		if (t == INTERFACE_TYPE_SENSOR) {
-			const char *name = interface_directory_get_name(&interfaces, i);
-			if (len == strlen(name) && !strncmp(buf, name, len)) {
-				sensor = (ISensor *)interface_directory_get_interface(&interfaces, i);
-			}
-		}
+	char name[20];
+	if (len >= sizeof(name)) {
+		return 1;
 	}
-	if (sensor == NULL) {
+	strncpy(name, buf, len);
+	name[len] = '\0';
+
+	/* Get the right interface by its name first. */
+	Interface *interface;
+	if (iservicelocator_query_name_type(locator, name, ISERVICELOCATOR_TYPE_SENSOR, &interface) == ISERVICELOCATOR_RET_OK) {
+		ISensor *sensor = (ISensor *)interface;
+
+		struct dp_graph_node *graph_node = find_node_by_index(data_process_graph.nodes, DP_NODE_SENSOR_SOURCE, DNODE_INDEX(parser, -1));
+		if (graph_node == NULL) {
+			return -1;
+		}
+		struct dp_sensor_source *s = (struct dp_sensor_source *)graph_node->node;
+		dp_sensor_source_set_sensor(s, sensor);
+
+		return 0;
+	} else {
 		u_log(system_log, LOG_TYPE_ERROR, "no sensor interface was found");
 		return 1;
 	}
-
-	struct dp_graph_node *graph_node = find_node_by_index(data_process_graph.nodes, DP_NODE_SENSOR_SOURCE, DNODE_INDEX(parser, -1));
-	if (graph_node == NULL) {
-		return -1;
-	}
-	struct dp_sensor_source *s = (struct dp_sensor_source *)graph_node->node;
-	dp_sensor_source_set_sensor(s, sensor);
-	return 0;
 }
 
 
