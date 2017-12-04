@@ -85,6 +85,27 @@ static iservicelocator_ret_t plocator_query_name(
 }
 
 
+static iservicelocator_ret_t plocator_query_name_type(
+	void *context,
+	char * name,
+	enum iservicelocator_type type,
+	Interface ** result
+) {
+	PLocator *self = (PLocator *)context;
+
+	struct plocator_item *item = self->first;
+	while (item != NULL) {
+		if (!strcmp(name, item->name) && type == item->type) {
+			*result = item->interface;
+			return ISERVICELOCATOR_RET_OK;
+		}
+		item = item->next;
+	}
+
+	return ISERVICELOCATOR_RET_FAILED;
+}
+
+
 static iservicelocator_ret_t plocator_query_type_id(
 	void *context,
 	enum iservicelocator_type type,
@@ -157,6 +178,7 @@ plocator_ret_t plocator_init(PLocator *self) {
 	self->iface.vmt.context = (void *)self;
 	self->iface.vmt.add = plocator_add;
 	self->iface.vmt.query_name = plocator_query_name;
+	self->iface.vmt.query_name_type = plocator_query_name_type;
 	self->iface.vmt.query_type_id = plocator_query_type_id;
 	self->iface.vmt.query_type_next = plocator_query_type_next;
 	self->iface.vmt.get_name = plocator_get_name;

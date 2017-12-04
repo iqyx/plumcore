@@ -20,3 +20,7 @@
 *.key
 
 version.h
+
+# python compiled
+*.pyc
+

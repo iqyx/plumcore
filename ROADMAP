@@ -11,6 +11,11 @@ Current **development version is 0.5.0** (develop branch). Current **stable vers
   string and each metric inside the group will have it's own name (string),
   value and unit. Several types of values will be supported (integer number,
   float number, string).
+- DataProcess service for data processing using flow graphs
+- Refactoring of the CLI service to be more concise and readable. Splitting
+  CLI service's code into multiple submodules.
+- DataProcess tcp-client node
+- DataProcess text-serialize node
 
 
 

@@ -116,6 +116,7 @@ env.Append(CFLAGS = [
 	"-fdiagnostics-color=always",
 	"-ffunction-sections",
 	"-fdata-sections",
+	"-fdiagnostics-color=always",
 	"--std=c99",
 	"-Wall",
 	"-Wextra",
