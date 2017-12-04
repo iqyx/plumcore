@@ -50,9 +50,6 @@
 #include "interface_led.h"
 #include "module_usart.h"
 #include "interface_stream.h"
-#include "module_loginmgr.h"
-#include "services/cli.h"
-#include "services/cli/system_cli_tree.h"
 #include "interface_spibus.h"
 #include "module_spibus_locm3.h"
 #include "interface_flash.h"
@@ -93,18 +90,16 @@
 #include "services/mqtt_tcpip.h"
 #include "services/mqtt_sensor_upload.h"
 
+#include "interfaces/servicelocator.h"
+#include "services/plocator.h"
+
 
 /**
  * Port specific global variables and singleton instances.
  */
 uint32_t SystemCoreClock;
-struct module_led led_charge;
 struct module_led led_stat;
-struct module_led led_tx;
-struct module_led led_rx;
 struct module_usart console;
-struct module_loginmgr console_loginmgr;
-ServiceCli console_cli;
 struct module_spibus_locm3 spi2;
 struct module_spidev_locm3 spi2_flash1;
 struct module_spidev_locm3 spi2_radio1;
@@ -112,7 +107,6 @@ struct module_spi_flash flash1;
 struct module_rtc_locm3 rtc1;
 struct module_prng_simple prng;
 AdcStm32Locm3 adc1;
-InterfaceDirectory interfaces;
 Ax5243 radio1;
 struct module_mac_csma radio1_mac;
 struct module_umesh umesh;
@@ -131,6 +125,10 @@ SolarCharger solar_charger1;
 Watchdog watchdog;
 Mqtt mqtt;
 MqttSensorUpload mqtt_sensor;
+
+PLocator plocator;
+IServiceLocator *locator;
+
 
 struct module_power_adc vin1;
 struct module_power_adc_config vin1_config = {
@@ -156,54 +154,14 @@ struct hal_interface_descriptor *hal_interfaces[] = {
 };
 
 
-static struct interface_directory_item interface_list[] = {
-	{
-		.type = INTERFACE_TYPE_SENSOR,
-		.name = "meteo_temp",
-		.interface = &i2c_test.si7021_temp.interface,
-	}, {
-		.type = INTERFACE_TYPE_SENSOR,
-		.name = "meteo_rh",
-		.interface = &i2c_test.si7021_rh.interface,
-	}, {
-		.type = INTERFACE_TYPE_SENSOR,
-		.name = "meteo_lum",
-		.interface = &i2c_test.lum.interface,
-	}, {
-		.type = INTERFACE_TYPE_CELLULAR,
-		.name = "gsm1",
-		.interface = &gsm1.cellular.interface,
-	}, {
-		.type = INTERFACE_TYPE_SENSOR,
-		.name = "charger_board_temp",
-		.interface = &solar_charger1.board_temperature.interface,
-	}, {
-		.type = INTERFACE_TYPE_SENSOR,
-		.name = "charger_bat_voltage",
-		.interface = &solar_charger1.battery_voltage.interface,
-	}, {
-		.type = INTERFACE_TYPE_SENSOR,
-		.name = "charger_bat_current",
-		.interface = &solar_charger1.battery_current.interface,
-	}, {
-		.type = INTERFACE_TYPE_SENSOR,
-		.name = "charger_bat_charge",
-		.interface = &solar_charger1.battery_charge.interface,
-	}, {
-		.type = INTERFACE_TYPE_SENSOR,
-		.name = "charger_bat_temp",
-		.interface = &solar_charger1.battery_temperature.interface,
-	}, {
-		.type = INTERFACE_TYPE_NONE
-	}
-};
-
-
 int32_t port_early_init(void) {
 	/* Relocate the vector table first. */
 	SCB_VTOR = 0x00010400;
 
-	/** @todo set HSI as the system clock */
+	/* Select HSE as SYSCLK source, no PLL, 16MHz. */
+	rcc_osc_on(RCC_HSE);
+	rcc_wait_for_osc_ready(RCC_HSE);
+	rcc_set_sysclk_source(RCC_CFGR_SW_HSE);
 
 	rcc_set_hpre(RCC_CFGR_HPRE_DIV_NONE);
 	rcc_set_ppre1(RCC_CFGR_PPRE_DIV_NONE);
@@ -229,7 +187,14 @@ int32_t port_early_init(void) {
 	 * used as a reference clock for getting task statistics. */
 	rcc_periph_clock_enable(RCC_TIM11);
 
-	/* Initialize the serial console here to display the boot log properly. */
+
+	return PORT_EARLY_INIT_OK;
+}
+
+
+int32_t port_init(void) {
+
+	/* Serial console. */
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6);
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO7);
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO6);
@@ -242,56 +207,71 @@ int32_t port_early_init(void) {
 	rcc_periph_clock_enable(RCC_USART1);
 	nvic_enable_irq(NVIC_USART1_IRQ);
 	nvic_set_priority(NVIC_USART1_IRQ, 6 * 16);
-
 	module_usart_init(&console, "console", USART1);
 	hal_interface_set_name(&(console.iface.descriptor), "console");
 
 	/* Console is now initialized, set its stream to be used as u_log output. */
 	u_log_set_stream(&(console.iface));
 
-	return PORT_EARLY_INIT_OK;
-}
-
-
-static void port_radio1_timer_callback(TimerHandle_t timer) {
-}
-
-
-int32_t port_init(void) {
-
 	/* Analog inputs (battery measurement). */
 	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO5 | GPIO6);
+
+	/* First, initialize the service locator service. It is required to
+	 * advertise any port-specific devices and interfaces. */
+	if (plocator_init(&plocator) == PLOCATOR_RET_OK) {
+		locator = plocator_iface(&plocator);
+	}
+
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_STREAM,
+		(Interface *)&console.iface.descriptor,
+		"console"
+	);
 
 	/* Initialize the Real-time clock. */
 	module_rtc_locm3_init(&rtc1, "rtc1");
 	hal_interface_set_name(&(rtc1.iface.descriptor), "rtc1");
 	u_log_set_rtc(&(rtc1.iface));
-	/** @todo advertise the RTC device */
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_RTC,
+		(Interface *)&rtc1.iface.descriptor,
+		"rtc1"
+	);
 
 	/* Status LEDs. */
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
 	module_led_init(&led_stat, "led_stat");
 	module_led_set_port(&led_stat, GPIOB, GPIO10);
-	interface_led_loop(&(led_stat.iface), 0x0);
+	interface_led_loop(&(led_stat.iface), 0x11f1);
 	hal_interface_set_name(&(led_stat.iface.descriptor), "led_stat");
-	/** @todo advertise the LED device */
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_LED,
+		(Interface *)&led_stat.iface.descriptor,
+		"led_stat"
+	);
 
-	/** @todo simple prng device needs an ADC to seed */
 	module_prng_simple_init(&prng, "prng");
 	hal_interface_set_name(&(prng.iface.descriptor), "prng");
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_RNG,
+		(Interface *)&prng.iface.descriptor,
+		"rng1"
+	);
 
 	/** @todo profiler is a generic system service, move it to the system init */
 	module_fifo_profiler_init(&profiler, "profiler", TIM3, 100);
 	hal_interface_set_name(&(profiler.iface.descriptor), "profiler");
 	module_fifo_profiler_stream_enable(&profiler, &(console.iface));
-
-	/** @todo CLI and the login manager are generic system services, move them */
-	/* Start login manager in the main system console. */
-	/** @todo get the console dependency from the service locator */
-	module_loginmgr_init(&console_loginmgr, "login1", &(console.iface));
-	hal_interface_set_name(&(console_loginmgr.iface.descriptor), "login1");
-	service_cli_init(&console_cli, &(console_loginmgr.iface), system_cli_tree);
-	service_cli_start(&console_cli);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_PROFILER,
+		(Interface *)&profiler.iface.descriptor,
+		"profiler1"
+	);
 
 	/* wtf? */
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
@@ -351,8 +331,9 @@ int32_t port_init(void) {
 	adc_stm32_locm3_init(&adc1, ADC1);
 
 	/* Battery power device (using ADC). */
-	module_power_adc_init(&vin1, "vin1", &(adc1.iface), &vin1_config);
-	module_power_adc_init(&ubx_voltage, "ubx1", &(adc1.iface), &ubx_voltage_config);
+	/** @todo resolve incompatible interfaces */
+	// module_power_adc_init(&vin1, "vin1", &(adc1.iface), &vin1_config);
+	// module_power_adc_init(&ubx_voltage, "ubx1", &(adc1.iface), &ubx_voltage_config);
 
 	/* Initialize the radio interface. */
 	// gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
@@ -398,7 +379,12 @@ int32_t port_init(void) {
 	 * Start the GSM driver on the USART instead. */
 	gsm_quectel_set_usart(&gsm1, &(gsm1_usart.iface));
 	gsm_quectel_start(&gsm1);
-	/** @todo the modem provides cellular and tcpip interfaces, advertise them */
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_CELLULAR,
+		&gsm1.cellular.interface,
+		"cellular1"
+	);
 
 	/* Initialize the onboard I2C port. No resonable I2C bus/device implementation
 	 * exists now, initialize just the i2c_sensors module directly.  */
@@ -417,6 +403,55 @@ int32_t port_init(void) {
 	i2c_peripheral_enable(I2C1);
 
 	i2c_sensors_init(&i2c_test, I2C1);
+
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&i2c_test.si7021_temp.interface,
+		"meteo_temp"
+	);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&i2c_test.si7021_rh.interface,
+		"meteo_rh"
+	);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&i2c_test.lum.interface,
+		"meteo_lum"
+	);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&solar_charger1.board_temperature.interface,
+		"charger_board_temp"
+	);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&solar_charger1.battery_voltage.interface,
+		"charger_bat_voltage"
+	);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&solar_charger1.battery_current.interface,
+		"charger_bat_current"
+	);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&solar_charger1.battery_charge.interface,
+		"charger_bat_charge"
+	);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&solar_charger1.battery_temperature.interface,
+		"charger_bat_temp"
+	);
 
 	/** @todo generic service, move to the system init */
 /*
@@ -439,9 +474,6 @@ int32_t port_init(void) {
 	mqtt_set_ping_interval(&mqtt, 60000);
 	mqtt_connect(&mqtt, "iot.eclipse.org", 1883);
 	/** @todo advertise the mqtt interface */
-
-	/** @todo revork & move to the beginning */
-	interface_directory_init(&interfaces, interface_list);
 
 	/* Initialize the UXB bus. */
 	rcc_periph_clock_enable(RCC_SPI1);

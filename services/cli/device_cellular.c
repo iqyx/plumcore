@@ -1,13 +1,20 @@
 #include "uhal/interfaces/cellular.h"
 #include "cli_table_helper.h"
-#include "interface_directory.h"
 #include "services/cli.h"
 #include "port.h"
+#include "services/interfaces/servicelocator.h"
 
 
-int32_t device_cellular_cellularN_enabled_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf) {
+static int32_t device_cellular_cellularN_enabled_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
+	(void)parser;
+	(void)ctx;
+	(void)value;
+	(void)buf;
+	(void)len;
+
 	u_log(system_log, LOG_TYPE_INFO, "set enabled");
 
+	return 0;
 }
 
 
@@ -40,59 +47,54 @@ static int32_t device_cellular_print(struct treecli_parser *parser, void *exec_c
 	});
 	table_print_row_separator(cli->stream, device_cellular_table);
 
-	enum interface_directory_type t;
-	for (size_t i = 0; (t = interface_directory_get_type(&interfaces, i)) != INTERFACE_TYPE_NONE; i++) {
+	Interface *interface;
+	for (size_t i = 0; (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_CELLULAR, i, &interface)) != ISERVICELOCATOR_RET_FAILED; i++) {
 
+		/* Get device name and a reference to the interface from the interface directory. */
+		ICellular *cellular = (ICellular *)interface;
 
-		if (t == INTERFACE_TYPE_CELLULAR) {
-			/* Get device name and a reference to the interface from the interface directory. */
-			ICellular *cellular = (ICellular *)interface_directory_get_interface(&interfaces, i);
-			const char *name = interface_directory_get_name(&interfaces, i);
+		const char *name = "";
+		iservicelocator_get_name(locator, interface, &name);
 
-			/* Get IMEI number of the device. */
-			char imei[20];
-			cellular_imei(cellular, imei);
+		/* Get IMEI number of the device. */
+		char imei[20];
+		cellular_imei(cellular, imei);
 
-			char operator[20];
-			cellular_get_operator(cellular, operator);
+		char operator[20];
+		cellular_get_operator(cellular, operator);
 
-			enum cellular_modem_status status;
-			cellular_status(cellular, &status);
+		enum cellular_modem_status status;
+		cellular_status(cellular, &status);
 
-			table_print_row(cli->stream, device_cellular_table, (const union cli_table_cell_content []) {
-				{.string = name},
-				{.string = imei},
-				{.string = cellular_modem_status_strings[status]},
-				{.string = operator},
-			});
-		}
+		table_print_row(cli->stream, device_cellular_table, (const union cli_table_cell_content []) {
+			{.string = name},
+			{.string = imei},
+			{.string = cellular_modem_status_strings[status]},
+			{.string = operator},
+		});
 	}
 
 	return 0;
 }
 
 
-int32_t device_cellular_cellularN_create(struct treecli_parser *parser, uint32_t index, struct treecli_node *node, void *ctx) {
+static int32_t device_cellular_cellularN_create(struct treecli_parser *parser, uint32_t index, struct treecli_node *node, void *ctx) {
+	(void)parser;
+	(void)ctx;
 
-	size_t current_index = 0;
-	enum interface_directory_type t;
-	for (size_t i = 0; (t = interface_directory_get_type(&interfaces, i)) != INTERFACE_TYPE_NONE; i++) {
-		if (t == INTERFACE_TYPE_CELLULAR) {
-			if (index == current_index) {
-
-				const char *name = interface_directory_get_name(&interfaces, i);
-				if (node->name != NULL) {
-					strcpy(node->name, name);
-				}
-
-				node->values = device_cellular_cellularN_values;
-
-				return 0;
-
-			}
-			current_index++;
+	Interface *interface;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_CELLULAR, index, &interface) == ISERVICELOCATOR_RET_OK) {
+		const char *name = "";
+		iservicelocator_get_name(locator, interface, &name);
+		if (node->name != NULL) {
+			strcpy(node->name, name);
 		}
+		node->values = &device_cellular_cellularN_values;
+		return 0;
+
+
 	}
+
 	return -1;
 }
 

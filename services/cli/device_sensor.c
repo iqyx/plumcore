@@ -1,8 +1,8 @@
 #include "uhal/interfaces/sensor.h"
 #include "cli_table_helper.h"
-#include "interface_directory.h"
 #include "services/cli.h"
 #include "port.h"
+#include "services/interfaces/servicelocator.h"
 
 
 static const struct cli_table_cell device_sensor_table[] = {
@@ -27,27 +27,24 @@ static int32_t device_sensor_print(struct treecli_parser *parser, void *exec_con
 	});
 	table_print_row_separator(cli->stream, device_sensor_table);
 
-	enum interface_directory_type t;
-	for (size_t i = 0; (t = interface_directory_get_type(&interfaces, i)) != INTERFACE_TYPE_NONE; i++) {
+	Interface *interface;
+	for (size_t i = 0; (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_SENSOR, i, &interface)) != ISERVICELOCATOR_RET_FAILED; i++) {
+		ISensor *sensor = (ISensor *)interface;
+		ISensorInfo info = {0};
+		const char *name = "";
+		float value;
 
+		iservicelocator_get_name(locator, interface, &name);
+		interface_sensor_info(sensor, &info);
+		interface_sensor_value(sensor, &value);
 
-		if (t == INTERFACE_TYPE_SENSOR) {
-			ISensor *sensor = (ISensor *)interface_directory_get_interface(&interfaces, i);
-			ISensorInfo info;
-			const char *name = interface_directory_get_name(&interfaces, i);
-			float value;
-
-			interface_sensor_info(sensor, &info);
-			interface_sensor_value(sensor, &value);
-
-			table_print_row(cli->stream, device_sensor_table, (const union cli_table_cell_content []) {
-				{.string = name},
-				{.string = info.quantity_name},
-				{.string = info.unit_name},
-				{.int32 = (int32_t)value},
-				{.string = info.unit_symbol}
-			});
-		}
+		table_print_row(cli->stream, device_sensor_table, (const union cli_table_cell_content []) {
+			{.string = name},
+			{.string = info.quantity_name},
+			{.string = info.unit_name},
+			{.int32 = (int32_t)value},
+			{.string = info.unit_symbol}
+		});
 	}
 
 	return 0;

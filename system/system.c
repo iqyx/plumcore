@@ -22,14 +22,21 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
 #include "port.h"
-#include "system.h"
-
 #include "u_assert.h"
 #include "u_log.h"
+
+#include "system.h"
+
+#include "interfaces/servicelocator.h"
+#include "module_loginmgr.h"
+#include "services/cli.h"
+#include "services/cli/system_cli_tree.h"
+
 
 #ifdef MODULE_NAME
 #undef MODULE_NAME
@@ -37,11 +44,34 @@
 #define MODULE_NAME "system"
 
 
+/**
+ * Discover the first stream interface in the system, it should be the system console.
+ * Use it to initialize a login manager service which then runs a command line interface.
+ */
+static void main_console_init(void) {
+	Interface *console;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_STREAM, 0, &console) != ISERVICELOCATOR_RET_OK) {
+		return;
+	}
+
+	struct module_loginmgr *console_loginmgr = malloc(sizeof(struct module_loginmgr));
+	if (console_loginmgr == NULL) {
+		return;
+	}
+
+	module_loginmgr_init(console_loginmgr, "login1", (struct interface_stream *)console);
+	hal_interface_set_name(&(console_loginmgr->iface.descriptor), "login1");
+
+	ServiceCli *console_cli = malloc(sizeof(ServiceCli));
+	if (console_cli == NULL) {
+		return;
+	}
+
+	service_cli_init(console_cli, &(console_loginmgr->iface), system_cli_tree);
+	service_cli_start(console_cli);
+}
+
+
 void system_init(void) {
-
-
-
-
-
-
+	main_console_init();
 }

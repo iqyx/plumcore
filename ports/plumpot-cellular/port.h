@@ -27,6 +27,7 @@
 #include "module_usart.h"
 #include "services/cli.h"
 #include "interface_directory.h"
+#include "interfaces/servicelocator.h"
 
 
 #define PORT_NAME                  "plumpot-cellular"
@@ -42,9 +43,6 @@
 #define PORT_CLOG_SIZE             0x800
 
 extern struct module_led led_stat;
-extern struct module_usart console;
-extern struct module_loginmgr console_loginmgr;
-extern ServiceCli console_cli;
 extern struct module_spibus_locm3 spi1;
 extern struct module_spidev_locm3 spi1_radio1;
 extern struct module_spibus_locm3 spi2;
@@ -53,8 +51,9 @@ extern struct module_spi_flash flash1;
 extern struct module_rtc_locm3 rtc1;
 extern struct sffs fs;
 extern struct module_prng_simple prng;
-extern InterfaceDirectory interfaces;
 extern struct module_umesh umesh;
+
+extern IServiceLocator *locator;
 
 
 int32_t port_early_init(void);

@@ -1,0 +1,56 @@
+name: ServiceLocator
+description: Interface for querying system services (see service locator pattern)
+return-values:
+    - ok = 0
+    - failed
+    - not_implemented
+
+enums:
+    type:
+        - none = 0
+        - service_locator
+        - led
+        - rtc
+        - rng
+        - profiler
+        - stream
+        - tcpip
+        - mqtt
+        - sensor
+        - cellular
+
+methods:
+    add:
+        - name: type
+          type: enum iservicelocator_type
+        - name: interface
+          type: "Interface *"
+        - name: name
+          type: "char *"
+
+    query_name:
+        - name: name
+          type: "char *"
+        - name: result
+          type: "Interface **"
+
+    query_type_id:
+        - name: type
+          type: enum iservicelocator_type
+        - name: index
+          type: size_t
+        - name: result
+          type: "Interface **"
+
+    query_type_next:
+        - name: type
+          type: enum iservicelocator_type
+        - name: start
+          type: "Interface *"
+        - name: result
+          type: "Interface **"
+    get_name:
+        - name: interface
+          type: "Interface *"
+        - name: result
+          type: "const char **"

@@ -1,7 +1,17 @@
 Import("env")
 
+env.Command(
+	source = Glob("interfaces/*.yaml"),
+	target = [
+		"interfaces/servicelocator.c",
+		"interfaces/servicelocator.h",
+	],
+	action = Action("python tools/interface_generator.py $SOURCE", env['GENIFACECOMSTR'])
+)
+
 objs = env.Object(source = [
 	File(Glob("*.c")),
+	File(Glob("interfaces/*.c")),
 	File(Glob("cli/system_cli_tree.c")),
 ])
 

@@ -16,6 +16,7 @@
 *.key
 *.map
 
-bin/
+# ignore encryption and signing keys
+*.key
 
 version.h

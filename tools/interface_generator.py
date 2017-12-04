@@ -42,6 +42,7 @@ interface_impl_header = """
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "u_assert.h"
 #include "interface.h"
