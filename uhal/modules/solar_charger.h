@@ -25,7 +25,7 @@
 
 #include "module.h"
 #include "interfaces/sensor.h"
-#include "uxb_locm3.h"
+#include "libuxb.h"
 
 
 typedef enum {
@@ -43,8 +43,8 @@ typedef struct {
 	ISensor battery_charge;
 	ISensor battery_temperature;
 
-	UxbInterface *uxb;
-	UxbSlot stat_slot;
+	LibUxbDevice *uxb;
+	LibUxbSlot stat_slot;
 	uint8_t stat_slot_buffer[64];
 
 	int32_t board_temperature_mc;
@@ -56,6 +56,6 @@ typedef struct {
 } SolarCharger;
 
 
-solar_charger_ret_t solar_charger_init(SolarCharger *self, UxbInterface *uxb);
+solar_charger_ret_t solar_charger_init(SolarCharger *self, LibUxbDevice *uxb);
 solar_charger_ret_t solar_charger_free(SolarCharger *self);
 

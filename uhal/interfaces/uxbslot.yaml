@@ -1,0 +1,32 @@
+name: UxbSlot
+description: UXB slot interface
+return-values:
+    - ok
+    - failed
+
+methods:
+    set_slot_number:
+        - name: slot_number
+          type: uint8_t
+    set_slot_buffer:
+        - name: buf
+          type: "uint8_t *"
+        - name: len
+          type: "size_t"
+    send:
+        - name: buf
+          type: "const uint8_t *"
+        - name: len
+          type: size_t
+        - name: response
+          type: bool
+    receive:
+        - name: buf
+          type: "uint8_t *"
+        - name: size
+          type: size_t
+        - name: len
+          type: "size_t *"
+
+
+
