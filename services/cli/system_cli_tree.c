@@ -57,6 +57,7 @@
 #include "device_cellular.c"
 
 #include "service_data_process.h"
+#include "device_uxb.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -163,6 +164,16 @@ const struct treecli_node *system_cli_tree = Node {
 							.create = device_cellular_cellularN_create,
 						}
 					}
+				},
+				Node {
+					Name "uxb",
+					Commands {
+						Command {
+							Name "print",
+							Exec device_uxb_print,
+						},
+						End
+					},
 				},
 				End
 			},
