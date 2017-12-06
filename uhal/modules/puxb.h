@@ -32,6 +32,7 @@ typedef struct puxb_bus {
 
 	LibUxbBus bus;
 	IUxbBus iface;
+	SemaphoreHandle_t bus_lock;
 
 	struct puxb_device *devices;
 } PUxbBus;
@@ -44,6 +45,7 @@ typedef struct puxb_device {
 	LibUxbSlot *descriptor;
 	SemaphoreHandle_t descriptor_lock;
 	uint8_t descriptor_buffer[PUXB_DESCRIPTOR_BUFFER_SIZE];
+	uint8_t id[8];
 
 	char hw_version[PUXB_DESCRIPTOR_VERSION_SIZE];
 	char fw_version[PUXB_DESCRIPTOR_VERSION_SIZE];

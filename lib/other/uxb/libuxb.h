@@ -116,7 +116,7 @@ typedef struct {
 	struct libuxb_device *previous_device;
 
 	uint8_t control_frame[UXB_CONTROL_FRAME_LEN];
-	bool ignore_rx;
+	volatile bool ignore_rx;
 } LibUxbBus;
 
 

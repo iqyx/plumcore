@@ -133,6 +133,9 @@ static void check_active_devices(PUxbDiscovery *self) {
 		iuxbdevice_get_name(device->device, &name);
 
 		bool present = false;
+
+		/** @todo fix occasional device disconnections */
+		vTaskDelay(1);
 		iuxbbus_probe_device(self->bus, device->id, &present);
 		if (present && !device->active) {
 			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("%s: device active"), name);
@@ -170,7 +173,7 @@ puxb_discovery_ret_t puxb_discovery_init(PUxbDiscovery *self, IUxbBus *bus) {
 	self->bus = bus;
 
 	/* Delay the discovery a bit. */
-	vTaskDelay(50);
+	vTaskDelay(100);
 
 	self->discovery_can_run = true;
 	xTaskCreate(discovery_task, "puxb-discovery", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->discovery_task));

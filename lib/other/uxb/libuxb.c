@@ -156,7 +156,7 @@ static void spi_send_data(LibUxbBus *self, uint8_t *buf, size_t len) {
 
 	/* Respect inter-frame delay. */
 	uint16_t t = timer_wait_init(self);
-	timer_wait(self, t, 50);
+	timer_wait(self, t, 100);
 }
 
 
@@ -312,6 +312,7 @@ uxb_master_locm3_ret_t libuxb_bus_init(LibUxbBus *self, const struct uxb_master_
 
 	gpio_mode_setup(self->config.id_port, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, self->config.id_pin);
 	gpio_set_output_options(self->config.id_port, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, self->config.id_pin);
+	gpio_set(self->config.id_port, self->config.id_pin);
 
 	SPI_CR1(self->config.spi_port) |= SPI_CR1_BIDIMODE;
 	/* Data frame format is 8 bit (default). */
@@ -475,6 +476,7 @@ uxb_master_locm3_ret_t libuxb_bus_frame_irq(LibUxbBus *self) {
 				}
 
 				/* This is the single exit point without an error (full frame was received correctly). */
+				release_spi_port(self, false);
 				return UXB_MASTER_LOCM3_RET_OK;
 			}
 
@@ -521,6 +523,10 @@ uxb_master_locm3_ret_t libuxb_bus_check_id(LibUxbBus *self, uint8_t id[UXB_INTER
 	spi_send_data(self, frame, 12);
 
 	uxb_build_id_assert_control(frame);
+	spi_send_data(self, frame, 12);
+
+	/* Send the frame two times to allow the ID signal to stabilize. */
+	/** @todo meh. */
 	spi_send_data(self, frame, 12);
 
 	*result = !gpio_get(self->config.id_port, self->config.id_pin);

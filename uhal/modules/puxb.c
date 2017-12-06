@@ -66,7 +66,14 @@ static uxb_master_locm3_ret_t puxb_slot_data_received(void *context, uint8_t *bu
 
 static iuxbslot_ret_t puxb_slot_send(void *context, const uint8_t * buf, size_t len, bool response) {
 	PUxbSlot *slot = (PUxbSlot *)context;
+	PUxbDevice *device = slot->parent;
+	PUxbBus *bus = device->parent;
+
+	if (xSemaphoreTake(bus->bus_lock, 100) == pdFALSE) {
+		return IUXBSLOT_RET_FAILED;
+	}
 	libuxb_slot_send_data(&slot->slot, buf, len, response);
+	xSemaphoreGive(bus->bus_lock);
 
 	return IUXBSLOT_RET_OK;
 }
@@ -141,6 +148,27 @@ static iuxbdevice_ret_t puxb_device_get_name(void *context, char ** buf) {
 }
 
 
+static iuxbdevice_ret_t puxb_device_get_hardware_version(void *context, char ** buf) {
+	PUxbDevice *self = (PUxbDevice *)context;
+	*buf = self->hw_version;
+	return IUXBDEVICE_RET_OK;
+}
+
+
+static iuxbdevice_ret_t puxb_device_get_firmware_version(void *context, char ** buf) {
+	PUxbDevice *self = (PUxbDevice *)context;
+	*buf = self->fw_version;
+	return IUXBDEVICE_RET_OK;
+}
+
+
+static iuxbdevice_ret_t puxb_device_get_id(void *context, uint8_t * id) {
+	PUxbDevice *self = (PUxbDevice *)context;
+	memcpy(id, self->id, 8);
+	return IUXBDEVICE_RET_OK;
+}
+
+
 static uxb_master_locm3_ret_t puxb_descriptor_data_received(void *context, uint8_t *buf, size_t len) {
 	(void)buf;
 	(void)len;
@@ -192,6 +220,8 @@ static puxb_ret_t puxb_device_parse_descriptor(PUxbDevice *self, const char *buf
 
 
 static puxb_ret_t puxb_device_process_descriptor(PUxbDevice *self, const char *key, const char *value) {
+
+	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("%s === %s"), key, value);
 	if (!strcmp(key, "device")) {
 		strlcpy(self->device_name, value, PUXB_DESCRIPTOR_DEVICE_NAME_SIZE);
 	} else if (!strcmp(key, "hw-version")) {
@@ -207,6 +237,7 @@ static puxb_ret_t puxb_device_process_descriptor(PUxbDevice *self, const char *k
 
 static iuxbdevice_ret_t puxb_device_read_descriptor(void *context, uint8_t line, char *key, size_t key_size, char *value, size_t value_size) {
 	PUxbDevice *device = (PUxbDevice *)context;
+	PUxbBus *bus = device->parent;
 
 	if (device->descriptor == NULL) {
 		device->descriptor = (LibUxbSlot *)malloc(sizeof(LibUxbSlot));
@@ -221,32 +252,45 @@ static iuxbdevice_ret_t puxb_device_read_descriptor(void *context, uint8_t line,
 		return IUXBDEVICE_RET_FAILED;
 	}
 
+	if (xSemaphoreTake(bus->bus_lock, 100) == pdFALSE) {
+		goto err;
+	}
+
 	libuxb_slot_init(device->descriptor);
 	libuxb_slot_set_slot_number(device->descriptor, 0);
 	libuxb_slot_set_slot_buffer(device->descriptor, device->descriptor_buffer, PUXB_DESCRIPTOR_BUFFER_SIZE);
 	libuxb_slot_set_data_received(device->descriptor, puxb_descriptor_data_received, (void *)device);
 	libuxb_device_add_slot(&device->device, device->descriptor);
 
+	/* Put the semaphore to the taken state just to be sure. */
+	xSemaphoreTake(device->descriptor_lock, 0);
 	libuxb_slot_send_data(device->descriptor, &line, 1, false);
-	xSemaphoreTake(device->descriptor_lock, portMAX_DELAY);
+	if (xSemaphoreTake(device->descriptor_lock, 10) == pdFALSE) {
+		goto err;
+	}
 	if (device->descriptor->len == 1 && device->descriptor->buffer[0] == 0) {
-		return IUXBDEVICE_RET_FAILED;
+		goto err;
 	}
 
-	char m_key[PUXB_DESCRIPTOR_KEY_SIZE];
-	char m_value[PUXB_DESCRIPTOR_VALUE_SIZE];
+	char m_key[PUXB_DESCRIPTOR_KEY_SIZE] = {0};
+	char m_value[PUXB_DESCRIPTOR_VALUE_SIZE] = {0};
 	puxb_device_parse_descriptor(device, (char *)device->descriptor->buffer, device->descriptor->len, m_key, PUXB_DESCRIPTOR_KEY_SIZE, m_value, PUXB_DESCRIPTOR_VALUE_SIZE);
-	puxb_device_process_descriptor(device, key, value);
+	puxb_device_process_descriptor(device, m_key, m_value);
 	strlcpy(key, m_key, key_size);
 	strlcpy(value, m_value, value_size);
 
+	xSemaphoreGive(bus->bus_lock);
 	return IUXBDEVICE_RET_OK;
+err:
+
+	xSemaphoreGive(bus->bus_lock);
+	return IUXBDEVICE_RET_FAILED;
 }
 
 
 static iuxbdevice_ret_t puxb_device_set_address(void *context, uint8_t * local_address, uint8_t * remote_address) {
 	PUxbDevice *device = (PUxbDevice *)context;
-
+	memcpy(device->id, remote_address, 8);
 	libuxb_device_set_address(&device->device, local_address, remote_address);
 	return IUXBDEVICE_RET_FAILED;
 }
@@ -278,6 +322,9 @@ static iuxbbus_ret_t puxb_bus_add_device(void *context, IUxbDevice ** device) {
 	new_device->device_iface.vmt.set_address = puxb_device_set_address;
 	new_device->device_iface.vmt.read_descriptor = puxb_device_read_descriptor;
 	new_device->device_iface.vmt.get_name = puxb_device_get_name;
+	new_device->device_iface.vmt.get_hardware_version = puxb_device_get_hardware_version;
+	new_device->device_iface.vmt.get_firmware_version = puxb_device_get_firmware_version;
+	new_device->device_iface.vmt.get_id = puxb_device_get_id;
 
 	new_device->next = self->devices;
 	new_device->parent = self;
@@ -299,6 +346,12 @@ puxb_ret_t puxb_bus_init(PUxbBus *self, const struct uxb_master_locm3_config *co
 	self->iface.vmt.context = (void *)self;
 	self->iface.vmt.probe_device = puxb_bus_probe_device;
 	self->iface.vmt.add_device = puxb_bus_add_device;
+
+	self->bus_lock = xSemaphoreCreateMutex();
+	if (self->bus_lock == NULL) {
+		return PUXB_RET_FAILED;
+	}
+
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("module initialized"));
 	return PUXB_RET_OK;
