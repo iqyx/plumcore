@@ -35,6 +35,7 @@
 #include "uhal/interfaces/uxbbus.h"
 #include "uhal/interfaces/uxbdevice.h"
 #include "uhal/interfaces/uxbslot.h"
+#include "uhal/modules/uxb_can.h"
 
 #include "puxb_discovery.h"
 
@@ -61,14 +62,65 @@ static PUxbDiscoveryDevice *get_device_by_id(PUxbDiscovery *self, uint8_t id[8])
 }
 
 
+static void process_slot_descriptor(
+	PUxbDiscoveryDevice *self,
+	uint8_t slot_number,
+	char *interface,
+	char *version
+) {
+
+	if (!strcmp(interface, "sensor")) {
+		/** @todo process the version */
+		/** @todo initialize the uxb_sensor module */
+	} else if (!strcmp(interface, "can")) {
+		IUxbSlot *slot = NULL;
+		vTaskDelay(10);
+		if (iuxbdevice_add_slot(self->device, &slot) == IUXBDEVICE_RET_OK) {
+			iuxbslot_set_slot_number(slot, 1);
+			/* Do not set slot buffer, the driver will set it automatically. */
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("add slot %d"), 1);
+
+			UxbCan *uxb_can = calloc(1, sizeof(UxbCan));
+			if (uxb_can != NULL) {
+				uxb_can_init(uxb_can, slot);
+			}
+		}
+	} else {
+		/** @todo process errors */
+	}
+}
+
+
+static void parse_slot_descriptor(
+	PUxbDiscoveryDevice *self,
+	const char *value,
+	uint8_t *slot_number,
+	char *interface,
+	size_t interface_size,
+	char *version,
+	size_t version_size
+) {
+
+	strcpy(interface, "can");
+
+}
+
+
 /* Read the device descriptor, up to PXUB_DISCOVERY_DESCRIPTOR_LENGTH lines. */
 static void read_device_descriptor(PUxbDiscoveryDevice *self) {
 	char key[16];
 	char value[48];
 
 	for (uint8_t i = 1; i < PXUB_DISCOVERY_DSECRIPTOR_LENGTH; i++) {
-		if (iuxbdevice_read_descriptor(self->device, i, key, 16, value, 48) != IUXBDEVICE_RET_OK) {
-			break;
+		if (iuxbdevice_read_descriptor(self->device, i, key, 16, value, 48) == IUXBDEVICE_RET_OK) {
+			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("%s = %s"), key, value);
+			if (!strcmp(key, "slot")) {
+				uint8_t slot;
+				char interface[16];
+				char version[32];
+				parse_slot_descriptor(self, value, &slot, interface, 16, version, 32);
+				process_slot_descriptor(self, slot, interface, version);
+			}
 		}
 	}
 	char *name = "";
@@ -80,31 +132,33 @@ static void read_device_descriptor(PUxbDiscoveryDevice *self) {
 static void add_new_device(PUxbDiscovery *self, uint8_t id[8]) {
 	uint8_t local[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
-	PUxbDiscoveryDevice *device = malloc(sizeof(PUxbDiscoveryDevice));
-	if (device != NULL) {
-		memset(device, 0, sizeof(PUxbDiscoveryDevice));
+	PUxbDiscoveryDevice *device = calloc(1, sizeof(PUxbDiscoveryDevice));
+	if (device == NULL) {
+		return;
+	}
 
-		if (iuxbbus_add_device(self->bus, &device->device) == IUXBBUS_RET_OK) {
-			iuxbdevice_set_address(device->device, local, id);
-			memcpy(device->id, id, 8);
-			device->parent = self;
+	if (iuxbbus_add_device(self->bus, &device->device) != IUXBBUS_RET_OK) {
+		return;
+	}
 
-			/* Append it to the list. */
-			device->next = self->devices;
-			self->devices = device;
+	iuxbdevice_set_address(device->device, local, id);
+	memcpy(device->id, id, 8);
+	device->parent = self;
 
-			char s[25];
-			id_to_str(id, s);
-			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("new device discovered addr = %s"), s);
+	/* Append it to the list. */
+	device->next = self->devices;
+	self->devices = device;
 
-			read_device_descriptor(device);
+	char s[25];
+	id_to_str(id, s);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("new device discovered addr = %s"), s);
 
-			char *name = NULL;
-			iuxbdevice_get_name(device->device, &name);
-			if (name != NULL) {
-				iservicelocator_add(locator, ISERVICELOCATOR_TYPE_UXBDEVICE, &device->device->interface, name);
-			}
-		}
+	read_device_descriptor(device);
+
+	char *name = NULL;
+	iuxbdevice_get_name(device->device, &name);
+	if (name != NULL) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_UXBDEVICE, &device->device->interface, name);
 	}
 }
 
@@ -133,9 +187,7 @@ static void check_active_devices(PUxbDiscovery *self) {
 		iuxbdevice_get_name(device->device, &name);
 
 		bool present = false;
-
-		/** @todo fix occasional device disconnections */
-		vTaskDelay(1);
+		vTaskDelay(100);
 		iuxbbus_probe_device(self->bus, device->id, &present);
 		if (present && !device->active) {
 			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("%s: device active"), name);
@@ -156,7 +208,9 @@ static void discovery_task(void *p) {
 
 	while (self->discovery_can_run) {
 		discover_new_devices(self);
-		check_active_devices(self);
+
+		/** @todo fix occasional device disconnections */
+		// check_active_devices(self);
 
 		vTaskDelay(1000);
 	}

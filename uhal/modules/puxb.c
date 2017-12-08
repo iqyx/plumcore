@@ -41,14 +41,25 @@
 
 static iuxbslot_ret_t puxb_slot_receive(void *context, uint8_t * buf, size_t size, size_t * len) {
 	PUxbSlot *slot = (PUxbSlot *)context;
-	xSemaphoreTake(slot->read_lock, portMAX_DELAY);
+	PUxbDevice *device = slot->parent;
+	PUxbBus *bus = device->parent;
+
+	if (xSemaphoreTake(slot->read_lock, 100) == pdFALSE) {
+		goto err;
+	}
 
 	if (slot->slot.len != 0 && slot->slot.len <= size) {
 		memcpy(buf, slot->slot.buffer, slot->slot.len);
 		*len = slot->slot.len;
+
+		vTaskDelay(1);
+		xSemaphoreGive(bus->bus_lock);
 		return IUXBSLOT_RET_OK;
 	}
 
+err:
+	vTaskDelay(1);
+	xSemaphoreGive(bus->bus_lock);
 	return IUXBSLOT_RET_FAILED;
 }
 
@@ -72,8 +83,10 @@ static iuxbslot_ret_t puxb_slot_send(void *context, const uint8_t * buf, size_t 
 	if (xSemaphoreTake(bus->bus_lock, 100) == pdFALSE) {
 		return IUXBSLOT_RET_FAILED;
 	}
+	vTaskDelay(1);
+
+	xSemaphoreTake(slot->read_lock, 0);
 	libuxb_slot_send_data(&slot->slot, buf, len, response);
-	xSemaphoreGive(bus->bus_lock);
 
 	return IUXBSLOT_RET_OK;
 }
@@ -109,8 +122,6 @@ static iuxbdevice_ret_t puxb_device_add_slot(void *context, IUxbSlot ** slot) {
 		return IUXBDEVICE_RET_FAILED;
 	}
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("lock = %08x"), new_slot->read_lock);
-
 	libuxb_slot_init(&new_slot->slot);
 	libuxb_slot_set_data_received(&new_slot->slot, puxb_slot_data_received, (void *)new_slot);
 	libuxb_device_add_slot(&device->device, &new_slot->slot);
@@ -121,7 +132,6 @@ static iuxbdevice_ret_t puxb_device_add_slot(void *context, IUxbSlot ** slot) {
 	new_slot->slot_iface.vmt.set_slot_number = puxb_slot_set_slot_number;
 	new_slot->slot_iface.vmt.send = puxb_slot_send;
 	new_slot->slot_iface.vmt.receive = puxb_slot_receive;
-
 
 	new_slot->next = device->slots;
 	new_slot->parent = device;
@@ -221,7 +231,6 @@ static puxb_ret_t puxb_device_parse_descriptor(PUxbDevice *self, const char *buf
 
 static puxb_ret_t puxb_device_process_descriptor(PUxbDevice *self, const char *key, const char *value) {
 
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("%s === %s"), key, value);
 	if (!strcmp(key, "device")) {
 		strlcpy(self->device_name, value, PUXB_DESCRIPTOR_DEVICE_NAME_SIZE);
 	} else if (!strcmp(key, "hw-version")) {
@@ -241,9 +250,16 @@ static iuxbdevice_ret_t puxb_device_read_descriptor(void *context, uint8_t line,
 
 	if (device->descriptor == NULL) {
 		device->descriptor = (LibUxbSlot *)malloc(sizeof(LibUxbSlot));
-	}
-	if (device->descriptor == NULL) {
-		return IUXBDEVICE_RET_FAILED;
+
+		if (device->descriptor == NULL) {
+			return IUXBDEVICE_RET_FAILED;
+		}
+
+		libuxb_slot_init(device->descriptor);
+		libuxb_slot_set_slot_number(device->descriptor, 0);
+		libuxb_slot_set_slot_buffer(device->descriptor, device->descriptor_buffer, PUXB_DESCRIPTOR_BUFFER_SIZE);
+		libuxb_slot_set_data_received(device->descriptor, puxb_descriptor_data_received, (void *)device);
+		libuxb_device_add_slot(&device->device, device->descriptor);
 	}
 	if (device->descriptor_lock == NULL) {
 		device->descriptor_lock = xSemaphoreCreateBinary();
@@ -256,16 +272,11 @@ static iuxbdevice_ret_t puxb_device_read_descriptor(void *context, uint8_t line,
 		goto err;
 	}
 
-	libuxb_slot_init(device->descriptor);
-	libuxb_slot_set_slot_number(device->descriptor, 0);
-	libuxb_slot_set_slot_buffer(device->descriptor, device->descriptor_buffer, PUXB_DESCRIPTOR_BUFFER_SIZE);
-	libuxb_slot_set_data_received(device->descriptor, puxb_descriptor_data_received, (void *)device);
-	libuxb_device_add_slot(&device->device, device->descriptor);
 
 	/* Put the semaphore to the taken state just to be sure. */
 	xSemaphoreTake(device->descriptor_lock, 0);
 	libuxb_slot_send_data(device->descriptor, &line, 1, false);
-	if (xSemaphoreTake(device->descriptor_lock, 10) == pdFALSE) {
+	if (xSemaphoreTake(device->descriptor_lock, 20) == pdFALSE) {
 		goto err;
 	}
 	if (device->descriptor->len == 1 && device->descriptor->buffer[0] == 0) {
@@ -278,6 +289,9 @@ static iuxbdevice_ret_t puxb_device_read_descriptor(void *context, uint8_t line,
 	puxb_device_process_descriptor(device, m_key, m_value);
 	strlcpy(key, m_key, key_size);
 	strlcpy(value, m_value, value_size);
+
+	/** @todo fix */
+	vTaskDelay(5);
 
 	xSemaphoreGive(bus->bus_lock);
 	return IUXBDEVICE_RET_OK;
@@ -298,7 +312,14 @@ static iuxbdevice_ret_t puxb_device_set_address(void *context, uint8_t * local_a
 
 static iuxbbus_ret_t puxb_bus_probe_device(void *context, uint8_t * address, bool * result) {
 	PUxbBus *self = (PUxbBus *)context;
+
+	if (xSemaphoreTake(self->bus_lock, 100) == pdFALSE) {
+		return IUXBSLOT_RET_FAILED;
+	}
+	vTaskDelay(1);
 	libuxb_bus_check_id(&self->bus, address, result);
+	vTaskDelay(1);
+	xSemaphoreGive(self->bus_lock);
 
 	return IUXBBUS_RET_OK;
 }
