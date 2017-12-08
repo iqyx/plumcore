@@ -478,9 +478,9 @@ int32_t port_init(void) {
 
 	/** @todo generic service, move tot he system init */
 	mqtt_init(&mqtt, gsm_quectel_tcpip(&gsm1));
-	mqtt_set_client_id(&mqtt, "plumpot1");
+	mqtt_set_client_id(&mqtt, "plumpot2");
 	mqtt_set_ping_interval(&mqtt, 60000);
-	mqtt_connect(&mqtt, "iot.eclipse.org", 1883);
+	mqtt_connect(&mqtt, "mqtt.krtko.org", 1883);
 	/** @todo advertise the mqtt interface */
 
 	/* Initialize the UXB bus. */
@@ -513,7 +513,7 @@ int32_t port_init(void) {
 	});
 
 	nvic_enable_irq(NVIC_EXTI15_10_IRQ);
-	nvic_set_priority(NVIC_EXTI15_10_IRQ, 15*16);
+	nvic_set_priority(NVIC_EXTI15_10_IRQ, 5 * 16);
 	rcc_periph_clock_enable(RCC_SYSCFG);
 	exti_select_source(EXTI15, GPIOA);
 	exti_set_trigger(EXTI15, EXTI_TRIGGER_FALLING);
@@ -533,12 +533,9 @@ int32_t port_init(void) {
 	/** @todo the watchdog is port-dependent. Rename the module accordingly and keep it here. */
 	watchdog_init(&watchdog, 20000, 0);
 
-	// mqtt_cli_init(&mqtt_cli, &mqtt, system_cli_tree);
-	// mqtt_cli_start(&mqtt_cli);
-
 	/** @todo generic service move to the system init */
-	// mqtt_sensor_upload_init(&mqtt_sensor, &mqtt);
-	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_temp", &(i2c_test.si7021_temp), 120000);
+	mqtt_sensor_upload_init(&mqtt_sensor, &mqtt);
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx2/plumpot2_temp", &(i2c_test.si7021_temp), 15000);
 	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_rh", &(i2c_test.si7021_rh), 120000);
 	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_lum", &(i2c_test.lum), 120000);
 
@@ -548,7 +545,7 @@ int32_t port_init(void) {
 	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_charge", &(solar_charger1.battery_charge), 120000);
 	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_temp", &(solar_charger1.battery_temperature), 120000);
 
-	// dp_graph_init(&data_process_graph);
+	dp_graph_init(&data_process_graph);
 
 	return PORT_INIT_OK;
 }

@@ -1,0 +1,55 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+
+message CanRequest {
+	oneof content {
+		AddId add_id = 1;
+		TransmitMessage transmit_message = 3;
+		QueryReceiveBuffer query_received_buffer = 4;
+		SetSpeed set_speed = 5;
+		RemoveId remove_id = 6;
+	}
+}
+
+
+message CanResponse {
+
+
+	oneof content {
+		ReceivedMessages received_message = 1;
+
+	}
+
+}
+
+
+message AddId {
+
+}
+
+message RemoveId {
+
+}
+
+message TransmitMessage {
+
+}
+
+message QueryReceiveBuffer {
+
+}
+
+message SetSpeed {
+
+}
+
+message ReceivedMessages {
+	repeated ReceivedMessage message = 1 [(nanopb).max_count = 8];
+}
+
+message ReceivedMessage {
+	required uint32 id = 1;
+	required bytes data = 2 [(nanopb).max_size = 8];
+}
+
