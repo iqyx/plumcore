@@ -174,9 +174,6 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 		case GSM_QUECTEL_CMD_ENABLE_TCPIP_MUX:
 			strcpy(command_str, "AT+QIMUX=1");
 			break;
-		case GSM_QUECTEL_CMD_CONNECT:
-			strcpy(command_str, "AT+QIOPEN=\"TCP\",\"198.41.30.241\",1883");
-			break;
 		case GSM_QUECTEL_CMD_GET_IP:
 			strcpy(command_str, "AT+QILOCIP");
 			break;
@@ -213,6 +210,11 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 				snprintf(command_str, sizeof(command_str), "AT+QIRD=0,1,0,%u", self->data_to_receive_len);
 			}
 			break;
+
+		case GSM_QUECTEL_CMD_CONNECT:
+			snprintf(command_str, sizeof(command_str), "AT+QIOPEN=\"TCP\",\"%s\",%d", self->tcpip_address, self->tcpip_remote_port);
+			break;
+
 
 		case GSM_QUECTEL_CMD_NONE:
 		default:
