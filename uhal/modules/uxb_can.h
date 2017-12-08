@@ -1,5 +1,5 @@
 /*
- * plumCore solar charger UXB driver
+ * plumCore CAN interface UXB driver
  *
  * Copyright (C) 2017, Marek Koza, qyx@krtko.org
  *
@@ -23,39 +23,31 @@
 
 #include <stdint.h>
 
+#include "FreeRTOS.h"
+#include "task.h"
 #include "module.h"
 #include "interfaces/sensor.h"
 #include "libuxb.h"
 
 
 typedef enum {
-	SOLAR_CHARGER_RET_OK = 0,
-	SOLAR_CHARGER_RET_FAILED = -1,
-} solar_charger_ret_t;
+	UXB_CAN_RET_OK = 0,
+	UXB_CAN_RET_FAILED = -1,
+} uxb_can_ret_t;
 
 
 typedef struct {
-
 	Module module;
-	ISensor board_temperature;
-	ISensor battery_voltage;
-	ISensor battery_current;
-	ISensor battery_charge;
-	ISensor battery_temperature;
 
-	LibUxbDevice *uxb;
-	LibUxbSlot stat_slot;
-	uint8_t stat_slot_buffer[64];
+	IUxbSlot *slot;
+	uint8_t slot_buffer[64];
 
-	int32_t board_temperature_mc;
-	int32_t battery_voltage_mv;
-	int32_t battery_current_ma;
-	int32_t battery_charge_mah;
-	int32_t battery_temperature_mc;
+	TaskHandle_t receive_task;
+	bool receive_can_run;
 
-} SolarCharger;
+} UxbCan;
 
 
-solar_charger_ret_t solar_charger_init(SolarCharger *self, LibUxbDevice *uxb);
-solar_charger_ret_t solar_charger_free(SolarCharger *self);
+uxb_can_ret_t uxb_can_init(UxbCan *self, IUxbSlot *slot);
+uxb_can_ret_t uxb_can_free(UxbCan *self);
 

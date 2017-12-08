@@ -1,0 +1,45 @@
+name: UxbDevice
+description: UXB device interface
+return-values:
+    - ok
+    - failed
+
+depends:
+  - UxbSlot
+
+methods:
+    set_address:
+        - name: local_address
+          type: "uint8_t *"
+        - name: remote_address
+          type: "uint8_t *"
+    add_slot:
+        - name: slot
+          type: "IUxbSlot **"
+    remove_slot:
+        - name: slot
+          type: "IUxbSlot *"
+    get_id:
+        - name: id
+          type: "uint8_t *"
+    get_hardware_version:
+        - name: buf
+          type: "char **"
+    get_firmware_version:
+        - name: buf
+          type: "char **"
+    read_descriptor:
+        - name: line
+          type: uint8_t
+        - name: key
+          type: "char *"
+        - name: key_size
+          type: size_t
+        - name: value
+          type: "char *"
+        - name: value_size
+          type: size_t
+    get_name:
+        - name: buf
+          type: "char **"
+

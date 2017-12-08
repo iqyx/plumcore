@@ -18,6 +18,9 @@ enums:
         - mqtt
         - sensor
         - cellular
+        - uxbbus
+        - uxbdevice
+        - uxbslot
 
 methods:
     add:

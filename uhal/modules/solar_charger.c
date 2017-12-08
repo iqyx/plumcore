@@ -30,7 +30,7 @@
 
 #include "module.h"
 #include "interfaces/sensor.h"
-#include "uxb_locm3.h"
+#include "libuxb.h"
 #include "protocols/uxb/solar_charger_iface.pb.h"
 #include "pb_decode.h"
 
@@ -45,7 +45,7 @@
 
 static void read_values(SolarCharger *self) {
 	uint8_t tmp = 0;
-	uxb_slot_send_data(&self->stat_slot, &tmp, 1, false);
+	libuxb_slot_send_data(&self->stat_slot, &tmp, 1, false);
 	vTaskDelay(20);
 
 	pb_istream_t stream;
@@ -213,7 +213,7 @@ static interface_sensor_ret_t battery_temperature_mc_value(void *context, float 
 }
 
 
-solar_charger_ret_t solar_charger_init(SolarCharger *self, UxbInterface *uxb) {
+solar_charger_ret_t solar_charger_init(SolarCharger *self, LibUxbDevice *uxb) {
 	if (u_assert(self != NULL)) {
 		return SOLAR_CHARGER_RET_FAILED;
 	}
@@ -221,10 +221,10 @@ solar_charger_ret_t solar_charger_init(SolarCharger *self, UxbInterface *uxb) {
 	memset(self, 0, sizeof(SolarCharger));
 	uhal_module_init(&self->module);
 
-	uxb_slot_init(&self->stat_slot);
-	uxb_slot_set_slot_number(&self->stat_slot, 5);
-	uxb_slot_set_slot_buffer(&self->stat_slot, self->stat_slot_buffer, 64);
-	uxb_interface_add_slot(uxb, &self->stat_slot);
+	libuxb_slot_init(&self->stat_slot);
+	libuxb_slot_set_slot_number(&self->stat_slot, 5);
+	libuxb_slot_set_slot_buffer(&self->stat_slot, self->stat_slot_buffer, 64);
+	libuxb_device_add_slot(uxb, &self->stat_slot);
 	self->uxb = uxb;
 
 	interface_sensor_init(&(self->board_temperature));

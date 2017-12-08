@@ -80,7 +80,7 @@
 #include "services/sensor_upload.h"
 
 #include "uhal/interfaces/cellular.h"
-#include "uxb_locm3.h"
+#include "libuxb.h"
 #include "uhal/modules/solar_charger.h"
 
 #include "protocols/uxb/solar_charger_iface.pb.h"
@@ -94,6 +94,8 @@
 #include "services/plocator.h"
 
 #include "services/data-process/data-process.h"
+#include "uhal/modules/puxb.h"
+#include "uhal/modules/puxb_discovery.h"
 
 
 /**
@@ -118,9 +120,9 @@ struct module_usart gsm1_usart;
 SensorUpload upload1;
 I2cSensors i2c_test;
 struct sffs fs;
-UxbMasterLocm3 uxb;
-UxbInterface uxb_iface1;
-UxbSlot uxb_slot1;
+// LibUxbBus uxb;
+// LibUxbDevice uxb_iface1;
+// LibUxbSlot uxb_slot1;
 uint8_t slot1_buffer[256];
 uxb_master_locm3_ret_t uxb_ret;
 SolarCharger solar_charger1;
@@ -130,6 +132,9 @@ MqttSensorUpload mqtt_sensor;
 
 PLocator plocator;
 IServiceLocator *locator;
+
+PUxbBus puxb_bus;
+PUxbDiscovery puxb_discovery;
 
 
 struct module_power_adc vin1;
@@ -170,6 +175,7 @@ int32_t port_early_init(void) {
 	rcc_set_ppre2(RCC_CFGR_PPRE_DIV_NONE);
 
 	/* Initialize systick interrupt for FreeRTOS. */
+	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
 	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
 	systick_set_reload(15999);
 	systick_interrupt_enable();
@@ -472,9 +478,9 @@ int32_t port_init(void) {
 
 	/** @todo generic service, move tot he system init */
 	mqtt_init(&mqtt, gsm_quectel_tcpip(&gsm1));
-	mqtt_set_client_id(&mqtt, "plumpot1");
+	mqtt_set_client_id(&mqtt, "plumpot2");
 	mqtt_set_ping_interval(&mqtt, 60000);
-	mqtt_connect(&mqtt, "iot.eclipse.org", 1883);
+	mqtt_connect(&mqtt, "mqtt.krtko.org", 1883);
 	/** @todo advertise the mqtt interface */
 
 	/* Initialize the UXB bus. */
@@ -492,13 +498,14 @@ int32_t port_init(void) {
 	timer_set_period(TIM9, 65535);
 	timer_enable_counter(TIM9);
 
-	uxb_master_locm3_init(&uxb, &(struct uxb_master_locm3_config) {
+	puxb_bus_init(&puxb_bus, &(struct uxb_master_locm3_config) {
 		.spi_port = SPI1,
 		.spi_af = GPIO_AF5,
 		.sck_port = GPIOB, .sck_pin = GPIO3,
 		.miso_port = GPIOB, .miso_pin = GPIO4,
 		.mosi_port = GPIOB, .mosi_pin = GPIO5,
 		.frame_port = GPIOA, .frame_pin = GPIO15,
+		.id_port = GPIOA, .id_pin = GPIO10,
 		.delay_timer = TIM9,
 		.delay_timer_freq_mhz = 1,
 		.control_prescaler = SPI_CR1_BR_FPCLK_DIV_16,
@@ -506,60 +513,37 @@ int32_t port_init(void) {
 	});
 
 	nvic_enable_irq(NVIC_EXTI15_10_IRQ);
+	nvic_set_priority(NVIC_EXTI15_10_IRQ, 5 * 16);
 	rcc_periph_clock_enable(RCC_SYSCFG);
 	exti_select_source(EXTI15, GPIOA);
 	exti_set_trigger(EXTI15, EXTI_TRIGGER_FALLING);
 	exti_enable_request(EXTI15);
 
-	/** @todo revork the UXB interface. There should be a service continuously scanning the
-	 * bus and discovering new devices. They should be advertised automatically. If a driver
-	 * for a particular device/interface exists, it should be initialized. */
-	uxb_interface_init(&uxb_iface1);
-	uxb_interface_set_address(
-		&uxb_iface1,
-		(uint8_t[]){0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-		(uint8_t[]){0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22}
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_UXBBUS,
+		(Interface *)puxb_bus_interface(&puxb_bus),
+		"uxb1"
 	);
-	uxb_master_locm3_add_interface(&uxb, &uxb_iface1);
 
-	uxb_slot_init(&uxb_slot1);
-	uxb_slot_set_slot_number(&uxb_slot1, 0);
-	uxb_slot_set_slot_buffer(&uxb_slot1, slot1_buffer, sizeof(slot1_buffer));
-	uxb_interface_add_slot(&uxb_iface1, &uxb_slot1);
+	puxb_discovery_init(&puxb_discovery, puxb_bus_interface(&puxb_bus));
 
-	solar_charger_init(&solar_charger1, &uxb_iface1);
+	// solar_charger_init(&solar_charger1, &uxb_iface1);
 
 	/** @todo the watchdog is port-dependent. Rename the module accordingly and keep it here. */
 	watchdog_init(&watchdog, 20000, 0);
 
-	/** @todo remove */
-	vTaskDelay(10);
-	u_log(system_log, LOG_TYPE_DEBUG, "device descriptor:");
-	for (uint8_t i = 1; i < 20; i++) {
-		uxb_slot_send_data(&uxb_slot1, &i, 1, false);
-		vTaskDelay(20);
-		if (uxb_slot1.len == 1 && uxb_slot1.buffer[0] == 0) {
-			break;
-		}
-		/* Zero terminate at the maximum key-value pair length. */
-		uxb_slot1.buffer[63] = '\0';
-		u_log(system_log, LOG_TYPE_DEBUG, "    %s", uxb_slot1.buffer);
-	}
-
-	// mqtt_cli_init(&mqtt_cli, &mqtt, system_cli_tree);
-	// mqtt_cli_start(&mqtt_cli);
-
 	/** @todo generic service move to the system init */
 	mqtt_sensor_upload_init(&mqtt_sensor, &mqtt);
-	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_temp", &(i2c_test.si7021_temp), 120000);
-	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_rh", &(i2c_test.si7021_rh), 120000);
-	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_lum", &(i2c_test.lum), 120000);
+	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx2/plumpot2_temp", &(i2c_test.si7021_temp), 15000);
+	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_rh", &(i2c_test.si7021_rh), 120000);
+	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_lum", &(i2c_test.lum), 120000);
 
-	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_board_temp", &(solar_charger1.board_temperature), 120000);
-	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_voltage", &(solar_charger1.battery_voltage), 120000);
-	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_current", &(solar_charger1.battery_current), 120000);
-	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_charge", &(solar_charger1.battery_charge), 120000);
-	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_temp", &(solar_charger1.battery_temperature), 120000);
+	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_board_temp", &(solar_charger1.board_temperature), 120000);
+	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_voltage", &(solar_charger1.battery_voltage), 120000);
+	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_current", &(solar_charger1.battery_current), 120000);
+	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_charge", &(solar_charger1.battery_charge), 120000);
+	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_temp", &(solar_charger1.battery_temperature), 120000);
 
 	dp_graph_init(&data_process_graph);
 
@@ -598,6 +582,6 @@ void exti15_10_isr(void) {
 	exti_reset_request(EXTI15);
 
 	exti_disable_request(EXTI15);
-	uxb_ret = uxb_master_locm3_frame_irq(&uxb);
+	uxb_ret = libuxb_bus_frame_irq(&puxb_bus.bus);
 	exti_enable_request(EXTI15);
 }

@@ -32,7 +32,7 @@
 
 #define CONTROL_FRAME_MAGIC 0x1234
 
-enum uxb_control_frame_type {
+enum uxb_frame_type {
 	UXB_FRAME_TYPE_UNKNOWN = 256,
 	UXB_FRAME_TYPE_NOP = (0x00 << 5),
 	UXB_FRAME_TYPE_ASSERT_ID = (0x01 << 5),
@@ -86,6 +86,10 @@ struct uxb_master_locm3_config {
 	uint32_t irq_port;
 	uint32_t irq_pin;
 
+	/** Open-drain ID pin (device discovery). */
+	uint32_t id_port;
+	uint32_t id_pin;
+
 	/** Timer used to control protocol timing. */
 	uint32_t delay_timer;
 	uint32_t delay_timer_freq_mhz;
@@ -97,46 +101,45 @@ struct uxb_master_locm3_config {
 
 
 /* Forward declarations. */
-struct uxb_master_locm3_interface;
-struct uxb_master_locm3_slot;
+struct libuxb_device;
+struct libuxb_slot;
 
 
 typedef struct {
 	struct uxb_master_locm3_config config;
 
-	struct uxb_master_locm3_interface *interfaces;
+	struct libuxb_device *devices;
 
 	/**
 	 * Last interface used for sending data. It is used for matching the response.
 	 */
-	struct uxb_master_locm3_interface *previous_interface;
+	struct libuxb_device *previous_device;
 
 	uint8_t control_frame[UXB_CONTROL_FRAME_LEN];
-	bool ignore_rx;
-} UxbMasterLocm3;
+	volatile bool ignore_rx;
+} LibUxbBus;
 
 
 /**
- * Interface on a UXB bus is defined by a 64bit address. A single device
- * on the bus may have multiple interfaces.
+ * Device on the UXB bus is defined by a 64bit address.
  */
-typedef struct uxb_master_locm3_interface {
+typedef struct libuxb_device {
 	uint8_t local_address[UXB_INTERFACE_ADDRESS_LEN];
 	uint8_t remote_address[UXB_INTERFACE_ADDRESS_LEN];
 	bool selected;
 
-	struct uxb_master_locm3_slot *slots;
+	struct libuxb_slot *slots;
 
-	UxbMasterLocm3 *parent;
-	struct uxb_master_locm3_interface *next;
-} UxbInterface;
+	LibUxbBus *parent;
+	struct libuxb_device *next;
+} LibUxbDevice;
 
 
 /**
  * Slot is a data pipe within the interface able to transmit and receive
  * data. It is specified by a 8bit slot number.
  */
-typedef struct uxb_master_locm3_slot {
+typedef struct libuxb_slot {
 	uint8_t slot_number;
 
 	/* Buffer used to send and receive data. Must by serviceable by the DMA. */
@@ -148,22 +151,24 @@ typedef struct uxb_master_locm3_slot {
 	uxb_master_locm3_ret_t (*data_received)(void *context, uint8_t *buf, size_t len);
 	void *callback_context;
 
-	UxbInterface *parent;
-	struct uxb_master_locm3_slot *next;
-} UxbSlot;
+	LibUxbDevice *parent;
+	struct libuxb_slot *next;
+} LibUxbSlot;
 
 
-uxb_master_locm3_ret_t uxb_master_locm3_init(UxbMasterLocm3 *self, const struct uxb_master_locm3_config *config);
-uxb_master_locm3_ret_t uxb_master_locm3_frame_irq(UxbMasterLocm3 *self);
-uxb_master_locm3_ret_t uxb_master_locm3_add_interface(UxbMasterLocm3 *self, UxbInterface *i);
+uxb_master_locm3_ret_t libuxb_bus_init(LibUxbBus *self, const struct uxb_master_locm3_config *config);
+uxb_master_locm3_ret_t libuxb_bus_frame_irq(LibUxbBus *self);
+uxb_master_locm3_ret_t libuxb_bus_add_device(LibUxbBus *self, LibUxbDevice *i);
+uxb_master_locm3_ret_t libuxb_bus_check_id(LibUxbBus *self, uint8_t id[UXB_INTERFACE_ADDRESS_LEN], bool *result);
+uxb_master_locm3_ret_t libuxb_bus_query_device_by_id(LibUxbBus *self, uint8_t id[UXB_INTERFACE_ADDRESS_LEN], LibUxbDevice **result);
 
-uxb_master_locm3_ret_t uxb_interface_init(UxbInterface *self);
-uxb_master_locm3_ret_t uxb_interface_add_slot(UxbInterface *self, UxbSlot *s);
-uxb_master_locm3_ret_t uxb_interface_set_address(UxbInterface *self, const uint8_t local_address[UXB_INTERFACE_ADDRESS_LEN], const uint8_t remote_address[UXB_INTERFACE_ADDRESS_LEN]);
+uxb_master_locm3_ret_t libuxb_device_init(LibUxbDevice *self);
+uxb_master_locm3_ret_t libuxb_device_add_slot(LibUxbDevice *self, LibUxbSlot *s);
+uxb_master_locm3_ret_t libuxb_device_set_address(LibUxbDevice *self, const uint8_t local_address[UXB_INTERFACE_ADDRESS_LEN], const uint8_t remote_address[UXB_INTERFACE_ADDRESS_LEN]);
 
-uxb_master_locm3_ret_t uxb_slot_init(UxbSlot *self);
-uxb_master_locm3_ret_t uxb_slot_set_slot_number(UxbSlot *self, uint8_t slot_number);
-uxb_master_locm3_ret_t uxb_slot_set_slot_buffer(UxbSlot *self, uint8_t *buf, size_t size);
-uxb_master_locm3_ret_t uxb_slot_set_data_received(UxbSlot *self, uxb_master_locm3_ret_t (*data_received)(void *context, uint8_t *buf, size_t len), void *context);
-uxb_master_locm3_ret_t uxb_slot_send_data(UxbSlot *self, const uint8_t *buf, size_t len, bool response);
-uxb_master_locm3_ret_t uxb_slot_receive_data(UxbSlot *self);
+uxb_master_locm3_ret_t libuxb_slot_init(LibUxbSlot *self);
+uxb_master_locm3_ret_t libuxb_slot_set_slot_number(LibUxbSlot *self, uint8_t slot_number);
+uxb_master_locm3_ret_t libuxb_slot_set_slot_buffer(LibUxbSlot *self, uint8_t *buf, size_t size);
+uxb_master_locm3_ret_t libuxb_slot_set_data_received(LibUxbSlot *self, uxb_master_locm3_ret_t (*data_received)(void *context, uint8_t *buf, size_t len), void *context);
+uxb_master_locm3_ret_t libuxb_slot_send_data(LibUxbSlot *self, const uint8_t *buf, size_t len, bool response);
+uxb_master_locm3_ret_t libuxb_slot_receive_data(LibUxbSlot *self);
