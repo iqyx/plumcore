@@ -679,13 +679,18 @@ static tcpip_ret_t gsm_quectel_tcpip_socket_connect(void *context, const char *a
 	self->tcpip_address = address;
 	self->tcpip_remote_port = port;
 	if (command(self, GSM_QUECTEL_CMD_CONNECT, 75000) == GSM_QUECTEL_RET_OK) {
-		/** @todo wait for connected status */
-		return TCPIP_RET_OK;
+		for (uint32_t timeout = 0; timeout < 200; timeout++) {
+			if (self->tcp_ready) {
+				return TCPIP_RET_OK;
+			}
+			vTaskDelay(100);
+		}
+		return TCPIP_RET_FAILED;
 	} else {
 		return TCPIP_RET_FAILED;
 	}
 
-	return TCPIP_RET_OK;
+	return TCPIP_RET_FAILED;
 }
 
 

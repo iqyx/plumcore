@@ -107,11 +107,16 @@ static int net_write(void *context, const byte *buf, int buf_len, int timeout_ms
 	(void)timeout_ms;
 
 	size_t written;
-	while (tcpip_socket_send(self->socket, buf, buf_len, &written) != TCPIP_RET_OK) {
-		vTaskDelay(200);
+	tcpip_ret_t ret = tcpip_socket_send(self->socket, buf, buf_len, &written);
+	if (ret == TCPIP_RET_OK) {
+		return written;
+	} else if (ret == TCPIP_RET_NODATA) {
+		return MQTT_CODE_CONTINUE;
+	} else if (ret == TCPIP_RET_DISCONNECTED) {
+		return MQTT_CODE_ERROR_NETWORK;
 	}
 
-	return written;
+	return MQTT_CODE_CONTINUE;
 }
 
 
@@ -228,7 +233,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 			 * be required later in the message callback. */
 			self->mqtt_client.ctx = (void *)self;
 
-			rc = MqttClient_NetConnect(&self->mqtt_client, "", 0, 100, false, NULL);
+			rc = MqttClient_NetConnect(&self->mqtt_client, self->address, self->port, 100, false, NULL);
 			if (rc == MQTT_CODE_SUCCESS) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("TCP connection to the broker at %s:%u created"), self->address, self->port);
 				self->state = MQTT_STATE_PROTO_CONNECTING;
