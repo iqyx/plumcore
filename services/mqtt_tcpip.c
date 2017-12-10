@@ -316,6 +316,8 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 				if (count >= 5) {
 					break;
 				}
+				/* Wait some time otherwise the subscription will always fail. */
+				vTaskDelay(500);
 			}
 			if (rc == MQTT_CODE_SUCCESS) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("subscribed to a topic name='%s', qos=%d"), sub.topics[0].topic_filter, sub.topics[0].qos);
@@ -417,7 +419,15 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 			msg.buffer = q->buffer;
 			msg.total_len = q->data_len;
 
-			int rc = MqttClient_Publish(&self->mqtt_client, &msg);
+			uint32_t count = 0;
+			int rc = 0;
+			while ((rc = MqttClient_Publish(&self->mqtt_client, &msg)) == MQTT_CODE_CONTINUE) {
+				count++;
+				if (count >= 5) {
+					break;
+				}
+				vTaskDelay(500);
+			}
 			if (rc == MQTT_CODE_SUCCESS) {
 				if (self->debug) {
 					u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("published to topic name='%s', qos=%d"), msg.topic_name, msg.qos);

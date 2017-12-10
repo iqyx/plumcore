@@ -253,17 +253,16 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 	}
 
 	if (command == GSM_QUECTEL_CMD_IP_SEND) {
-		/** @todo send data here */
-
+		/* Delay of 10ms works somehow. Shorter delays don't. */
+		/** @todo fix & remove */
 		vTaskDelay(10);
 		write_line(self, self->data_to_send, self->data_to_send_len);
-		write_line(self, "\x1a", 1);
 		write_line(self, "\r\n", 2);
 	}
 
 	/* Reset the semaphore to avoid taking it immediatelly (if an unrelated response
 	 * was received prior to taking it). */
-	xSemaphoreTake(self->response_lock, 2);
+	xSemaphoreTake(self->response_lock, 0);
 
 	/* Wait for the response. */
 	if (xSemaphoreTake(self->response_lock, timeout_ms) == pdFALSE) {
@@ -744,10 +743,11 @@ static tcpip_ret_t gsm_quectel_tcpip_socket_send(void *context, const uint8_t *d
 
 	self->data_to_send = data;
 	self->data_to_send_len = len;
-	if (command(self, GSM_QUECTEL_CMD_IP_SEND, 1000) == GSM_QUECTEL_RET_OK) {
+	if (command(self, GSM_QUECTEL_CMD_IP_SEND, 2000) == GSM_QUECTEL_RET_OK) {
 		*written = len;
 		return TCPIP_RET_OK;
 	} else {
+		*written = 0;
 		return TCPIP_RET_FAILED;
 	}
 
@@ -777,7 +777,7 @@ static tcpip_ret_t gsm_quectel_tcpip_socket_receive(void *context, const uint8_t
 	self->data_to_receive_read = 0;
 	*read = 0;
 	while (1) {
-		if (command(self, GSM_QUECTEL_CMD_IP_RECV, 300) == GSM_QUECTEL_RET_OK) {
+		if (command(self, GSM_QUECTEL_CMD_IP_RECV, 1000) == GSM_QUECTEL_RET_OK) {
 			if (self->data_to_receive_read == 0) {
 				/* Wait on the semaphore until some data is ready. */
 				if (xSemaphoreTake(self->data_waiting, 100) == pdFALSE) {
