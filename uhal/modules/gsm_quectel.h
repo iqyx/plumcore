@@ -63,6 +63,8 @@ enum gsm_quectel_command {
 	GSM_QUECTEL_CMD_IP_RECV,
 	GSM_QUECTEL_CMD_IP_RECV_METHOD,
 	GSM_QUECTEL_CMD_IP_CLOSE,
+	GSM_QUECTEL_CMD_SET_CHARACTER_SET,
+	GSM_QUECTEL_CMD_SEND_USSD,
 
 };
 
@@ -145,6 +147,10 @@ typedef struct {
 	volatile bool tcpip_socket_used;
 	const char *tcpip_address;
 	uint16_t tcpip_remote_port;
+
+	const char *ussd_request_string;
+	char *ussd_response_string;
+	size_t ussd_response_size;
 
 	ICellular cellular;
 

@@ -47,6 +47,7 @@ struct interface_cellular_vmt {
 	cellular_ret_t (*imei)(void *context, char *imei);
 	cellular_ret_t (*status)(void *context, enum cellular_modem_status *status);
 	cellular_ret_t (*get_operator)(void *context, char *operator);
+	cellular_ret_t (*run_ussd)(void *context, const char *request, char *response, size_t response_size);
 
 	void *context;
 };
@@ -66,5 +67,6 @@ cellular_ret_t cellular_stop(ICellular *self);
 cellular_ret_t cellular_imei(ICellular *self, char *imei);
 cellular_ret_t cellular_status(ICellular *self, enum cellular_modem_status *status);
 cellular_ret_t cellular_get_operator(ICellular *self, char *operator);
+cellular_ret_t cellular_run_ussd(ICellular *self, const char *request, char *response, size_t response_size);
 
 

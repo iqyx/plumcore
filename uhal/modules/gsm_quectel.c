@@ -198,6 +198,9 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 		case GSM_QUECTEL_CMD_IP_CLOSE:
 			strcpy(command_str, "AT+QICLOSE");
 			break;
+		case GSM_QUECTEL_CMD_SET_CHARACTER_SET:
+			strcpy(command_str, "AT+CSCS=\"8859-1\"");
+			break;
 
 		case GSM_QUECTEL_CMD_IP_SEND:
 			if (self->data_to_send != NULL && self->data_to_send_len > 0) {
@@ -213,6 +216,10 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 
 		case GSM_QUECTEL_CMD_CONNECT:
 			snprintf(command_str, sizeof(command_str), "AT+QIOPEN=\"TCP\",\"%s\",%d", self->tcpip_address, self->tcpip_remote_port);
+			break;
+
+		case GSM_QUECTEL_CMD_SEND_USSD:
+			snprintf(command_str, sizeof(command_str), "AT+CUSD=1,\"%s\"", self->ussd_request_string);
 			break;
 
 
@@ -493,6 +500,14 @@ static void gsm_quectel_process_task(void *p) {
 				self->operator[sizeof(self->operator) - 1] = '\0';
 			} else {
 				strcpy(self->operator, "");
+			}
+			continue;
+		}
+
+
+		if (self->current_command == GSM_QUECTEL_CMD_SEND_USSD) {
+			if (!strncmp(buf, "+CUSD: ", 7)) {
+				snprintf(self->ussd_response_string, self->ussd_response_size, "%s", buf + 7);
 			}
 			continue;
 		}
@@ -873,6 +888,29 @@ static cellular_ret_t gsm_quectel_cellular_get_operator(void *context, char *ope
 }
 
 
+static cellular_ret_t gsm_quectel_cellular_run_ussd(void *context, const char *request, char *response, size_t response_size) {
+	if (u_assert(context != NULL) ||
+	    u_assert(request != NULL) ||
+	    u_assert(response != NULL)) {
+		return CELLULAR_RET_FAILED;
+	}
+	GsmQuectel *self = (GsmQuectel *)context;
+
+	if (command(self, GSM_QUECTEL_CMD_SET_CHARACTER_SET, 300) != GSM_QUECTEL_RET_OK) {
+		return CELLULAR_RET_FAILED;
+	}
+
+	self->ussd_request_string = request;
+	self->ussd_response_string = response;
+	self->ussd_response_size = response_size;
+	if (command(self, GSM_QUECTEL_CMD_SEND_USSD, 120000) != GSM_QUECTEL_RET_OK) {
+		return CELLULAR_RET_FAILED;
+	}
+
+	return CELLULAR_RET_OK;
+}
+
+
 gsm_quectel_ret_t gsm_quectel_init(GsmQuectel *self) {
 	if (u_assert(self != NULL)) {
 		return GSM_QUECTEL_RET_FAILED;
@@ -906,6 +944,7 @@ gsm_quectel_ret_t gsm_quectel_init(GsmQuectel *self) {
 	self->cellular.vmt.imei = gsm_quectel_cellular_imei;
 	self->cellular.vmt.status = gsm_quectel_cellular_status;
 	self->cellular.vmt.get_operator = gsm_quectel_cellular_get_operator;
+	self->cellular.vmt.run_ussd = gsm_quectel_cellular_run_ussd;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 
