@@ -108,3 +108,17 @@ cellular_ret_t cellular_get_operator(ICellular *self, char *operator) {
 	}
 	return CELLULAR_RET_FAILED;
 }
+
+
+cellular_ret_t cellular_run_ussd(ICellular *self, const char *request, char *response, size_t response_size) {
+	if (u_assert(self != NULL) ||
+	    u_assert(request != NULL) ||
+	    u_assert(response != NULL)) {
+		return CELLULAR_RET_FAILED;
+	}
+
+	if (self->vmt.run_ussd != NULL) {
+		return self->vmt.run_ussd(self->vmt.context, request, response, response_size);
+	}
+	return CELLULAR_RET_FAILED;
+}
