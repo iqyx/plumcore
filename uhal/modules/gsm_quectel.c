@@ -201,6 +201,20 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 		case GSM_QUECTEL_CMD_SET_CHARACTER_SET:
 			strcpy(command_str, "AT+CSCS=\"8859-1\"");
 			break;
+		case GSM_QUECTEL_CMD_SETUP_SMS_TEXT_MODE:
+			strcpy(command_str, "AT+CMGF=1");
+			break;
+		case GSM_QUECTEL_CMD_SETUP_SMS_NOTIFICATION:
+			/* Buffer URC and then flush + output full message as URC. */
+			strcpy(command_str, "AT+CNMI=2,2");
+			break;
+		case GSM_QUECTEL_CMD_READ_SMS:
+			strcpy(command_str, "AT+CMGR=1");
+			break;
+		case GSM_QUECTEL_CMD_DEL_ALL_SMS:
+			strcpy(command_str, "AT+CMGD=1,4");
+			break;
+
 
 		case GSM_QUECTEL_CMD_IP_SEND:
 			if (self->data_to_send != NULL && self->data_to_send_len > 0) {
@@ -234,7 +248,9 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 		return GSM_QUECTEL_RET_FAILED;
 	}
 
-	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("running command %s"), command_str);
+	if (self->debug_commands) {
+		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("running command %s"), command_str);
+	}
 
 	/* Only one command can be run at a time. */
 	xSemaphoreTake(self->command_lock, portMAX_DELAY);
@@ -274,7 +290,7 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 			r = GSM_QUECTEL_RET_OK;
 		} else {
 			r = GSM_QUECTEL_RET_FAILED;
-			// u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("command '%s' caused an error, CME error code = %u"), command_str, self->cme_error_code);
+			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("command '%s' caused an error, CME error code = %u"), command_str, self->cme_error_code);
 		}
 	}
 
@@ -315,7 +331,9 @@ static void gsm_quectel_process_task(void *p) {
 		read_line(self, buf, sizeof(buf) - 1, &len);
 		buf[len] = '\0';
 
-		// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("-> %s"), buf);
+		if (self->debug_responses) {
+			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("-> %s"), buf);
+		}
 
 		if (!strcmp(buf, "OK")) {
 
@@ -512,6 +530,11 @@ static void gsm_quectel_process_task(void *p) {
 		}
 
 
+		if (self->current_command == GSM_QUECTEL_CMD_SETUP_SMS_NOTIFICATION) {
+			continue;
+		}
+
+
 		if (self->current_command == GSM_QUECTEL_CMD_NONE) {
 			if (!strcmp(buf, "RING")) {
 				/* Incoming call. */
@@ -537,7 +560,20 @@ static void gsm_quectel_process_task(void *p) {
 				continue;
 			}
 
+			if (!strncmp(buf, "+CMT: ", 6)) {
+				read_line(self, buf, sizeof(buf) - 1, &len);
+				buf[len] = '\0';
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("incoming SMS: '%s'"), buf);
+				if (len == 5 && !memcmp(buf, "reset", 5)) {
+					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("reset requested by SMS"));
 
+					/* Wait until the watchdog resets the device. */
+					while (1) {
+						;
+					}
+				}
+				continue;
+			}
 
 			if (!strncmp(buf, "+", 1)) {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("URC: %s"), buf);
@@ -562,9 +598,6 @@ static void gsm_quectel_main_task(void *p) {
 		gsm_quectel_stop(self);
 	}
 
-	/** @todo wait for command completion */
-	//~ write_command(self, "AT+CREG=2");
-	//~ vTaskDelay(200);
 	command(self, GSM_QUECTEL_CMD_ENABLE_CREG_URC, 300);
 	command(self, GSM_QUECTEL_CMD_DISABLE_ECHO, 300);
 	command(self, GSM_QUECTEL_CMD_ENABLE_RFTXMON, 300);
@@ -584,9 +617,19 @@ static void gsm_quectel_main_task(void *p) {
 		/* Get status every 5 seconds. */
 		if ((cnt % 50) == 0) {
 			if (self->modem_status == GSM_QUECTEL_MODEM_STATUS_FULL) {
+				command(self, GSM_QUECTEL_CMD_SET_CHARACTER_SET, 300);
+				command(self, GSM_QUECTEL_CMD_SETUP_SMS_TEXT_MODE, 300);
+				command(self, GSM_QUECTEL_CMD_SETUP_SMS_NOTIFICATION, 300);
 				command(self, GSM_QUECTEL_CMD_GET_IMSI, 300);
 				command(self, GSM_QUECTEL_CMD_GET_IMEI, 300);
 				command(self, GSM_QUECTEL_CMD_GET_OPERATOR, 300);
+			}
+		}
+
+		/* Delete all SMS every 10 minutes. */
+		if ((cnt % 60) == 30) {
+			if (self->modem_status == GSM_QUECTEL_MODEM_STATUS_FULL) {
+				command(self, GSM_QUECTEL_CMD_DEL_ALL_SMS, 300);
 			}
 		}
 
@@ -945,6 +988,9 @@ gsm_quectel_ret_t gsm_quectel_init(GsmQuectel *self) {
 	self->cellular.vmt.status = gsm_quectel_cellular_status;
 	self->cellular.vmt.get_operator = gsm_quectel_cellular_get_operator;
 	self->cellular.vmt.run_ussd = gsm_quectel_cellular_run_ussd;
+
+	self->debug_commands = false;
+	self->debug_responses = false;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 
