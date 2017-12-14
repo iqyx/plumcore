@@ -35,25 +35,15 @@ typedef enum {
 } mqtt_sensor_upload_ret_t;
 
 
-struct mqtt_sensor_upload_sensor {
-	bool used;
-	uint32_t interval_ms;
-	uint32_t time_from_last_send_ms;
-	const char *name;
-	ISensor *sensor;
-	QueuePublish pub;
-};
-
 typedef struct {
 	Module module;
 
 	TaskHandle_t task;
 	Mqtt *mqtt;
-
-	struct mqtt_sensor_upload_sensor sensors[SENSOR_UPLOAD_MAX_SENSORS];
-
+	QueuePublish pub;
+	const char *topic_prefix;
+	uint32_t interval_ms;
 } MqttSensorUpload;
 
 
-mqtt_sensor_upload_ret_t mqtt_sensor_upload_init(MqttSensorUpload *self, Mqtt *mqtt);
-mqtt_sensor_upload_ret_t mqtt_sensor_upload_add_sensor(MqttSensorUpload *self, const char *name, ISensor *sensor, uint32_t interval_ms);
+mqtt_sensor_upload_ret_t mqtt_sensor_upload_init(MqttSensorUpload *self, Mqtt *mqtt, const char *topic_prefix, uint32_t interval_ms);

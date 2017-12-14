@@ -31,6 +31,7 @@
 
 #include "services/mqtt_tcpip.h"
 #include "interfaces/sensor.h"
+#include "port.h"
 
 #include "mqtt_sensor_upload.h"
 
@@ -45,40 +46,47 @@ static void sensor_upload_task(void *p) {
 
 	while (true) {
 
-		for (size_t i = 0; i < SENSOR_UPLOAD_MAX_SENSORS; i++) {
-			if (self->sensors[i].used) {
-				self->sensors[i].time_from_last_send_ms += 1000;
 
-				if (self->sensors[i].time_from_last_send_ms >= self->sensors[i].interval_ms) {
-					char line[32];
-					if (self->sensors[i].sensor) {
-						float value;
-						interface_sensor_value(self->sensors[i].sensor, &value);
-						snprintf(line, sizeof(line), "%ld", (int32_t)value);
-					}
-					queue_publish_send_message(&(self->sensors[i].pub), (uint8_t *)line, strlen(line));
+		Interface *interface;
+		for (size_t i = 0; (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_SENSOR, i, &interface)) != ISERVICELOCATOR_RET_FAILED; i++) {
+			ISensor *sensor = (ISensor *)interface;
+			ISensorInfo info = {0};
+			const char *name = "";
+			float value;
+			iservicelocator_get_name(locator, interface, &name);
+			interface_sensor_info(sensor, &info);
+			interface_sensor_value(sensor, &value);
 
-					self->sensors[i].time_from_last_send_ms = 0;
-				}
-			}
+			char topic[32] = {0};
+			snprintf(topic, sizeof(topic), "%s/%s", self->topic_prefix, name);
+
+			/** @todo this is meh. We are using only a single publish instance
+			 *        and the topic is changed for every sensor. */
+			self->pub.topic_name = topic;
+
+			char line[32];
+			snprintf(line, sizeof(line), "%ld", (int32_t)value);
+			queue_publish_send_message(&self->pub, (uint8_t *)line, strlen(line));
+			vTaskDelay(200);
+
 		}
-
-		vTaskDelay(1000);
+		vTaskDelay(self->interval_ms);
 
 	}
 	vTaskDelete(NULL);
 }
 
 
-mqtt_sensor_upload_ret_t mqtt_sensor_upload_init(MqttSensorUpload *self, Mqtt *mqtt) {
+mqtt_sensor_upload_ret_t mqtt_sensor_upload_init(MqttSensorUpload *self, Mqtt *mqtt, const char *topic_prefix, uint32_t interval_ms) {
 	if (u_assert(self != NULL) ||
 	    u_assert(mqtt != NULL)) {
 		return MQTT_SENSOR_UPLOAD_RET_FAILED;
 	}
 
 	memset(self, 0, sizeof(MqttSensorUpload));
-
 	self->mqtt = mqtt;
+	self->topic_prefix = topic_prefix;
+	self->interval_ms = interval_ms;
 
 	xTaskCreate(sensor_upload_task, "mqtt-upload", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
@@ -86,32 +94,11 @@ mqtt_sensor_upload_ret_t mqtt_sensor_upload_init(MqttSensorUpload *self, Mqtt *m
 		return MQTT_SENSOR_UPLOAD_RET_FAILED;
 	}
 
+	queue_publish_init(&self->pub, "init", 0);
+	mqtt_add_publish(self->mqtt, &self->pub);
+
 	return MQTT_SENSOR_UPLOAD_RET_OK;
 }
 
-
-mqtt_sensor_upload_ret_t mqtt_sensor_upload_add_sensor(MqttSensorUpload *self, const char *name, ISensor *sensor, uint32_t interval_ms) {
-	if (u_assert(self != NULL) ||
-	    u_assert(name != NULL) ||
-	    u_assert(sensor != NULL) ||
-	    u_assert(interval_ms > 0)) {
-		return MQTT_SENSOR_UPLOAD_RET_FAILED;
-	}
-
-	for (size_t i = 0; i < SENSOR_UPLOAD_MAX_SENSORS; i++) {
-		if (self->sensors[i].used == false) {
-			self->sensors[i].used = true;
-			queue_publish_init(&(self->sensors[i].pub), name, 0);
-			mqtt_add_publish(self->mqtt, &(self->sensors[i].pub));
-			self->sensors[i].interval_ms = interval_ms;
-			self->sensors[i].time_from_last_send_ms = 0;
-			self->sensors[i].sensor = sensor;
-
-			return MQTT_SENSOR_UPLOAD_RET_OK;
-		}
-	}
-
-	return MQTT_SENSOR_UPLOAD_RET_FAILED;
-}
 
 

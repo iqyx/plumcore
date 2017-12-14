@@ -36,6 +36,7 @@
 #include "uhal/interfaces/uxbdevice.h"
 #include "uhal/interfaces/uxbslot.h"
 #include "uhal/modules/uxb_can.h"
+#include "uhal/modules/solar_charger.h"
 
 #include "puxb_discovery.h"
 
@@ -69,20 +70,33 @@ static void process_slot_descriptor(
 	char *version
 ) {
 
+	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("trying to add slot %u with interface '%s'"), slot_number, interface);
+
+
 	if (!strcmp(interface, "sensor")) {
 		/** @todo process the version */
 		/** @todo initialize the uxb_sensor module */
-	} else if (!strcmp(interface, "can")) {
+	} else if (!strcmp(interface, "can-1.0.0")) {
 		IUxbSlot *slot = NULL;
 		vTaskDelay(10);
 		if (iuxbdevice_add_slot(self->device, &slot) == IUXBDEVICE_RET_OK) {
-			iuxbslot_set_slot_number(slot, 1);
-			/* Do not set slot buffer, the driver will set it automatically. */
-			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("add slot %d"), 1);
+			iuxbslot_set_slot_number(slot, slot_number);
 
 			UxbCan *uxb_can = calloc(1, sizeof(UxbCan));
 			if (uxb_can != NULL) {
 				uxb_can_init(uxb_can, slot);
+			}
+		}
+	} else if (!strcmp(interface, "solar-charger-1.0.0")) {
+		/** @todo use semver compare instead */
+		IUxbSlot *slot = NULL;
+		vTaskDelay(10);
+		if (iuxbdevice_add_slot(self->device, &slot) == IUXBDEVICE_RET_OK) {
+			iuxbslot_set_slot_number(slot, slot_number);
+
+			SolarCharger *charger = calloc(1, sizeof(SolarCharger));
+			if (charger != NULL) {
+				solar_charger_init(charger, slot);
 			}
 		}
 	} else {
@@ -100,9 +114,9 @@ static void parse_slot_descriptor(
 	char *version,
 	size_t version_size
 ) {
-
-	strcpy(interface, "can");
-
+	/** @todo implement, for now, slot number is the first char, interfce is the rest. */
+	*slot_number = value[0] - '0';
+	strlcpy(interface, &(value[2]), interface_size);
 }
 
 
@@ -116,9 +130,9 @@ static void read_device_descriptor(PUxbDiscoveryDevice *self) {
 			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("%s = %s"), key, value);
 			if (!strcmp(key, "slot")) {
 				uint8_t slot;
-				char interface[16];
+				char interface[32];
 				char version[32];
-				parse_slot_descriptor(self, value, &slot, interface, 16, version, 32);
+				parse_slot_descriptor(self, value, &slot, interface, 32, version, 32);
 				process_slot_descriptor(self, slot, interface, version);
 			}
 		}

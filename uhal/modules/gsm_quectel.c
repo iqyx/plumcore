@@ -627,7 +627,7 @@ static void gsm_quectel_main_task(void *p) {
 		}
 
 		/* Delete all SMS every 10 minutes. */
-		if ((cnt % 60) == 30) {
+		if ((cnt % 60000) == 30) {
 			if (self->modem_status == GSM_QUECTEL_MODEM_STATUS_FULL) {
 				command(self, GSM_QUECTEL_CMD_DEL_ALL_SMS, 300);
 			}

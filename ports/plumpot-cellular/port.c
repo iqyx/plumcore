@@ -96,6 +96,9 @@
 #include "services/data-process/data-process.h"
 #include "uhal/modules/puxb.h"
 #include "uhal/modules/puxb_discovery.h"
+#include "services/stream_over_mqtt.h"
+#include "services/cli/system_cli_tree.h"
+#include "services/mqtt_file_server.h"
 
 
 /**
@@ -129,6 +132,9 @@ SolarCharger solar_charger1;
 Watchdog watchdog;
 Mqtt mqtt;
 MqttSensorUpload mqtt_sensor;
+StreamOverMqtt mqtt_cli_stream;
+ServiceCli mqtt_cli;
+MqttFileServer mqtt_file_server;
 
 PLocator plocator;
 IServiceLocator *locator;
@@ -430,57 +436,12 @@ int32_t port_init(void) {
 		&i2c_test.lum.interface,
 		"meteo_lum"
 	);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_SENSOR,
-		&solar_charger1.board_temperature.interface,
-		"charger_board_temp"
-	);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_SENSOR,
-		&solar_charger1.battery_voltage.interface,
-		"charger_bat_voltage"
-	);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_SENSOR,
-		&solar_charger1.battery_current.interface,
-		"charger_bat_current"
-	);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_SENSOR,
-		&solar_charger1.battery_charge.interface,
-		"charger_bat_charge"
-	);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_SENSOR,
-		&solar_charger1.battery_temperature.interface,
-		"charger_bat_temp"
-	);
-
-	/** @todo generic service, move to the system init */
-/*
-	sensor_upload_init(&upload1, gsm_quectel_tcpip(&gsm1), "147.175.187.202", 6008);
-	sensor_upload_add_power_device(&upload1, "plumpot1_uxb", &(ubx_voltage.iface), 60000);
-	sensor_upload_add_power_device(&upload1, "plumpot1_vin", &(vin1.iface), 60000);
-	sensor_upload_add_sensor(&upload1, "plumpot1_temp", &(i2c_test.si7021_temp), 60000);
-	sensor_upload_add_sensor(&upload1, "plumpot1_rh", &(i2c_test.si7021_rh), 60000);
-	sensor_upload_add_sensor(&upload1, "plumpot1_lum", &(i2c_test.lum), 60000);
-
-	sensor_upload_add_sensor(&upload1, "charger_board_temp", &(solar_charger1.board_temperature), 60000);
-	sensor_upload_add_sensor(&upload1, "charger_bat_voltage", &(solar_charger1.battery_voltage), 60000);
-	sensor_upload_add_sensor(&upload1, "charger_bat_current", &(solar_charger1.battery_current), 60000);
-	sensor_upload_add_sensor(&upload1, "charger_bat_charge", &(solar_charger1.battery_charge), 5000);
-*/
 
 	/** @todo generic service, move tot he system init */
 	mqtt_init(&mqtt, gsm_quectel_tcpip(&gsm1));
 	mqtt_set_client_id(&mqtt, "plumpot2");
 	mqtt_set_ping_interval(&mqtt, 60000);
-	mqtt_connect(&mqtt, "mqtt.krtko.org", 1883);
+	mqtt_connect(&mqtt, "147.175.187.202", 1883);
 	/** @todo advertise the mqtt interface */
 
 	/* Initialize the UXB bus. */
@@ -528,24 +489,20 @@ int32_t port_init(void) {
 
 	puxb_discovery_init(&puxb_discovery, puxb_bus_interface(&puxb_bus));
 
-	// solar_charger_init(&solar_charger1, &uxb_iface1);
-
 	/** @todo the watchdog is port-dependent. Rename the module accordingly and keep it here. */
 	watchdog_init(&watchdog, 20000, 0);
 
 	/** @todo generic service move to the system init */
-	mqtt_sensor_upload_init(&mqtt_sensor, &mqtt);
-	mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx2/plumpot2_temp", &(i2c_test.si7021_temp), 15000);
-	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_rh", &(i2c_test.si7021_rh), 120000);
-	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/plumpot1_lum", &(i2c_test.lum), 120000);
-
-	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_board_temp", &(solar_charger1.board_temperature), 120000);
-	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_voltage", &(solar_charger1.battery_voltage), 120000);
-	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_current", &(solar_charger1.battery_current), 120000);
-	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_charge", &(solar_charger1.battery_charge), 120000);
-	// mqtt_sensor_upload_add_sensor(&mqtt_sensor, "qyx/charger_bat_temp", &(solar_charger1.battery_temperature), 120000);
+	mqtt_sensor_upload_init(&mqtt_sensor, &mqtt, "plumpot1/s", 120000);
 
 	dp_graph_init(&data_process_graph);
+
+	stream_over_mqtt_init(&mqtt_cli_stream, &mqtt, "plumpot1/cli", 0);
+	stream_over_mqtt_start(&mqtt_cli_stream);
+	service_cli_init(&mqtt_cli, &(mqtt_cli_stream.stream), system_cli_tree);
+	service_cli_start(&mqtt_cli);
+
+	mqtt_file_server_init(&mqtt_file_server, &mqtt, "plumpot1/file", &fs);
 
 	return PORT_INIT_OK;
 }

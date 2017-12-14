@@ -33,6 +33,7 @@
 #include "libuxb.h"
 #include "protocols/uxb/solar_charger_iface.pb.h"
 #include "pb_decode.h"
+#include "port.h"
 
 #include "solar_charger.h"
 
@@ -45,11 +46,18 @@
 
 static void read_values(SolarCharger *self) {
 	uint8_t tmp = 0;
-	libuxb_slot_send_data(&self->stat_slot, &tmp, 1, false);
-	vTaskDelay(20);
+	uint8_t buf[64];
+	size_t len = 0;
+
+	if (iuxbslot_send(self->stat_slot, &tmp, 1, false) != IUXBSLOT_RET_OK) {
+		return;
+	}
+	if (iuxbslot_receive(self->stat_slot, buf, 64, &len) != IUXBSLOT_RET_OK) {
+		return;
+	}
 
 	pb_istream_t stream;
-        stream = pb_istream_from_buffer(self->stat_slot.buffer, self->stat_slot.len);
+        stream = pb_istream_from_buffer(buf, len);
 	SolarChargerResponse msg;
 
 	if (pb_decode(&stream, SolarChargerResponse_fields, &msg)) {
@@ -77,7 +85,7 @@ static interface_sensor_ret_t board_temperature_mc_info(void *context, ISensorIn
 	info->quantity_name = "Temperature";
 	info->quantity_symbol = "t";
 	info->unit_name = "Degree Celsius";
-	info->unit_symbol = "°C";
+	info->unit_symbol = "m°C";
 
 	return INTERFACE_SENSOR_RET_OK;
 }
@@ -134,8 +142,8 @@ static interface_sensor_ret_t battery_current_ma_info(void *context, ISensorInfo
 
 	info->quantity_name = "Current";
 	info->quantity_symbol = "I";
-	info->unit_name = "milliAmps";
-	info->unit_symbol = "mA";
+	info->unit_name = "microAmps";
+	info->unit_symbol = "uA";
 
 	return INTERFACE_SENSOR_RET_OK;
 }
@@ -193,7 +201,7 @@ static interface_sensor_ret_t battery_temperature_mc_info(void *context, ISensor
 	info->quantity_name = "Temperature";
 	info->quantity_symbol = "t";
 	info->unit_name = "Degree Celsius";
-	info->unit_symbol = "°C";
+	info->unit_symbol = "m°C";
 
 	return INTERFACE_SENSOR_RET_OK;
 }
@@ -213,7 +221,7 @@ static interface_sensor_ret_t battery_temperature_mc_value(void *context, float 
 }
 
 
-solar_charger_ret_t solar_charger_init(SolarCharger *self, LibUxbDevice *uxb) {
+solar_charger_ret_t solar_charger_init(SolarCharger *self,  IUxbSlot *slot) {
 	if (u_assert(self != NULL)) {
 		return SOLAR_CHARGER_RET_FAILED;
 	}
@@ -221,37 +229,65 @@ solar_charger_ret_t solar_charger_init(SolarCharger *self, LibUxbDevice *uxb) {
 	memset(self, 0, sizeof(SolarCharger));
 	uhal_module_init(&self->module);
 
-	libuxb_slot_init(&self->stat_slot);
-	libuxb_slot_set_slot_number(&self->stat_slot, 5);
-	libuxb_slot_set_slot_buffer(&self->stat_slot, self->stat_slot_buffer, 64);
-	libuxb_device_add_slot(uxb, &self->stat_slot);
-	self->uxb = uxb;
+	iuxbslot_set_slot_buffer(slot, self->stat_slot_buffer, 64);
+	self->stat_slot = slot;
 
 	interface_sensor_init(&(self->board_temperature));
 	self->board_temperature.vmt.info = board_temperature_mc_info;
 	self->board_temperature.vmt.value = board_temperature_mc_value;
 	self->board_temperature.vmt.context = (void *)self;
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&self->board_temperature.interface,
+		"charger_board_temp"
+	);
 
 	interface_sensor_init(&(self->battery_voltage));
 	self->battery_voltage.vmt.info = battery_voltage_mv_info;
 	self->battery_voltage.vmt.value = battery_voltage_mv_value;
 	self->battery_voltage.vmt.context = (void *)self;
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&self->battery_voltage.interface,
+		"charger_bat_voltage"
+	);
 
 	interface_sensor_init(&(self->battery_current));
 	self->battery_current.vmt.info = battery_current_ma_info;
 	self->battery_current.vmt.value = battery_current_ma_value;
 	self->battery_current.vmt.context = (void *)self;
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&self->battery_current.interface,
+		"charger_bat_current"
+	);
 
 	interface_sensor_init(&(self->battery_charge));
 	self->battery_charge.vmt.info = battery_charge_mah_info;
 	self->battery_charge.vmt.value = battery_charge_mah_value;
 	self->battery_charge.vmt.context = (void *)self;
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&self->battery_charge.interface,
+		"charger_bat_charge"
+	);
 
 	interface_sensor_init(&(self->battery_temperature));
 	self->battery_temperature.vmt.info = battery_temperature_mc_info;
 	self->battery_temperature.vmt.value = battery_temperature_mc_value;
 	self->battery_temperature.vmt.context = (void *)self;
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_SENSOR,
+		&self->battery_temperature.interface,
+		"charger_bat_temp"
+	);
 
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("UXB solar charger driver initialized"));
 	return SOLAR_CHARGER_RET_OK;
 }
 
