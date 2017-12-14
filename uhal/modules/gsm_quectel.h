@@ -65,6 +65,10 @@ enum gsm_quectel_command {
 	GSM_QUECTEL_CMD_IP_CLOSE,
 	GSM_QUECTEL_CMD_SET_CHARACTER_SET,
 	GSM_QUECTEL_CMD_SEND_USSD,
+	GSM_QUECTEL_CMD_SETUP_SMS_TEXT_MODE,
+	GSM_QUECTEL_CMD_SETUP_SMS_NOTIFICATION,
+	GSM_QUECTEL_CMD_READ_SMS,
+	GSM_QUECTEL_CMD_DEL_ALL_SMS,
 
 };
 
@@ -153,6 +157,9 @@ typedef struct {
 	size_t ussd_response_size;
 
 	ICellular cellular;
+
+	bool debug_commands;
+	bool debug_responses;
 
 
 } GsmQuectel;

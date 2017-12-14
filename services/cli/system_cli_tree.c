@@ -58,6 +58,7 @@
 
 #include "service_data_process.h"
 #include "device_uxb.h"
+#include "system_bootloader.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -312,6 +313,53 @@ const struct treecli_node *system_cli_tree = Node {
 						},
 						End
 					},
+				},
+				Node {
+					Name "bootloader",
+					Subnodes {
+						Node {
+							Name "config",
+							Commands {
+								Command {
+									Name "load",
+									Exec system_bootloader_config_load,
+								},
+								Command {
+									Name "save",
+									Exec system_bootloader_config_save,
+								},
+								Command {
+									Name "print",
+									Exec system_bootloader_config_print,
+								},
+								End
+							},
+							Values {
+								Value {
+									Name "host",
+									.set = system_bootloader_config_host_set,
+									Type TREECLI_VALUE_STR,
+								},
+								Value {
+									Name "fw-working",
+									.set = system_bootloader_config_fw_working_set,
+									Type TREECLI_VALUE_STR,
+								},
+								Value {
+									Name "fw-request",
+									.set = system_bootloader_config_fw_request_set,
+									Type TREECLI_VALUE_STR,
+								},
+								Value {
+									Name "console-speed",
+									.set = system_bootloader_config_console_speed_set,
+									Type TREECLI_VALUE_UINT32,
+								},
+								End
+							},
+						},
+						End
+					}
 				},
 				End
 			},
