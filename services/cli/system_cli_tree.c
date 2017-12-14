@@ -365,6 +365,10 @@ const struct treecli_node *system_cli_tree = Node {
 			},
 			Commands {
 				Command {
+					Name "version",
+					Exec ucli_system_version,
+				},
+				Command {
 					Name "reboot",
 					Exec ucli_system_reboot,
 				},
