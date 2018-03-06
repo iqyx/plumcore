@@ -29,6 +29,8 @@
 #include "interfaces/sensor.h"
 #include "libuxb.h"
 
+#include "interfaces/hcan.h"
+
 
 typedef enum {
 	UXB_CAN_RET_OK = 0,
@@ -44,6 +46,8 @@ typedef struct {
 
 	TaskHandle_t receive_task;
 	bool receive_can_run;
+
+	HCan can_host;
 
 } UxbCan;
 
