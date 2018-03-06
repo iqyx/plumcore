@@ -59,6 +59,8 @@
 #include "service_data_process.h"
 #include "device_uxb.h"
 #include "system_bootloader.h"
+#include "device_can.h"
+#include "device_can_sensor.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -128,6 +130,37 @@ const struct treecli_node *system_cli_tree = Node {
 		Node {
 			Name "device",
 			Subnodes {
+				Node {
+					Name "driver",
+					Subnodes {
+						Node {
+							Name "can-sensor",
+							Commands {
+								Command {
+									Name "add",
+									Exec device_can_sensor_add,
+								},
+								Command {
+									Name "print",
+									Exec device_can_sensor_print,
+								},
+								Command {
+									Name "export",
+									Exec device_can_sensor_export,
+								},
+								End
+							},
+							DSubnodes {
+								DNode {
+									Name "can-sensorN",
+									.create = device_can_sensor_can_sensorN_create,
+								},
+								End
+							},
+						},
+						End
+					},
+				},
 				#if defined(INTERFACE_POWER)
 				Node {
 					Name "power",
@@ -175,6 +208,22 @@ const struct treecli_node *system_cli_tree = Node {
 						},
 						End
 					},
+				},
+				Node {
+					Name "can",
+					Commands {
+						Command {
+							Name "print",
+							Exec device_can_print,
+						},
+						End
+					},
+					DSubnodes {
+						DNode {
+							Name "canN",
+							.create = device_can_canN_create,
+						}
+					}
 				},
 				End
 			},
