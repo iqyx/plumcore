@@ -21,6 +21,8 @@ enums:
         - uxbbus
         - uxbdevice
         - uxbslot
+        - can
+        - can_sensor_driver
 
 methods:
     add:
@@ -65,3 +67,8 @@ methods:
           type: "Interface *"
         - name: result
           type: "const char **"
+    set_name:
+        - name: interface
+          type: "Interface *"
+        - name: name
+          type: "const char *"
