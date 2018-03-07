@@ -169,9 +169,6 @@ int32_t device_can_sensor_export(struct treecli_parser *parser, void *exec_conte
 		snprintf(line, sizeof(line), "name = %s ", name);
 		module_cli_output(line, cli);
 
-		snprintf(line, sizeof(line), "enabled = %s ", sensor->running ? "1" : "0");
-		module_cli_output(line, cli);
-
 		snprintf(line, sizeof(line), "id = %lu ", sensor->can_id);
 		module_cli_output(line, cli);
 
@@ -191,6 +188,11 @@ int32_t device_can_sensor_export(struct treecli_parser *parser, void *exec_conte
 		snprintf(line, sizeof(line), "unit-name = \"%s\" ", sensor->unit_name);
 		module_cli_output(line, cli);
 		snprintf(line, sizeof(line), "unit-symbol = \"%s\" ", sensor->unit_symbol);
+		module_cli_output(line, cli);
+
+		module_cli_output("\r\n", cli);
+
+		snprintf(line, sizeof(line), "enabled = %s ", sensor->running ? "1" : "0");
 		module_cli_output(line, cli);
 
 		module_cli_output("\r\n..\r\n", cli);
