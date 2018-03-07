@@ -61,6 +61,7 @@
 #include "system_bootloader.h"
 #include "device_can.h"
 #include "device_can_sensor.h"
+#include "config_export.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -129,9 +130,23 @@ const struct treecli_node *system_cli_tree = Node {
 		},
 		Node {
 			Name "device",
+			Commands {
+				Command {
+					Name "export",
+					Exec default_export,
+				},
+				End
+			},
 			Subnodes {
 				Node {
 					Name "driver",
+					Commands {
+						Command {
+							Name "export",
+							Exec default_export,
+						},
+						End
+					},
 					Subnodes {
 						Node {
 							Name "can-sensor",
@@ -427,6 +442,13 @@ const struct treecli_node *system_cli_tree = Node {
 				},
 				End
 			},
+		},
+		End
+	},
+	Commands {
+		Command {
+			Name "export",
+			Exec default_export,
 		},
 		End
 	}
