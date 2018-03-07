@@ -37,5 +37,7 @@
 
 
 int32_t default_export(struct treecli_parser *parser, void *exec_context);
+int32_t config_save(struct treecli_parser *parser, void *exec_context);
+int32_t config_load(struct treecli_parser *parser, void *exec_context);
 
 

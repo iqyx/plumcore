@@ -69,6 +69,11 @@ static void main_console_init(void) {
 
 	service_cli_init(console_cli, &(console_loginmgr->iface), system_cli_tree);
 	service_cli_start(console_cli);
+
+	/* Wait for the extension board discovery. */
+	vTaskDelay(4000);
+
+	service_cli_load_file(console_cli, "default.cfg");
 }
 
 

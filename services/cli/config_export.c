@@ -79,3 +79,24 @@ int32_t default_export(struct treecli_parser *parser, void *exec_context) {
 	return 0;
 }
 
+
+int32_t config_save(struct treecli_parser *parser, void *exec_context) {
+	(void)exec_context;
+	ServiceCli *cli = (ServiceCli *)parser->context;
+
+	service_cli_start_out_logging(cli, "default.cfg");
+	treecli_parser_parse_line(parser, "/ export");
+	service_cli_stop_out_logging(cli);
+
+	return 0;
+}
+
+
+int32_t config_load(struct treecli_parser *parser, void *exec_context) {
+	(void)exec_context;
+	ServiceCli *cli = (ServiceCli *)parser->context;
+
+	service_cli_load_file(cli, "default.cfg");
+
+	return 0;
+}

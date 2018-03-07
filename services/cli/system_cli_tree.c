@@ -419,11 +419,30 @@ const struct treecli_node *system_cli_tree = Node {
 									.set = system_bootloader_config_console_speed_set,
 									Type TREECLI_VALUE_UINT32,
 								},
+								Value {
+									Name "console-speed",
+									.set = system_bootloader_config_console_speed_set,
+									Type TREECLI_VALUE_UINT32,
+								},
 								End
 							},
 						},
 						End
 					}
+				},
+				Node {
+					Name "config",
+					Commands {
+						Command {
+							Name "save",
+							Exec config_save,
+						},
+						Command {
+							Name "load",
+							Exec config_load,
+						},
+						End
+					},
 				},
 				End
 			},

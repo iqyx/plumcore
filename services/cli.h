@@ -27,6 +27,9 @@
 #include "interface_stream.h"
 #include "treecli_shell.h"
 
+#include "port.h"
+#include "sffs.h"
+
 
 typedef enum {
 	SERVICE_CLI_RET_OK = 0,
@@ -37,6 +40,8 @@ typedef enum {
 typedef struct {
 	struct interface_stream *stream;
 	struct treecli_shell sh;
+	struct sffs_file log_file;
+	bool log_file_opened;
 } ServiceCli;
 
 extern const struct treecli_node *ucli;
@@ -47,4 +52,7 @@ service_cli_ret_t service_cli_init(ServiceCli *self, struct interface_stream *st
 service_cli_ret_t service_cli_start(ServiceCli *self);
 service_cli_ret_t service_cli_stop(ServiceCli *self);
 service_cli_ret_t service_cli_free(ServiceCli *self);
+service_cli_ret_t service_cli_start_out_logging(ServiceCli *self, const char *filename);
+service_cli_ret_t service_cli_stop_out_logging(ServiceCli *self);
+service_cli_ret_t service_cli_load_file(ServiceCli *self, const char *filename);
 
