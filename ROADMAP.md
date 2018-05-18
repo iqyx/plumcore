@@ -1,6 +1,10 @@
 # Status of the project
 
-Current **development version is 0.5.0** (develop branch). Current **stable version is 0.4.0** (2017-05-31). History of older versions (the uMeshFw project) is truncated.
+Current **development version is 0.5.0** (develop branch).
+
+Current **stable version is 0.4.0** (2017-05-31).
+
+History of older versions (the uMeshFw project) is truncated.
 
 
 # Features and bug fixes to be included in the current development version
@@ -16,8 +20,10 @@ Current **development version is 0.5.0** (develop branch). Current **stable vers
   CLI service's code into multiple submodules.
 - DataProcess tcp-client node
 - DataProcess text-serialize node
-
-
+- CAN interface
+- UXB CAN driver
+- configuration exporting, saving and loading
+- fix of the /system/bootloader menu
 
 
 # Features and bug fixes to be included in future versions
