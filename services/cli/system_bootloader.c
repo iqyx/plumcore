@@ -186,6 +186,17 @@ int32_t system_bootloader_config_fw_request_set(struct treecli_parser *parser, v
 }
 
 
+int32_t system_bootloader_config_console_enabled_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
+	(void)ctx;
+	(void)value;
+	(void)parser;
+	(void)len;
+
+	ubload_current_config.serial_enabled = *(bool *)buf;
+	return 0;
+}
+
+
 int32_t system_bootloader_config_console_speed_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
 	(void)ctx;
 	(void)value;
