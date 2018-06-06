@@ -81,6 +81,7 @@ int32_t system_bootloader_config_save(struct treecli_parser *parser, void *exec_
 int32_t system_bootloader_config_host_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
 int32_t system_bootloader_config_fw_working_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
 int32_t system_bootloader_config_fw_request_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
+int32_t system_bootloader_config_console_enabled_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
 int32_t system_bootloader_config_console_speed_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
 
 

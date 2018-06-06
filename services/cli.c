@@ -35,11 +35,18 @@
 
 #include "system_cli_tree.h"
 
+/* For output logging. */
+#include "port.h"
+#include "sffs.h"
+
 
 int32_t module_cli_output(const char *s, void *ctx) {
 	ServiceCli *cli = (ServiceCli *)ctx;
 
 	interface_stream_write(cli->stream, (const uint8_t *)s, strlen(s));
+	if (cli->log_file_opened) {
+		sffs_write(&cli->log_file, s, strlen(s));
+	}
 	return 0;
 }
 
@@ -85,7 +92,7 @@ service_cli_ret_t service_cli_start(ServiceCli *self) {
 		return SERVICE_CLI_RET_FAILED;
 	}
 
-	xTaskCreate(cli_task, "service-cli", configMINIMAL_STACK_SIZE + 384, (void *)self, 1, NULL);
+	xTaskCreate(cli_task, "service-cli", configMINIMAL_STACK_SIZE + 768, (void *)self, 1, NULL);
 
 	return SERVICE_CLI_RET_OK;
 }
@@ -100,6 +107,62 @@ service_cli_ret_t service_cli_stop(ServiceCli *self) {
 
 service_cli_ret_t service_cli_free(ServiceCli *self) {
 	/** @todo */
+
+	return SERVICE_CLI_RET_OK;
+}
+
+
+service_cli_ret_t service_cli_start_out_logging(ServiceCli *self, const char *filename) {
+	if (u_assert(self != NULL) ||
+	    u_assert(filename != NULL)) {
+		return SERVICE_CLI_RET_FAILED;
+	}
+
+	if (sffs_open(&fs, &self->log_file, filename, SFFS_OVERWRITE) != SFFS_OPEN_OK) {
+		return SERVICE_CLI_RET_FAILED;
+	}
+	self->log_file_opened = true;
+
+	return SERVICE_CLI_RET_OK;
+}
+
+
+service_cli_ret_t service_cli_stop_out_logging(ServiceCli *self) {
+	if (u_assert(self != NULL)) {
+		return SERVICE_CLI_RET_FAILED;
+	}
+
+	self->log_file_opened = false;
+	sffs_close(&self->log_file);
+
+	return SERVICE_CLI_RET_OK;
+}
+
+
+service_cli_ret_t service_cli_load_file(ServiceCli *self, const char *filename) {
+	if (u_assert(self != NULL)) {
+		return SERVICE_CLI_RET_FAILED;
+	}
+
+	struct sffs_file f;
+	if (sffs_open(&fs, &f, filename, SFFS_READ) != SFFS_OPEN_OK) {
+		return 1;
+	}
+
+	while (1) {
+		uint8_t buf[256];
+		size_t read = sffs_read(&f, buf, sizeof(buf));
+		if (read == 0) {
+			break;
+		}
+		for (size_t i = 0; i < read; i++) {
+			treecli_shell_keypress(&self->sh, buf[i]);
+		}
+	}
+	sffs_close(&f);
+	treecli_shell_keypress(&self->sh, '/');
+	treecli_shell_keypress(&self->sh, '\n');
+
 
 	return SERVICE_CLI_RET_OK;
 }

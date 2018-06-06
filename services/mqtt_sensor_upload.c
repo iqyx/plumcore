@@ -65,7 +65,8 @@ static void sensor_upload_task(void *p) {
 			self->pub.topic_name = topic;
 
 			char line[32];
-			snprintf(line, sizeof(line), "%ld", (int32_t)value);
+			snprintf(line, sizeof(line), "%ld.%03u", (int32_t)value, abs(value * 1000) % 1000);
+
 			queue_publish_send_message(&self->pub, (uint8_t *)line, strlen(line));
 			vTaskDelay(200);
 

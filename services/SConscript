@@ -16,7 +16,10 @@ objs = env.Object(source = [
 	File(Glob("cli/system_cli_tree.c")),
 	File(Glob("cli/service_data_process.c")),
 	File(Glob("cli/device_uxb.c")),
+	File(Glob("cli/device_can.c")),
+	File(Glob("cli/device_can_sensor.c")),
 	File(Glob("cli/system_bootloader.c")),
+	File(Glob("cli/config_export.c")),
 ])
 
 env.Append(CPPPATH = [

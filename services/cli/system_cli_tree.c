@@ -59,6 +59,9 @@
 #include "service_data_process.h"
 #include "device_uxb.h"
 #include "system_bootloader.h"
+#include "device_can.h"
+#include "device_can_sensor.h"
+#include "config_export.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -127,7 +130,52 @@ const struct treecli_node *system_cli_tree = Node {
 		},
 		Node {
 			Name "device",
+			Commands {
+				Command {
+					Name "export",
+					Exec default_export,
+				},
+				End
+			},
 			Subnodes {
+				Node {
+					Name "driver",
+					Commands {
+						Command {
+							Name "export",
+							Exec default_export,
+						},
+						End
+					},
+					Subnodes {
+						Node {
+							Name "can-sensor",
+							Commands {
+								Command {
+									Name "add",
+									Exec device_can_sensor_add,
+								},
+								Command {
+									Name "print",
+									Exec device_can_sensor_print,
+								},
+								Command {
+									Name "export",
+									Exec device_can_sensor_export,
+								},
+								End
+							},
+							DSubnodes {
+								DNode {
+									Name "can-sensorN",
+									.create = device_can_sensor_can_sensorN_create,
+								},
+								End
+							},
+						},
+						End
+					},
+				},
 				#if defined(INTERFACE_POWER)
 				Node {
 					Name "power",
@@ -175,6 +223,22 @@ const struct treecli_node *system_cli_tree = Node {
 						},
 						End
 					},
+				},
+				Node {
+					Name "can",
+					Commands {
+						Command {
+							Name "print",
+							Exec device_can_print,
+						},
+						End
+					},
+					DSubnodes {
+						DNode {
+							Name "canN",
+							.create = device_can_canN_create,
+						}
+					}
 				},
 				End
 			},
@@ -351,6 +415,11 @@ const struct treecli_node *system_cli_tree = Node {
 									Type TREECLI_VALUE_STR,
 								},
 								Value {
+									Name "console-enabled",
+									.set = system_bootloader_config_console_enabled_set,
+									Type TREECLI_VALUE_BOOL,
+								},
+								Value {
 									Name "console-speed",
 									.set = system_bootloader_config_console_speed_set,
 									Type TREECLI_VALUE_UINT32,
@@ -360,6 +429,20 @@ const struct treecli_node *system_cli_tree = Node {
 						},
 						End
 					}
+				},
+				Node {
+					Name "config",
+					Commands {
+						Command {
+							Name "save",
+							Exec config_save,
+						},
+						Command {
+							Name "load",
+							Exec config_load,
+						},
+						End
+					},
 				},
 				End
 			},
@@ -378,6 +461,13 @@ const struct treecli_node *system_cli_tree = Node {
 				},
 				End
 			},
+		},
+		End
+	},
+	Commands {
+		Command {
+			Name "export",
+			Exec default_export,
 		},
 		End
 	}

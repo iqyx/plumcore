@@ -166,6 +166,26 @@ static iservicelocator_ret_t plocator_get_name(
 }
 
 
+static iservicelocator_ret_t plocator_set_name(
+	void *context,
+	Interface * interface,
+	const char * name
+) {
+	PLocator *self = (PLocator *)context;
+
+	struct plocator_item *item = self->first;
+	while (item != NULL) {
+		if (item->interface == interface) {
+			item->name = name;
+			return ISERVICELOCATOR_RET_OK;
+		}
+		item = item->next;
+	}
+
+	return ISERVICELOCATOR_RET_FAILED;
+}
+
+
 plocator_ret_t plocator_init(PLocator *self) {
 	if (u_assert(self != NULL)) {
 		return PLOCATOR_RET_FAILED;
@@ -182,6 +202,7 @@ plocator_ret_t plocator_init(PLocator *self) {
 	self->iface.vmt.query_type_id = plocator_query_type_id;
 	self->iface.vmt.query_type_next = plocator_query_type_next;
 	self->iface.vmt.get_name = plocator_get_name;
+	self->iface.vmt.set_name = plocator_set_name;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("service initialized"));
 	return PLOCATOR_RET_OK;

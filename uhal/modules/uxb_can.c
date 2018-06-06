@@ -33,8 +33,12 @@
 #include "pb_decode.h"
 #include "pb_encode.h"
 #include "uhal/interfaces/uxbslot.h"
+#include "port.h"
 
 #include "uxb_can.h"
+#include "interfaces/hcan.h"
+#include "interfaces/ccan.h"
+#include "interfaces/can.h"
 
 #ifdef MODULE_NAME
 #undef MODULE_NAME
@@ -42,10 +46,7 @@
 #define MODULE_NAME "uxb_can"
 
 
-
-
-
-static void process_message(uint8_t *buf, size_t len) {
+static void process_message(UxbCan *self, uint8_t *buf, size_t len) {
 
 	CanResponse msg = CanResponse_init_zero;
 	pb_istream_t istream;
@@ -54,8 +55,7 @@ static void process_message(uint8_t *buf, size_t len) {
 	if (pb_decode(&istream, CanResponse_fields, &msg)) {
 		if (msg.which_content == CanResponse_received_message_tag) {
 			for (size_t i = 0; i < msg.content.received_message.message_count; i++) {
-				u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("received id=%d len=%d"), msg.content.received_message.message[i].id, msg.content.received_message.message[i].data.size);
-
+				hcan_received(&self->can_host, msg.content.received_message.message[i].data.bytes, msg.content.received_message.message[i].data.size, msg.content.received_message.message[i].id);
 			}
 		}
 	}
@@ -96,7 +96,7 @@ static void receive_task(void *p) {
 			continue;
 		}
 
-		process_message(buf, len);
+		process_message(self, buf, len);
 	}
 
 	vTaskDelete(NULL);
@@ -114,6 +114,23 @@ uxb_can_ret_t uxb_can_init(UxbCan *self, IUxbSlot *slot) {
 
 	/* The slot is initialized, number is set. */
 	iuxbslot_set_slot_buffer(self->slot, self->slot_buffer, 64);
+
+	/* Initialize CAN interface descriptor from the heap and advertise
+	 * it using the service locator service. */
+	ICan *ican = malloc(sizeof(ICan));
+	if (ican == NULL) {
+		return UXB_CAN_RET_FAILED;
+	}
+	ican_init(ican);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_CAN,
+		&ican->interface,
+		"uxb_can"
+	);
+
+	hcan_init(&self->can_host);
+	hcan_connect(&self->can_host, ican);
 
 	self->receive_can_run = true;
 	xTaskCreate(receive_task, "uxb-can-recv", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->receive_task));
