@@ -1,0 +1,86 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+
+enum SampleFormat {
+	UINT16 = 0;
+	UINT32 = 1;
+}
+
+enum Result {
+	OK = 0;
+	FAILED = 1;
+	WRONG_STREAM_ID = 2;
+	UNSUPPORTED_CHANNELS = 3;
+	UNSUPPORTED_FREQUENCY = 4;
+	BUFFER_FULL = 5;
+	BUFFER_EMPTY = 6;
+}
+
+/* All buffer statistics are in samples. Each sample contains
+   multiple channels and each channel contains multiple bytes
+   (depends on the data type). */
+message BufferStats {
+	required uint32 size = 1;
+	required uint32 occupied = 2;
+	required uint32 free = 3;
+}
+
+message WaveformRequest {
+	oneof content {
+		StartRecording start_recording = 1;
+		StopRecording stop_recording = 2;
+		GetData get_data = 3;
+		Trigger trigger = 4;
+	}
+}
+
+message WaveformResponse {
+	required Result result = 1;
+	required BufferStats buffer_stats = 2;
+	oneof content {
+		StartRecordingResponse start_recording_response = 3;
+		StopRecordingResponse stop_recording_response = 4;
+		GetDataResponse get_data_response = 5;
+		TriggerResponse trigger_response = 6;
+	}
+}
+
+
+message StartRecording {
+	required SampleFormat sample_format = 1;
+	required uint32 frequency = 2;
+	required uint32 channels = 3;
+	optional bool trigger_only = 4;
+
+}
+
+message StartRecordingResponse {
+
+}
+
+message StopRecording {
+
+}
+
+message StopRecordingResponse {
+
+}
+
+message GetData {
+	optional uint32 samples = 1;
+}
+
+message GetDataResponse {
+	optional bytes data = 1 [(nanopb).max_size = 128];
+	optional bool new_frame = 2;
+	optional bool finish_frame = 3;
+}
+
+message Trigger {
+
+}
+
+message TriggerResponse {
+
+}
