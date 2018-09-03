@@ -37,6 +37,8 @@
 #include "uhal/interfaces/uxbslot.h"
 #include "uhal/modules/uxb_can.h"
 #include "uhal/modules/solar_charger.h"
+#include "uhal/modules/waveform_source.h"
+#include "uhal/modules/ldet.h"
 
 #include "puxb_discovery.h"
 
@@ -97,6 +99,28 @@ static void process_slot_descriptor(
 			SolarCharger *charger = calloc(1, sizeof(SolarCharger));
 			if (charger != NULL) {
 				solar_charger_init(charger, slot);
+			}
+		}
+	} else if (!strcmp(interface, "waveform-source-1.0.0")) {
+		IUxbSlot *slot = NULL;
+		vTaskDelay(10);
+		if (iuxbdevice_add_slot(self->device, &slot) == IUXBDEVICE_RET_OK) {
+			iuxbslot_set_slot_number(slot, slot_number);
+
+			UxbWaveformSource *source = calloc(1, sizeof(UxbWaveformSource));
+			if (source != NULL) {
+				uxb_waveform_source_init(source, slot);
+			}
+		}
+	} else if (!strcmp(interface, "ldet-1.0.0")) {
+		IUxbSlot *slot = NULL;
+		vTaskDelay(10);
+		if (iuxbdevice_add_slot(self->device, &slot) == IUXBDEVICE_RET_OK) {
+			iuxbslot_set_slot_number(slot, slot_number);
+
+			UxbLdet *ldet = calloc(1, sizeof(UxbLdet));
+			if (ldet != NULL) {
+				uxb_ldet_init(ldet, slot);
 			}
 		}
 	} else {

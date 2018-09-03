@@ -1,0 +1,36 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+
+message LdetRequest {
+	oneof content {
+		LdetGetStats get_stats = 1;
+		LdetTrigger trigger = 2;
+	}
+}
+
+message LdetResponse {
+	oneof content {
+		LdetGetStatsResponse get_stats_response = 1;
+		LdetTriggerResponse trigger_response = 2;
+	}
+}
+
+
+message LdetGetStats {
+
+}
+
+message LdetGetStatsResponse {
+	optional uint32 signals_total = 1;
+	optional sint32 ema_level_rms = 2;
+	optional sint32 ema_level_peak = 3;
+}
+
+message LdetTrigger {
+
+}
+
+message LdetTriggerResponse {
+
+}
