@@ -80,10 +80,6 @@ plog_ret_t plog_close(Plog *self) {
 		return PLOG_RET_NOT_OPENED;
 	}
 
-	/* Clear reference to the interface descriptor. The instance is no longer
-	 * correctly connected to the descriptor. */
-	self->iplog = NULL;
-
 	/* Remove this client from the linked list. */
 	Plog *i = self->iplog->first_client;
 	if (i == self) {
@@ -105,6 +101,9 @@ plog_ret_t plog_close(Plog *self) {
 		vQueueDelete(self->processed);
 	}
 
+	/* Clear reference to the interface descriptor. The instance is no longer
+	 * correctly connected to the descriptor. */
+	self->iplog = NULL;
 
 	return PLOG_RET_FAILED;
 }
@@ -201,8 +200,20 @@ plog_ret_t plog_publish_uint32(Plog *self, const char *topic, const uint32_t v) 
 
 
 plog_ret_t plog_publish_float(Plog *self, const char *topic, const float v) {
+	if (self == NULL) {
+		return PLOG_RET_NULL;
+	}
+	if (self->iplog == NULL) {
+		return PLOG_RET_NOT_OPENED;
+	}
 
+	IPlogMessage m;
+	memset(&m, 0, sizeof(IPlogMessage));
+	m.type = IPLOG_MESSAGE_TYPE_FLOAT;
+	m.topic = topic;
+	m.content.cfloat = v;
 
+	return plog_publish(self, &m);
 }
 
 
@@ -222,7 +233,7 @@ plog_ret_t plog_subscribe(Plog *self, const char *topic) {
 }
 
 
-plog_ret_t plog_receive(Plog *self) {
+plog_ret_t plog_receive(Plog *self, uint32_t timeout) {
 	if (self == NULL) {
 		return PLOG_RET_NULL;
 	}
@@ -232,8 +243,8 @@ plog_ret_t plog_receive(Plog *self) {
 
 	/* Wait for a message to arrive. */
 	IPlogMessage *msg = NULL;
-	if (xQueueReceive(self->txqueue, (void *)&msg, portMAX_DELAY) != pdTRUE) {
-		return PLOG_RET_FAILED;
+	if (xQueueReceive(self->txqueue, (void *)&msg, timeout) != pdTRUE) {
+		return PLOG_RET_EMPTY;
 	}
 
 	/* If the message is received properly, check if there is a reception

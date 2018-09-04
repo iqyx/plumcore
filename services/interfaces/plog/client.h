@@ -110,7 +110,7 @@ plog_ret_t plog_publish_float(Plog *self, const char *topic, const float v);
 
 plog_ret_t plog_subscribe(Plog *self, const char *topic);
 
-plog_ret_t plog_receive(Plog *self);
+plog_ret_t plog_receive(Plog *self, uint32_t timeout);
 
 plog_ret_t plog_set_recv_handler(Plog *self, plog_ret_t (*recv_handler)(void *context, const IPlogMessage *msg),
                                  void *recv_handler_context);
