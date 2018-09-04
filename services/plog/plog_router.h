@@ -49,6 +49,7 @@ typedef struct {
 	IPlog iplog;
 	volatile bool can_run;
 	volatile bool running;
+	bool debug;
 
 } PlogRouter;
 

@@ -50,6 +50,7 @@
  * @todo doc
  * @todo coding style
  * @todo debug logging
+*/
 
 /* MQTT style topic matching.
  *
@@ -122,13 +123,15 @@ static plog_router_ret_t plog_router_process(PlogRouter *self, IPlogMessage *msg
 	Plog *p = self->iplog.first_client;
 	while (p != NULL) {
 		if (plog_router_match_topic(p->topic_filter, msg->topic)) {
-			u_log(
-				system_log,
-				LOG_TYPE_DEBUG,
-				U_LOG_MODULE_PREFIX("message '%s' delivered to a client, filter = %s"),
-				msg->topic,
-				p->topic_filter
-			);
+			if (self->debug) {
+				u_log(
+					system_log,
+					LOG_TYPE_DEBUG,
+					U_LOG_MODULE_PREFIX("message '%s' delivered to a client, filter = %s"),
+					msg->topic,
+					p->topic_filter
+				);
+			}
 
 			if (xQueueSend(p->txqueue, &msg, portMAX_DELAY) != pdTRUE) {
 				return PLOG_RET_FAILED;
@@ -137,12 +140,14 @@ static plog_router_ret_t plog_router_process(PlogRouter *self, IPlogMessage *msg
 			/* Wait for the message to be processed. */
 			uint8_t tmp = 0;
 			if (xQueueReceive(p->processed, &tmp, 100) != pdTRUE) {
-				u_log(
-					system_log,
-					LOG_TYPE_DEBUG,
-					U_LOG_MODULE_PREFIX("message '%s' was not processed in time"),
-					msg->topic
-				);
+				if (self->debug) {
+					u_log(
+						system_log,
+						LOG_TYPE_DEBUG,
+						U_LOG_MODULE_PREFIX("message '%s' was not processed in time"),
+						msg->topic
+					);
+				}
 				return PLOG_RET_FAILED;
 			}
 			(void)tmp;
