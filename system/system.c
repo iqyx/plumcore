@@ -36,12 +36,16 @@
 #include "module_loginmgr.h"
 #include "services/cli.h"
 #include "services/cli/system_cli_tree.h"
-
+#include "services/plog/plog_router.h"
+#include "services/plog_sensor_upload.h"
+#include "interfaces/plog/descriptor.h"
+#include "interfaces/plog/client.h"
 
 #ifdef MODULE_NAME
 #undef MODULE_NAME
 #endif
 #define MODULE_NAME "system"
+
 
 
 /**
@@ -77,6 +81,34 @@ static void main_console_init(void) {
 }
 
 
+/**
+ * Initialize and run the system-wide message router. It is used for system logging purposes and
+ * to deliver measured data to an appropriate sink (memory, network, etc.)
+ */
+PlogRouter plog_router;
+static void system_plog_router_init(void) {
+	plog_router_init(&plog_router);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_PLOG_ROUTER,
+		(Interface *)&plog_router.iplog.interface,
+		"plog-router"
+	);
+}
+
+
+/**
+ * Plog sensor upload is a service which periodically searches for all connected sensors,
+ * reads their values and publishes them to the plog message router.
+ */
+PlogSensorUpload plog_sensor_upload;
+static void system_plog_sensor_upload_init(void) {
+	plog_sensor_upload_init(&plog_sensor_upload, 1000);
+}
+
+
 void system_init(void) {
 	main_console_init();
+	system_plog_router_init();
+	system_plog_sensor_upload_init();
 }
