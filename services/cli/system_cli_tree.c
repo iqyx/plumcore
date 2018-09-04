@@ -57,6 +57,7 @@
 #include "device_cellular.c"
 
 #include "service_data_process.h"
+#include "service_plog_router.h"
 #include "device_uxb.h"
 #include "system_bootloader.h"
 #include "device_can.h"
@@ -246,6 +247,16 @@ const struct treecli_node *system_cli_tree = Node {
 		Node {
 			Name "service",
 			Subnodes {
+				Node {
+					Name "plog-router",
+					Commands {
+						Command {
+							Name "sniff",
+							Exec service_plog_router_sniff,
+						},
+						End
+					}
+				},
 				Node {
 					Name "data-process",
 					Commands {
