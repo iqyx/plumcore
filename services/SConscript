@@ -12,9 +12,12 @@ env.Command(
 objs = env.Object(source = [
 	File(Glob("*.c")),
 	File(Glob("interfaces/*.c")),
+	File(Glob("interfaces/plog/*.c")),
+	File(Glob("plog/*.c")),
 	File(Glob("data-process/*.c")),
 	File(Glob("cli/system_cli_tree.c")),
 	File(Glob("cli/service_data_process.c")),
+	File(Glob("cli/service_plog_router.c")),
 	File(Glob("cli/device_uxb.c")),
 	File(Glob("cli/device_can.c")),
 	File(Glob("cli/device_can_sensor.c")),

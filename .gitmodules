@@ -13,3 +13,6 @@
 [submodule "lib/other/wolfmqtt"]
 	path = lib/other/wolfmqtt
 	url = https://github.com/wolfSSL/wolfMQTT.git
+[submodule "lib/other/heatshrink"]
+	path = lib/other/heatshrink
+	url = https://github.com/atomicobject/heatshrink

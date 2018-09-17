@@ -23,6 +23,7 @@ enums:
         - uxbslot
         - can
         - can_sensor_driver
+        - plog_router
 
 methods:
     add:
