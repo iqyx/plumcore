@@ -125,8 +125,9 @@ static plog_packager_ret_t package_append_compress_data(struct plog_packager_pac
 	}
 
 	while (len) {
+		/* "discards 'const' qualifier" warning as heatshrink encoder has a non-const buffer input. */
 		size_t sink_size;
-		HSD_sink_res sres = heatshrink_encoder_sink(self->parent->hs_encoder, buf, len, &sink_size);
+		HSE_sink_res sres = heatshrink_encoder_sink(self->parent->hs_encoder, buf, len, &sink_size);
 		if (sres < 0) {
 			return PLOG_PACKAGER_RET_FAILED;
 		}
@@ -262,7 +263,7 @@ static plog_packager_ret_t package_compress_finish(struct plog_packager_package 
 		return PLOG_PACKAGER_RET_NULL;
 	}
 
-	HSD_finish_res fres = 0;
+	HSE_finish_res fres = 0;
 	while (true) {
 		fres = heatshrink_encoder_finish(self->parent->hs_encoder);
 		if (fres == HSER_FINISH_MORE) {
@@ -283,7 +284,28 @@ static plog_packager_ret_t package_add_package_header(struct plog_packager_packa
 		return PLOG_PACKAGER_RET_NULL;
 	}
 
-	return package_prepend_raw_data(self, PLOG_PACKAGER_PACKAGE_HEADER, 4);
+	/* Prepend the package index. */
+	uint8_t tmp[4] = {
+		0,
+		0,
+		self->index / 256,
+		self->index % 256
+	};
+	if (package_prepend_raw_data(self, tmp, sizeof(tmp)) != PLOG_PACKAGER_RET_OK) {
+		return PLOG_PACKAGER_RET_FAILED;
+	}
+
+	/* Nonce of the packager process. */
+	if (package_prepend_raw_data(self, self->parent->nonce, PLOG_PACKAGER_NONCE_SIZE) != PLOG_PACKAGER_RET_OK) {
+		return PLOG_PACKAGER_RET_FAILED;
+	}
+
+	/* And finally the package header. It is the first one in the serialized stream. */
+	if (package_prepend_raw_data(self, PLOG_PACKAGER_PACKAGE_HEADER, 4) != PLOG_PACKAGER_RET_OK) {
+		return PLOG_PACKAGER_RET_FAILED;
+	}
+
+	return PLOG_PACKAGER_RET_OK;
 }
 
 
@@ -293,22 +315,6 @@ static plog_packager_ret_t package_add_package_trailer(struct plog_packager_pack
 	}
 
 	return package_append_raw_data(self, PLOG_PACKAGER_PACKAGE_TRAILER, 4);
-}
-
-
-static plog_packager_ret_t package_add_nonce_header(struct plog_packager_package *self) {
-	if (self == NULL) {
-		return PLOG_PACKAGER_RET_NULL;
-	}
-
-	if (
-		(package_prepend_raw_data(self, self->parent->nonce, PLOG_PACKAGER_NONCE_SIZE) == PLOG_PACKAGER_RET_OK) &&
-		(package_prepend_raw_data(self, PLOG_PACKAGER_NONCE_HEADER_16, 4) == PLOG_PACKAGER_RET_OK)
-	) {
-		return PLOG_PACKAGER_RET_OK;
-	}
-
-	return PLOG_PACKAGER_RET_FAILED;
 }
 
 
@@ -335,29 +341,6 @@ static plog_packager_ret_t package_add_message_list_header(struct plog_packager_
 }
 
 
-static plog_packager_ret_t package_add_index_header(struct plog_packager_package *self) {
-	if (self == NULL) {
-		return PLOG_PACKAGER_RET_NULL;
-	}
-
-	uint8_t tmp[4] = {
-		0,
-		0,
-		self->index / 256,
-		self->index % 256
-	};
-	if (package_prepend_raw_data(self, tmp, sizeof(tmp)) != PLOG_PACKAGER_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	if (package_prepend_raw_data(self, PLOG_PACKAGER_INDEX_HEADER, 4) != PLOG_PACKAGER_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	return PLOG_PACKAGER_RET_FAILED;
-}
-
-
 static plog_packager_ret_t package_finish(struct plog_packager_package *self) {
 	if (self == NULL) {
 		return PLOG_PACKAGER_RET_NULL;
@@ -374,8 +357,6 @@ static plog_packager_ret_t package_finish(struct plog_packager_package *self) {
 	/** @todo encrypt here and add different header if requested */
 
 	/* Prepend package headers. */
-	package_add_nonce_header(self);
-	package_add_index_header(self);
 	package_add_package_header(self);
 
 	/* And append package trailers. */
@@ -419,10 +400,13 @@ static plog_packager_ret_t package_add_message(struct plog_packager_package *sel
 		package_append_compress_data(self, topic_len_bytes, sizeof(topic_len_bytes));
 
 		switch (msg->type) {
-			case IPLOG_MESSAGE_TYPE_FLOAT:
+			case IPLOG_MESSAGE_TYPE_FLOAT: {
+				uint8_t tmp[4];
+				memcpy(tmp, &msg->content.cfloat, 4);
 				package_append_compress_data(self, PLOG_PACKAGER_M_FLOAT_HEADER, 2);
-				package_append_compress_data(self, (uint8_t *)&msg->content.cfloat, sizeof(float));
+				package_append_compress_data(self, tmp, sizeof(float));
 				break;
+			}
 
 			default:
 				package_append_compress_data(self, PLOG_PACKAGER_M_NONE_HEADER, 2);

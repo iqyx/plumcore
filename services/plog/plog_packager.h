@@ -45,9 +45,7 @@
 
 #define PLOG_PACKAGER_PACKAGE_HEADER (uint8_t[]){0xf2, 0xd8, 0xe4, 0x04}
 #define PLOG_PACKAGER_PACKAGE_TRAILER (uint8_t[]){0x29, 0x88, 0x5b, 0xd5}
-#define PLOG_PACKAGER_NONCE_HEADER_16 (uint8_t[]){0x9e, 0x41, 0xb0, 0xd6}
 #define PLOG_PACKAGER_MLIST_HEADER1 (uint8_t[]){0xbf, 0xed, 0x30, 0xfc}
-#define PLOG_PACKAGER_INDEX_HEADER (uint8_t[]){0xe8, 0x35, 0xbe, 0x44}
 #define PLOG_PACKAGER_MAC_POLY1305_HEADER (uint8_t[]){0x50, 0xd9, 0x8b, 0x7e}
 
 #define PLOG_PACKAGER_M_NONE_HEADER (uint8_t[]){0x51, 0xe2}
