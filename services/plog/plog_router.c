@@ -133,21 +133,22 @@ static plog_router_ret_t plog_router_process(PlogRouter *self, IPlogMessage *msg
 				);
 			}
 
+			uint8_t tmp = 0;
+			xQueueReceive(p->processed, &tmp, 0);
+
 			if (xQueueSend(p->txqueue, &msg, portMAX_DELAY) != pdTRUE) {
 				return PLOG_RET_FAILED;
 			}
 
 			/* Wait for the message to be processed. */
-			uint8_t tmp = 0;
-			if (xQueueReceive(p->processed, &tmp, 100) != pdTRUE) {
-				if (self->debug) {
+			if (xQueueReceive(p->processed, &tmp, 1000) != pdTRUE) {
+				// if (self->debug) {
 					u_log(
 						system_log,
 						LOG_TYPE_DEBUG,
-						U_LOG_MODULE_PREFIX("message '%s' was not processed in time"),
-						msg->topic
+						U_LOG_MODULE_PREFIX("message was not processed in time")
 					);
-				}
+				// }
 				return PLOG_RET_FAILED;
 			}
 			(void)tmp;
@@ -164,18 +165,18 @@ static void plog_router_task(void *p) {
 	self->running = true;
 	while (self->can_run) {
 
-		IPlogMessage *msg = NULL;
+		IPlogMessage msg = {0};
 
 		/* The rxqueue is a single element long. Peek the message first without removing it
 		 * to prevent another client submitting a message until the current one is processed.
 		 * It is important because only a single queue is used to signal message delivery. */
-		if (xQueuePeek(self->iplog.rxqueue, (void *)&msg, portMAX_DELAY) != pdTRUE) {
+		if (xQueuePeek(self->iplog.rxqueue, &msg, portMAX_DELAY) != pdTRUE) {
 			/* Something went wrong. Repeating the step is the most reasonable
 			 * thing we can do now. */
 			continue;
 		}
 
-		if (plog_router_process(self, msg) != PLOG_ROUTER_RET_OK) {
+		if (plog_router_process(self, &msg) != PLOG_ROUTER_RET_OK) {
 			/* Message cannot be processed. Ignore it and send delivery notification
 			 * to avoid blocking the sender. */
 			/** @todo find a way to pass a proper return code back to the sender */
@@ -191,7 +192,7 @@ static void plog_router_task(void *p) {
 		}
 
 		/* Now it is the time to allow some other process to submit its message. */
-		xQueueReceive(self->iplog.rxqueue, (void *)msg, 0);
+		xQueueReceive(self->iplog.rxqueue, &msg, 0);
 
 	}
 	vTaskDelete(NULL);

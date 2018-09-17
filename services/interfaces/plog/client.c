@@ -122,7 +122,7 @@ plog_ret_t plog_publish(Plog *self, const IPlogMessage *msg) {
 	/* Send the message as a reference. Wait until the plog-router
 	 * is ready to accept the message (wait for the queue to become empty).
 	 * Wait indefinitely otherwise. */
-	if (xQueueSend(self->iplog->rxqueue, &msg, portMAX_DELAY) != pdTRUE) {
+	if (xQueueSend(self->iplog->rxqueue, msg, portMAX_DELAY) != pdTRUE) {
 		return PLOG_RET_FAILED;
 	}
 
@@ -183,19 +183,19 @@ plog_ret_t plog_publish_log(Plog *self, enum iplog_message_severity severity, co
 plog_ret_t plog_publish_printf(Plog *self, enum iplog_message_severity severity,
                                const char *topic, const char *msg, ...) {
 
-
+	return PLOG_RET_FAILED;
 }
 
 
 plog_ret_t plog_publish_int32(Plog *self, const char *topic, const int32_t v) {
 
-
+	return PLOG_RET_FAILED;
 }
 
 
 plog_ret_t plog_publish_uint32(Plog *self, const char *topic, const uint32_t v) {
 
-
+	return PLOG_RET_FAILED;
 }
 
 
@@ -247,11 +247,12 @@ plog_ret_t plog_receive(Plog *self, uint32_t timeout) {
 		return PLOG_RET_EMPTY;
 	}
 
+	plog_ret_t ret = PLOG_RET_OK;
 	/* If the message is received properly, check if there is a reception
 	 * handler set. If yes, try to call it and examine its return value. */
 	if (self->recv_handler != NULL) {
 		if (self->recv_handler(self->recv_handler_context, msg) != PLOG_RET_OK) {
-			return PLOG_RET_FAILED;
+			ret = PLOG_RET_FAILED;
 		}
 	}
 
@@ -264,7 +265,7 @@ plog_ret_t plog_receive(Plog *self, uint32_t timeout) {
 		return PLOG_RET_FAILED;
 	}
 
-	return PLOG_RET_OK;
+	return ret;
 }
 
 

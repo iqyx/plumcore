@@ -46,7 +46,7 @@ iplog_ret_t iplog_init(IPlog *self) {
 	memset(self, 0, sizeof(IPlog));
 	uhal_interface_init(&self->interface);
 
-	self->rxqueue = xQueueCreate(1, sizeof(IPlogMessage *));
+	self->rxqueue = xQueueCreate(1, sizeof(IPlogMessage));
 	if(self->rxqueue == NULL) {
 		return IPLOG_RET_FAILED;
 	}
