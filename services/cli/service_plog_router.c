@@ -59,7 +59,7 @@ static plog_ret_t service_plog_router_sniff_recv_handler(void *context, const IP
 	module_cli_output("[?] ", cli);
 	module_cli_output(msg->topic, cli);
 
-	char num[32] = "";
+	char num[32] = {0};
 	const char *message_types[] = {
 		"NONE",
 		"LOG",
@@ -75,6 +75,16 @@ static plog_ret_t service_plog_router_sniff_recv_handler(void *context, const IP
 	switch (msg->type) {
 		case IPLOG_MESSAGE_TYPE_FLOAT:
 			snprintf(num, sizeof(num), "%d.%03d", (int)msg->content.cfloat, (unsigned int)(msg->content.cfloat / 1000));
+			module_cli_output(num, cli);
+			break;
+
+		case IPLOG_MESSAGE_TYPE_DATA:
+			for (size_t i = 0; i < msg->content.data.len; i++) {
+				snprintf(num, sizeof(num), "%02x", msg->content.data.buf[i]);
+				module_cli_output(num, cli);
+			}
+
+			snprintf(num, sizeof(num), " (size %dB)", msg->content.data.len);
 			module_cli_output(num, cli);
 			break;
 
