@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -55,8 +56,13 @@
 static plog_ret_t service_plog_router_sniff_recv_handler(void *context, const IPlogMessage *msg) {
 	ServiceCli *cli = (ServiceCli *)context;
 
+	struct tm ts = {0};
+	localtime_r(&msg->time.tv_sec, &ts);
+	char tstr[30];
+	strftime(tstr, sizeof(tstr), "[%FT%TZ] ", &ts);
+
 	/* Time of the message reception by the router. */
-	module_cli_output("[?] ", cli);
+	module_cli_output(tstr, cli);
 	module_cli_output(msg->topic, cli);
 
 	char num[32] = {0};
@@ -128,50 +134,6 @@ int32_t service_plog_router_sniff(struct treecli_parser *parser, void *exec_cont
 
 	plog_close(&p);
 
-
-/*
-	CCan ccan;
-	if (ccan_open(&ccan, ican) != CCAN_RET_OK) {
-		module_cli_output("Cannot open CAN interface\r\n", cli);
-		return 1;
-	}
-
-	module_cli_output("CAN sniffer started... (press any key to interrupt)\r\n", cli);
-
-	while (1) {
-		uint8_t buf[8] = {0};
-		size_t len = 0;
-		uint32_t id = 0;
-		if (ccan_receive(&ccan, buf, &len, &id, 1000) == CCAN_RET_OK) {
-			char data_str[8 * 6];
-			snprintf(
-				data_str,
-				sizeof(data_str),
-				"0x%02x, 0x%02x, 0x%02x, 0x%02x, 0x%02x, 0x%02x, 0x%02x, 0x%02x",
-				buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]
-			);
-
-			char id_str[30];
-			snprintf(id_str, sizeof(id_str), "id = %08lx (%lu), ", id, id);
-
-			char len_str[20];
-			snprintf(len_str, sizeof(len_str), "len = %u, data = ", len);
-
-			module_cli_output(id_str, cli);
-			module_cli_output(len_str, cli);
-			module_cli_output(data_str, cli);
-			module_cli_output("\r\n", cli);
-		}
-
-		uint8_t chr = 0;
-		int16_t read = interface_stream_read_timeout(cli->stream, &chr, 1, 0);
-		if (read != 0) {
-			break;
-		}
-	}
-
-	ccan_close(&ccan);
-*/
 	return 0;
 }
 

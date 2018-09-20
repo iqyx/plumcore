@@ -100,6 +100,9 @@
 #include "services/cli/system_cli_tree.h"
 #include "services/mqtt_file_server.h"
 
+#include "services/stm32-system-clock/clock.h"
+#include "services/stm32-rtc/rtc.h"
+
 
 /**
  * Port specific global variables and singleton instances.
@@ -142,6 +145,8 @@ IServiceLocator *locator;
 PUxbBus puxb_bus;
 PUxbDiscovery puxb_discovery;
 
+SystemClock system_clock;
+Stm32Rtc rtc;
 
 struct module_power_adc vin1;
 struct module_power_adc_config vin1_config = {
@@ -439,9 +444,9 @@ int32_t port_init(void) {
 
 	/** @todo generic service, move tot he system init */
 	mqtt_init(&mqtt, gsm_quectel_tcpip(&gsm1));
-	mqtt_set_client_id(&mqtt, "plumpot2");
+	mqtt_set_client_id(&mqtt, "sample");
 	mqtt_set_ping_interval(&mqtt, 60000);
-	mqtt_connect(&mqtt, "147.175.187.202", 1883);
+	mqtt_connect(&mqtt, "10.10.10.10", 1883);
 	/** @todo advertise the mqtt interface */
 
 	/* Initialize the UXB bus. */
@@ -504,7 +509,33 @@ int32_t port_init(void) {
 
 	mqtt_file_server_init(&mqtt_file_server, &mqtt, "plumpot1/file", &fs);
 
+	rcc_periph_clock_enable(RCC_TIM2);
+	nvic_enable_irq(NVIC_TIM2_IRQ);
+	system_clock_init(&system_clock, TIM2, 15, UINT32_MAX);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_CLOCK,
+		&system_clock.iface.interface,
+		"main"
+	);
+
+	stm32_rtc_init(&rtc);
+	iservicelocator_add(
+		locator,
+		ISERVICELOCATOR_TYPE_CLOCK,
+		&rtc.iface.interface,
+		"rtc"
+	);
+
 	return PORT_INIT_OK;
+}
+
+
+void tim2_isr(void) {
+	if (TIM_SR(TIM2) & TIM_SR_UIF) {
+		timer_clear_flag(TIM2, TIM_SR_UIF);
+		system_clock_overflow_handler(&system_clock);
+	}
 }
 
 

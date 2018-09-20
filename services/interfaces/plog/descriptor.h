@@ -37,6 +37,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -97,6 +98,7 @@ typedef struct iplog_message {
 	enum iplog_message_type type;
 	union iplog_message_content content;
 	const char *topic;
+	struct timespec time;
 } IPlogMessage;
 
 

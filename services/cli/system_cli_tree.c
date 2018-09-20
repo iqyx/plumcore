@@ -63,6 +63,7 @@
 #include "device_can.h"
 #include "device_can_sensor.h"
 #include "config_export.h"
+#include "device_clock.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -238,6 +239,22 @@ const struct treecli_node *system_cli_tree = Node {
 						DNode {
 							Name "canN",
 							.create = device_can_canN_create,
+						}
+					}
+				},
+				Node {
+					Name "clock",
+					Commands {
+						Command {
+							Name "print",
+							Exec device_clock_print,
+						},
+						End
+					},
+					DSubnodes {
+						DNode {
+							Name "clockN",
+							.create = device_clock_clockN_create,
 						}
 					}
 				},

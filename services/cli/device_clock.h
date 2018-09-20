@@ -1,6 +1,4 @@
 /*
- * plog message queue router
- *
  * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  *
@@ -28,33 +26,18 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdbool.h>
-#include "module.h"
-
-#include "interfaces/plog/descriptor.h"
-
-
-typedef enum {
-	PLOG_ROUTER_RET_OK = 0,
-	PLOG_ROUTER_RET_FAILED,
-	PLOG_ROUTER_RET_NULL,
-	PLOG_ROUTER_RET_BAD_ARG,
-} plog_router_ret_t;
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 
 
-typedef struct {
-	Module module;
+#define DNODE_INDEX(p, i) p->pos.levels[p->pos.depth + i].dnode_index
 
-	TaskHandle_t task;
-	bool initialized;
-	IPlog iplog;
-	volatile bool can_run;
-	volatile bool running;
-	bool debug;
+extern const struct cli_table_cell device_clock_table[];
 
-} PlogRouter;
+int32_t device_clock_print(struct treecli_parser *parser, void *exec_context);
+int32_t device_clock_clockN_create(struct treecli_parser *parser, uint32_t index, struct treecli_node *node, void *ctx);
+int32_t device_clock_clockN_value_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
 
 
-plog_router_ret_t plog_router_init(PlogRouter *self);
-plog_router_ret_t plog_router_free(PlogRouter *self);
 
