@@ -87,47 +87,7 @@ int32_t module_rtc_locm3_init(struct module_rtc_locm3 *rtc, const char *name) {
 		return MODULE_RTC_LOCM3_INIT_FAILED;
 	}
 
-	if (RTC_ISR & RTC_ISR_INITS) {
-		/* RTC is already initialized. */
-	} else {
-		u_log(system_log, LOG_TYPE_WARN, "%s: date/time not set", rtc->module.name);
-
-		/* Reset the backup domain. */
-		RCC_BDCR |= RCC_BDCR_BDRST;
-		RCC_BDCR &= ~RCC_BDCR_BDRST;
-
-		/* Select LSI oscillator and enable the RTC. */
-		RCC_BDCR |= (1 << 9); /* RTCSEL1 */
-		RCC_BDCR |= RCC_BDCR_RTCEN;
-
-		if (!(RCC_BDCR & RCC_BDCR_RTCEN)) {
-			u_log(system_log, LOG_TYPE_ERROR, "%s: RTC not enabled", rtc->module.name);
-			return MODULE_RTC_LOCM3_INIT_FAILED;
-		}
-
-		/* Unlock the RTC write access. */
-		RTC_WPR = (uint8_t)0xca;
-		RTC_WPR = (uint8_t)0x53;
-
-		/* Initialize the RTC. */
-		RTC_ISR |= RTC_ISR_INIT;
-		vTaskDelay(5);
-		if (!(RTC_ISR & RTC_ISR_INITF)) {
-			u_log(system_log, LOG_TYPE_ERROR, "%s: cannot initialize the RTC", rtc->module.name);
-			return MODULE_RTC_LOCM3_INIT_FAILED;
-		}
-
-		/* Write prescaler twice. */
-		uint32_t prediv = (0x7f << 16) | 0xff;
-		RTC_PRER = prediv;
-		RTC_PRER = prediv;
-
-		RTC_DR |= (1 << 16);
-
-		/* End the initialization and lock the registers. */
-		RTC_ISR &= ~RTC_ISR_INIT;
-		RTC_WPR = 0xff;
-	}
+	/* Old init code removed. */
 
 	u_log(system_log, LOG_TYPE_INFO, "%s: module RTC initialized", rtc->module.name);
 

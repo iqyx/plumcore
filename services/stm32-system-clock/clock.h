@@ -1,5 +1,5 @@
 /*
- * plog message queue router
+ * System clock counting microseconds using STM32 hardware.
  *
  * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
  * All rights reserved.
@@ -29,32 +29,38 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "module.h"
+#include <time.h>
 
-#include "interfaces/plog/descriptor.h"
+#include "module.h"
+#include "interfaces/clock/descriptor.h"
 
 
 typedef enum {
-	PLOG_ROUTER_RET_OK = 0,
-	PLOG_ROUTER_RET_FAILED,
-	PLOG_ROUTER_RET_NULL,
-	PLOG_ROUTER_RET_BAD_ARG,
-} plog_router_ret_t;
+	SYSTEM_CLOCK_RET_OK = 0,
+	SYSTEM_CLOCK_RET_FAILED,
+	SYSTEM_CLOCK_RET_NULL,
+} system_clock_ret_t;
 
 
 typedef struct {
 	Module module;
 
-	TaskHandle_t task;
 	bool initialized;
-	IPlog iplog;
-	volatile bool can_run;
-	volatile bool running;
-	bool debug;
 
-} PlogRouter;
+	uint32_t timer;
+	uint32_t prescaler;
+	uint32_t period;
+
+	uint32_t overflows;
+
+	IClock iface;
+
+} SystemClock;
 
 
-plog_router_ret_t plog_router_init(PlogRouter *self);
-plog_router_ret_t plog_router_free(PlogRouter *self);
+system_clock_ret_t system_clock_init(SystemClock *self, uint32_t timer, uint32_t prescaler, uint32_t period);
+system_clock_ret_t system_clock_free(SystemClock *self);
+system_clock_ret_t system_clock_overflow_handler(SystemClock *self);
+system_clock_ret_t system_clock_get(SystemClock *self, struct timespec *time);
+system_clock_ret_t system_clock_set(SystemClock *self, struct timespec *time);
 

@@ -24,6 +24,7 @@ enums:
         - can
         - can_sensor_driver
         - plog_router
+        - clock
 
 methods:
     add:

@@ -29,14 +29,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
+#include "port.h"
 
 #include "interfaces/plog/descriptor.h"
 #include "interfaces/plog/client.h"
+#include "interfaces/servicelocator.h"
+#include "interfaces/clock/descriptor.h"
 
 #include "plog_router.h"
 
@@ -112,11 +116,30 @@ static bool plog_router_match_topic(const char *filter, const char *topic) {
 }
 
 
+static plog_router_ret_t plog_router_timestamp(PlogRouter *self, IPlogMessage *msg) {
+	(void)self;
+	if (msg == NULL) {
+		return PLOG_ROUTER_RET_BAD_ARG;
+	}
+
+	/** @todo this is highly unoptimal. Query the service locator only
+	 *        at regular intervals. */
+	Interface *interface;
+	if (iservicelocator_query_name_type(locator, "main", ISERVICELOCATOR_TYPE_CLOCK, &interface) != ISERVICELOCATOR_RET_OK) {
+		return PLOG_ROUTER_RET_FAILED;
+	}
+	IClock *iclock = (IClock *)interface;
+	iclock_get(iclock, &msg->time);
+
+	return PLOG_ROUTER_RET_OK;
+}
+
+
 static plog_router_ret_t plog_router_process(PlogRouter *self, IPlogMessage *msg) {
 
 	/* Refuse to resend NULL messages. */
 	if (msg == NULL) {
-		return PLOG_RET_BAD_ARG;
+		return PLOG_ROUTER_RET_BAD_ARG;
 	}
 
 	/** @todo lock while traversing the list! */
@@ -137,7 +160,7 @@ static plog_router_ret_t plog_router_process(PlogRouter *self, IPlogMessage *msg
 			xQueueReceive(p->processed, &tmp, 0);
 
 			if (xQueueSend(p->txqueue, &msg, portMAX_DELAY) != pdTRUE) {
-				return PLOG_RET_FAILED;
+				return PLOG_ROUTER_RET_FAILED;
 			}
 
 			/* Wait for the message to be processed. */
@@ -149,7 +172,7 @@ static plog_router_ret_t plog_router_process(PlogRouter *self, IPlogMessage *msg
 						U_LOG_MODULE_PREFIX("message was not processed in time")
 					);
 				// }
-				return PLOG_RET_FAILED;
+				return PLOG_ROUTER_RET_FAILED;
 			}
 			(void)tmp;
 		}
@@ -174,6 +197,10 @@ static void plog_router_task(void *p) {
 			/* Something went wrong. Repeating the step is the most reasonable
 			 * thing we can do now. */
 			continue;
+		}
+
+		if (plog_router_timestamp(self, &msg) != PLOG_ROUTER_RET_OK) {
+			/* Message timestamping failed. Do nothing. */
 		}
 
 		if (plog_router_process(self, &msg) != PLOG_ROUTER_RET_OK) {

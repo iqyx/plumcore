@@ -1,5 +1,5 @@
 /*
- * plog message queue router
+ * STM32 internal RTC clock driver service.
  *
  * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
  * All rights reserved.
@@ -29,32 +29,29 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "module.h"
+#include <time.h>
 
-#include "interfaces/plog/descriptor.h"
+#include "module.h"
+#include "interfaces/clock/descriptor.h"
 
 
 typedef enum {
-	PLOG_ROUTER_RET_OK = 0,
-	PLOG_ROUTER_RET_FAILED,
-	PLOG_ROUTER_RET_NULL,
-	PLOG_ROUTER_RET_BAD_ARG,
-} plog_router_ret_t;
+	STM32_RTC_RET_OK = 0,
+	STM32_RTC_RET_FAILED,
+	STM32_RTC_RET_NULL,
+} stm32_rtc_ret_t;
 
 
 typedef struct {
 	Module module;
-
-	TaskHandle_t task;
 	bool initialized;
-	IPlog iplog;
-	volatile bool can_run;
-	volatile bool running;
-	bool debug;
-
-} PlogRouter;
+	IClock iface;
+	bool lse_available;
+} Stm32Rtc;
 
 
-plog_router_ret_t plog_router_init(PlogRouter *self);
-plog_router_ret_t plog_router_free(PlogRouter *self);
+stm32_rtc_ret_t stm32_rtc_init(Stm32Rtc *self);
+stm32_rtc_ret_t stm32_rtc_free(Stm32Rtc *self);
+stm32_rtc_ret_t stm32_rtc_get(Stm32Rtc *self, struct timespec *time);
+stm32_rtc_ret_t stm32_rtc_set(Stm32Rtc *self, struct timespec *time);
 

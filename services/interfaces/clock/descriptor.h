@@ -1,5 +1,5 @@
 /*
- * plog message queue router
+ * clock interface descriptor
  *
  * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
  * All rights reserved.
@@ -29,32 +29,49 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "module.h"
+#include <time.h>
 
-#include "interfaces/plog/descriptor.h"
+#include "interface.h"
 
 
 typedef enum {
-	PLOG_ROUTER_RET_OK = 0,
-	PLOG_ROUTER_RET_FAILED,
-	PLOG_ROUTER_RET_NULL,
-	PLOG_ROUTER_RET_BAD_ARG,
-} plog_router_ret_t;
+	ICLOCK_RET_OK = 0,
+	ICLOCK_RET_FAILED,
+	ICLOCK_RET_NULL,
+	ICLOCK_RET_BAD_ARG,
+} iclock_ret_t;
 
 
-typedef struct {
-	Module module;
-
-	TaskHandle_t task;
-	bool initialized;
-	IPlog iplog;
-	volatile bool can_run;
-	volatile bool running;
-	bool debug;
-
-} PlogRouter;
+enum iclock_source {
+	ICLOCK_SOURCE_UNKNOWN = 0,
+};
 
 
-plog_router_ret_t plog_router_init(PlogRouter *self);
-plog_router_ret_t plog_router_free(PlogRouter *self);
+enum iclock_status {
+	ICLOCK_STATUS_UNKNOWN = 0,
+};
+
+struct iclock_vmt {
+	iclock_ret_t (*clock_get)(void *context, struct timespec *time);
+	iclock_ret_t (*clock_set)(void *context, struct timespec *time);
+	iclock_ret_t (*clock_get_source)(void *context, enum iclock_source *source);
+	iclock_ret_t (*clock_get_status)(void *context, enum iclock_status *status);
+	void *context;
+};
+
+
+typedef struct iclock {
+	Interface interface;
+	struct iclock_vmt vmt;
+} IClock;
+
+
+iclock_ret_t iclock_init(IClock *self);
+iclock_ret_t iclock_free(IClock *self);
+iclock_ret_t iclock_get(IClock *self, struct timespec *time);
+iclock_ret_t iclock_set(IClock *self, struct timespec *time);
+iclock_ret_t iclock_get_source(IClock *self, enum iclock_source *source);
+iclock_ret_t iclock_get_status(IClock *self, enum iclock_status *status);
+
+
 
