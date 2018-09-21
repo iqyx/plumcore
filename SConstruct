@@ -36,6 +36,7 @@ Export("env")
 
 # Some helpers to make the build looks pretty
 SConscript("pretty.SConscript")
+SConscript("modules.SConscript")
 
 env.Append(ENV = os.environ)
 
@@ -142,6 +143,20 @@ env.Append(CFLAGS = [
 	"-Wstrict-prototypes",
 ])
 
+for module in env["BUILD_MODULES"]:
+	p, m = os.path.split(module)
+	libf = "%s/%s/lib%s.a" % (p, m, m)
+	env.Depends(objs, libf)
+	env.AppendUnique(LIBS = [m])
+	env.Alias(module, libf)
+
+env.Append(LIBS = [
+	env["LIBOCM3"],
+	"c",
+	"gcc",
+	"nosys",
+])
+
 # link the whole thing
 elf = env.Program(
 	source = objs,
@@ -149,12 +164,6 @@ elf = env.Program(
 		File(env["PORTFILE"] + ".elf"),
 		File(env["PORTFILE"] + ".map"),
 	],
-	LIBS = [
-		env["LIBOCM3"],
-		"c",
-		"gcc",
-		"nosys",
-	]
 )
 
 # Create the firmware image file
