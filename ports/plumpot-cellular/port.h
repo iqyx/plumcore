@@ -25,7 +25,7 @@
 #include "version.h"
 #include "module_led.h"
 #include "module_usart.h"
-#include "services/cli.h"
+#include "services/cli/cli.h"
 #include "interface_directory.h"
 #include "interfaces/servicelocator.h"
 

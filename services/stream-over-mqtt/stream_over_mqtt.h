@@ -26,7 +26,7 @@
 
 #include "FreeRTOS.h"
 #include "queue.h"
-#include "mqtt_tcpip.h"
+#include "services/mqtt-tcpip/mqtt_tcpip.h"
 #include "interface_stream.h"
 
 

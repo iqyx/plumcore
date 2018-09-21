@@ -1,0 +1,14 @@
+Import("env")
+
+env.DefineModule("cli", [
+	File("system_cli_tree.c"),
+	File("service_data_process.c"),
+	File("service_plog_router.c"),
+	File("device_clock.c"),
+	File("device_uxb.c"),
+	File("device_can.c"),
+	File("device_can_sensor.c"),
+	File("system_bootloader.c"),
+	File("config_export.c"),
+	File("cli.c")
+])

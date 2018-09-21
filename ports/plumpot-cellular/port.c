@@ -77,7 +77,6 @@
 #include "uhal/modules/i2c_sensors.h"
 
 #include "umesh_l2_status.h"
-#include "services/sensor_upload.h"
 
 #include "uhal/interfaces/cellular.h"
 #include "libuxb.h"
@@ -86,9 +85,9 @@
 #include "protocols/uxb/solar_charger_iface.pb.h"
 #include "pb_decode.h"
 
-#include "services/watchdog.h"
-#include "services/mqtt_tcpip.h"
-#include "services/mqtt_sensor_upload.h"
+#include "services/stm32-watchdog/watchdog.h"
+#include "services/mqtt-tcpip/mqtt_tcpip.h"
+#include "services/mqtt-sensor-upload/mqtt_sensor_upload.h"
 
 #include "interfaces/servicelocator.h"
 #include "services/plocator.h"
@@ -96,9 +95,9 @@
 #include "services/data-process/data-process.h"
 #include "uhal/modules/puxb.h"
 #include "uhal/modules/puxb_discovery.h"
-#include "services/stream_over_mqtt.h"
+#include "services/stream-over-mqtt/stream_over_mqtt.h"
 #include "services/cli/system_cli_tree.h"
-#include "services/mqtt_file_server.h"
+#include "services/mqtt-file-server/mqtt_file_server.h"
 
 #include "services/stm32-system-clock/clock.h"
 #include "services/stm32-rtc/rtc.h"
@@ -123,7 +122,6 @@ struct module_umesh umesh;
 struct module_fifo_profiler profiler;
 GsmQuectel gsm1;
 struct module_usart gsm1_usart;
-SensorUpload upload1;
 I2cSensors i2c_test;
 struct sffs fs;
 // LibUxbBus uxb;

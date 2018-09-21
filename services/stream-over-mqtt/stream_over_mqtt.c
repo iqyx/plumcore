@@ -31,7 +31,7 @@
 #include "u_log.h"
 
 /** @todo using service headers directly is prohibited. Replace with an interface header. */
-#include "mqtt_tcpip.h"
+#include "services/mqtt-tcpip/mqtt_tcpip.h"
 #include "stream_over_mqtt.h"
 
 #ifdef MODULE_NAME

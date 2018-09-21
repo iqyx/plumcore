@@ -1,6 +1,6 @@
 #include "uhal/interfaces/sensor.h"
 #include "cli_table_helper.h"
-#include "services/cli.h"
+#include "cli.h"
 #include "port.h"
 #include "services/interfaces/servicelocator.h"
 

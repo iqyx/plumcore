@@ -29,7 +29,7 @@
 #include "u_assert.h"
 #include "u_log.h"
 
-#include "services/mqtt_tcpip.h"
+#include "services/mqtt-tcpip/mqtt_tcpip.h"
 #include "sha2.h"
 #include "sffs.h"
 

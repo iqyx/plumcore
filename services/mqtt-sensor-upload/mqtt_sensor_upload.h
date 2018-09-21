@@ -25,7 +25,7 @@
 #include <stdbool.h>
 #include "module.h"
 #include "interfaces/sensor.h"
-#include "services/mqtt_tcpip.h"
+#include "services/mqtt-tcpip/mqtt_tcpip.h"
 
 #define SENSOR_UPLOAD_MAX_SENSORS 12
 

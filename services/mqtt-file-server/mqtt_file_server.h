@@ -24,7 +24,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "module.h"
-#include "services/mqtt_tcpip.h"
+#include "services/mqtt-tcpip/mqtt_tcpip.h"
 #include "sffs.h"
 
 

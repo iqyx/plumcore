@@ -34,10 +34,10 @@
 
 #include "interfaces/servicelocator.h"
 #include "module_loginmgr.h"
-#include "services/cli.h"
+#include "services/cli/cli.h"
 #include "services/cli/system_cli_tree.h"
-#include "services/plog/plog_router.h"
-#include "services/plog_sensor_upload.h"
+#include "services/plog-router/plog_router.h"
+#include "services/plog-sensor-upload/plog_sensor_upload.h"
 #include "interfaces/plog/descriptor.h"
 #include "interfaces/plog/client.h"
 

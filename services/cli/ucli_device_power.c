@@ -2,7 +2,7 @@
 #include "interface_power.h"
 #include "cli_table_helper.h"
 #include "treecli_parser.h"
-#include "services/cli.h"
+#include "cli.h"
 
 
 static const struct cli_table_cell device_power_table[] = {
