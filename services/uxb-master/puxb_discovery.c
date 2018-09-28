@@ -35,10 +35,10 @@
 #include "uhal/interfaces/uxbbus.h"
 #include "uhal/interfaces/uxbdevice.h"
 #include "uhal/interfaces/uxbslot.h"
-#include "uhal/modules/uxb_can.h"
-#include "uhal/modules/solar_charger.h"
-#include "uhal/modules/waveform_source.h"
-#include "uhal/modules/ldet.h"
+#include "services/uxb-can/uxb_can.h"
+#include "services/uxb-solar-charger/solar_charger.h"
+#include "services/uxb-waveform-source/waveform_source.h"
+#include "services/uxb-ldet/ldet.h"
 
 #include "puxb_discovery.h"
 

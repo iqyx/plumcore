@@ -29,6 +29,9 @@ static int32_t ucli_device_power_print(struct treecli_parser *parser, void *exec
 	});
 	table_print_row_separator(cli->stream, device_power_table);
 
+
+/** @todo old interface directory deprecated */
+#if 0
 	for (size_t i = 0; hal_interfaces[i] != NULL; i++) {
 		if (hal_interfaces[i]->type == HAL_INTERFACE_TYPE_POWER) {
 
@@ -46,6 +49,7 @@ static int32_t ucli_device_power_print(struct treecli_parser *parser, void *exec
 			});
 		}
 	}
+#endif
 
 	return 0;
 }

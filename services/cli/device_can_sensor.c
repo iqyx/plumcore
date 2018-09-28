@@ -46,7 +46,7 @@
 #include "port.h"
 
 #include "device_can_sensor.h"
-#include "modules/sensor_over_can.h"
+#include "services/sensor-over-can/sensor_over_can.h"
 
 
 const struct cli_table_cell device_can_sensor_table[] = {

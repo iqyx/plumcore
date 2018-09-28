@@ -19,6 +19,7 @@ objs = env.Object(source = [
 
 env.Append(CPPPATH = [
 	Dir("."),
+	Dir("interfaces"),
 
 ])
 

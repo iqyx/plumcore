@@ -41,11 +41,6 @@
 #include "u_log.h"
 #include "port.h"
 
-/* Old one. */
-#include "hal_interface_directory.h"
-/* New one. */
-#include "interface_directory.h"
-
 #include "module_led.h"
 #include "interface_led.h"
 #include "module_usart.h"
@@ -62,43 +57,31 @@
 #include "interface_rng.h"
 #include "module_prng_simple.h"
 #include "uhal/interfaces/adc.h"
-#include "uhal/modules/adc_stm32_locm3.h"
-#include "module_power_adc.h"
 #include "module_mac_csma.h"
 #include "interface_mac.h"
 #include "module_umesh.h"
 #include "interface_profiling.h"
 #include "module_fifo_profiler.h"
+#include "umesh_l2_status.h"
+#include "libuxb.h"
 
 #include "uhal/interfaces/sensor.h"
-#include "uhal/modules/stm32_timer_capsense.h"
-#include "uhal/modules/ax5243.h"
-#include "uhal/modules/gsm_quectel.h"
-#include "uhal/modules/i2c_sensors.h"
-
-#include "umesh_l2_status.h"
-
 #include "uhal/interfaces/cellular.h"
-#include "libuxb.h"
-#include "uhal/modules/solar_charger.h"
-
-#include "protocols/uxb/solar_charger_iface.pb.h"
-#include "pb_decode.h"
-
+#include "services/uxb-master/puxb.h"
+#include "services/uxb-master/puxb_discovery.h"
+#include "interfaces/servicelocator.h"
+#include "services/stm32-adc/adc_stm32_locm3.h"
+#include "services/radio-ax5243/ax5243.h"
+#include "services/gsm-quectel/gsm_quectel.h"
+#include "services/stm32-i2c-sensors/i2c_sensors.h"
 #include "services/stm32-watchdog/watchdog.h"
 #include "services/mqtt-tcpip/mqtt_tcpip.h"
 #include "services/mqtt-sensor-upload/mqtt_sensor_upload.h"
-
-#include "interfaces/servicelocator.h"
 #include "services/plocator.h"
-
 #include "services/data-process/data-process.h"
-#include "uhal/modules/puxb.h"
-#include "uhal/modules/puxb_discovery.h"
 #include "services/stream-over-mqtt/stream_over_mqtt.h"
 #include "services/cli/system_cli_tree.h"
 #include "services/mqtt-file-server/mqtt_file_server.h"
-
 #include "services/stm32-system-clock/clock.h"
 #include "services/stm32-rtc/rtc.h"
 
@@ -106,6 +89,8 @@
 /**
  * Port specific global variables and singleton instances.
  */
+
+/* Old-style HAL */
 uint32_t SystemCoreClock;
 struct module_led led_stat;
 struct module_usart console;
@@ -115,59 +100,32 @@ struct module_spidev_locm3 spi2_radio1;
 struct module_spi_flash flash1;
 struct module_rtc_locm3 rtc1;
 struct module_prng_simple prng;
-AdcStm32Locm3 adc1;
-Ax5243 radio1;
 struct module_mac_csma radio1_mac;
 struct module_umesh umesh;
 struct module_fifo_profiler profiler;
-GsmQuectel gsm1;
 struct module_usart gsm1_usart;
-I2cSensors i2c_test;
 struct sffs fs;
-// LibUxbBus uxb;
-// LibUxbDevice uxb_iface1;
-// LibUxbSlot uxb_slot1;
+
 uint8_t slot1_buffer[256];
 uxb_master_locm3_ret_t uxb_ret;
-SolarCharger solar_charger1;
+
+/*New-style HAL and services. */
+AdcStm32Locm3 adc1;
+Ax5243 radio1;
+GsmQuectel gsm1;
+I2cSensors i2c_test;
 Watchdog watchdog;
 Mqtt mqtt;
 MqttSensorUpload mqtt_sensor;
 StreamOverMqtt mqtt_cli_stream;
 ServiceCli mqtt_cli;
 MqttFileServer mqtt_file_server;
-
 PLocator plocator;
 IServiceLocator *locator;
-
 PUxbBus puxb_bus;
 PUxbDiscovery puxb_discovery;
-
 SystemClock system_clock;
 Stm32Rtc rtc;
-
-struct module_power_adc vin1;
-struct module_power_adc_config vin1_config = {
-	.measure_voltage = true,
-	.voltage_channel = 5,
-	.voltage_multiplier = 488,
-	.voltage_divider = 18
-};
-
-struct module_power_adc ubx_voltage;
-struct module_power_adc_config ubx_voltage_config = {
-	.measure_voltage = true,
-	.voltage_channel = 6,
-	.voltage_multiplier = 2,
-	.voltage_divider = 1
-};
-
-
-struct hal_interface_descriptor *hal_interfaces[] = {
-	&ubx_voltage.iface.descriptor,
-	&vin1.iface.descriptor,
-	NULL
-};
 
 
 int32_t port_early_init(void) {
