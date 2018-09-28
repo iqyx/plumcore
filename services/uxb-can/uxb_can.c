@@ -32,7 +32,7 @@
 #include "protocols/uxb/can.pb.h"
 #include "pb_decode.h"
 #include "pb_encode.h"
-#include "uhal/interfaces/uxbslot.h"
+#include "interfaces/uxbslot.h"
 #include "port.h"
 
 #include "uxb_can.h"

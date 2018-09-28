@@ -29,8 +29,7 @@
 #include "u_log.h"
 #include "hal_module.h"
 
-#include "uhal/interfaces/adc.h"
-//~ #include "interface_power.h"
+#include "interfaces/adc.h"
 #include "module_power_adc.h"
 
 

@@ -10,7 +10,7 @@
 
 #include "module.h"
 #include "libuxb.h"
-#include "uhal/interfaces/uxbbus.h"
+#include "interfaces/uxbbus.h"
 
 #define PUXB_DESCRIPTOR_BUFFER_SIZE 64
 #define PUXB_DESCRIPTOR_KEY_SIZE 16

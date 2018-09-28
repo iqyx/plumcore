@@ -1,4 +1,4 @@
-#include "uhal/interfaces/cellular.h"
+#include "interfaces/cellular.h"
 #include "cli_table_helper.h"
 #include "cli.h"
 #include "port.h"

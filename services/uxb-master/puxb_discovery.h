@@ -9,9 +9,9 @@
 
 #include "module.h"
 #include "libuxb.h"
-#include "uhal/interfaces/uxbbus.h"
-#include "uhal/interfaces/uxbdevice.h"
-#include "uhal/interfaces/uxbslot.h"
+#include "interfaces/uxbbus.h"
+#include "interfaces/uxbdevice.h"
+#include "interfaces/uxbslot.h"
 
 
 #define PXUB_DISCOVERY_DSECRIPTOR_LENGTH 16

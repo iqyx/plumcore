@@ -41,8 +41,8 @@
 #include "services/cli/system_cli_tree.h"
 
 #include "services/interfaces/servicelocator.h"
-#include "uhal/interfaces/can.h"
-#include "uhal/interfaces/ccan.h"
+#include "interfaces/can.h"
+#include "interfaces/ccan.h"
 #include "port.h"
 
 #include "device_can_sensor.h"

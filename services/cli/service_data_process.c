@@ -53,7 +53,7 @@
 #include "services/cli/system_cli_tree.h"
 
 #include "services/interfaces/servicelocator.h"
-#include "uhal/interfaces/sensor.h"
+#include "interfaces/sensor.h"
 #include "port.h"
 
 /* Includes of the service itself. */

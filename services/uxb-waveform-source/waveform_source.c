@@ -32,7 +32,7 @@
 #include "protocols/uxb/waveform.pb.h"
 #include "pb_decode.h"
 #include "pb_encode.h"
-#include "uhal/interfaces/uxbslot.h"
+#include "interfaces/uxbslot.h"
 
 #include "waveform_source.h"
 

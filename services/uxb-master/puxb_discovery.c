@@ -32,9 +32,9 @@
 #include "services/interfaces/servicelocator.h"
 
 #include "module.h"
-#include "uhal/interfaces/uxbbus.h"
-#include "uhal/interfaces/uxbdevice.h"
-#include "uhal/interfaces/uxbslot.h"
+#include "interfaces/uxbbus.h"
+#include "interfaces/uxbdevice.h"
+#include "interfaces/uxbslot.h"
 #include "services/uxb-can/uxb_can.h"
 #include "services/uxb-solar-charger/solar_charger.h"
 #include "services/uxb-waveform-source/waveform_source.h"

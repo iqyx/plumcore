@@ -1,4 +1,4 @@
-#include "uhal/interfaces/sensor.h"
+#include "interfaces/sensor.h"
 #include "cli_table_helper.h"
 #include "cli.h"
 #include "port.h"
