@@ -77,7 +77,7 @@
 #include "services/stm32-watchdog/watchdog.h"
 #include "services/mqtt-tcpip/mqtt_tcpip.h"
 #include "services/mqtt-sensor-upload/mqtt_sensor_upload.h"
-#include "services/plocator.h"
+#include "services/plocator/plocator.h"
 #include "services/data-process/data-process.h"
 #include "services/stream-over-mqtt/stream_over_mqtt.h"
 #include "services/cli/system_cli_tree.h"

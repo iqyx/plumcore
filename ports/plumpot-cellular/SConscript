@@ -44,5 +44,6 @@ env.DependsOnModule("services/uxb-waveform-source")
 env.DependsOnModule("services/uxb-solar-charger")
 env.DependsOnModule("services/uxb-master")
 env.DependsOnModule("services/sensor-over-can")
+env.DependsOnModule("services/plocator")
 
 Return("objs")
