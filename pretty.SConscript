@@ -19,7 +19,8 @@ if ARGUMENTS.get('VERBOSE') != "1":
 	env['CCCOMSTR'] = cformat("{c.bold}{c.blue}Compiling{c.white} $TARGET{c.default}")
 	env['LINKCOMSTR'] = cformat("{c.bold}{c.blue}Linking{c.white} $TARGET{c.default}")
 	env['ARCOMSTR'] = cformat("{c.blue}{c.bold}Creating library{c.white} $TARGET{c.default}")
-	env['FWCREATECOMSTR'] = cformat("{c.blue}{c.bold}Creating firmware image{c.white} $TARGET{c.default}")
-	env['CREATEKEYCOMSTR'] = cformat("{c.blue}{c.bold}Generating  new firmware signing key{c.white} $TARGET{c.default}")
-	env['CREATEBINCOMSTR'] = cformat("{c.blue}{c.bold}Creating binary firmware{c.white} $TARGET{c.default}")
-	env['GENIFACECOMSTR'] = cformat("{c.blue}{c.bold}Generating interface files{c.white} $TARGET{c.default}")
+
+env['FWCREATECOMSTR'] = cformat("{c.blue}{c.bold}Creating firmware image{c.white} $TARGET{c.default}")
+env['CREATEKEYCOMSTR'] = cformat("{c.blue}{c.bold}Generating  new firmware signing key{c.white} $TARGET{c.default}")
+env['CREATEBINCOMSTR'] = cformat("{c.blue}{c.bold}Creating binary firmware{c.white} $TARGET{c.default}")
+env['GENIFACECOMSTR'] = cformat("{c.blue}{c.bold}Generating interface files{c.white} $TARGET{c.default}")

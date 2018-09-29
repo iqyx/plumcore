@@ -35,14 +35,12 @@
 
 /* Common functions and helpers for the CLI service. */
 #include "cli_table_helper.h"
-#include "services/cli.h"
+#include "cli.h"
 
 /* Helper defines for tree construction. */
 #include "services/cli/system_cli_tree.h"
 
 #include "services/interfaces/servicelocator.h"
-#include "uhal/interfaces/can.h"
-#include "uhal/interfaces/ccan.h"
 #include "port.h"
 
 #include "config_export.h"

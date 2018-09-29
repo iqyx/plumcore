@@ -26,7 +26,7 @@
 #include <stdbool.h>
 
 #include "hal_module.h"
-#include "uhal/interfaces/adc.h"
+#include "interfaces/adc.h"
 #include "interface_power.h"
 
 

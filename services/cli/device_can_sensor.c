@@ -35,18 +35,18 @@
 
 /* Common functions and helpers for the CLI service. */
 #include "cli_table_helper.h"
-#include "services/cli.h"
+#include "cli.h"
 
 /* Helper defines for tree construction. */
 #include "services/cli/system_cli_tree.h"
 
 #include "services/interfaces/servicelocator.h"
-#include "uhal/interfaces/can.h"
-#include "uhal/interfaces/ccan.h"
+#include "interfaces/can.h"
+#include "interfaces/ccan.h"
 #include "port.h"
 
 #include "device_can_sensor.h"
-#include "modules/sensor_over_can.h"
+#include "services/sensor-over-can/sensor_over_can.h"
 
 
 const struct cli_table_cell device_can_sensor_table[] = {

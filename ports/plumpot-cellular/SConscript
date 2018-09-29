@@ -1,6 +1,8 @@
 Import("env")
 
-objs = env.Object(source = ["port.c"])
+objs = env.Object(source = [
+	File("port.c"),
+])
 
 env.Replace(FREERTOS_PORT = "GCC/ARM_CM4F")
 
@@ -23,5 +25,25 @@ env.Append(CFLAGS = [
 # FreeRTOSConfig.h directly
 env.Append(CPPPATH = [Dir(".")])
 
+# Module dependencies for this port
+env.DependsOnModule("services/stm32-watchdog")
+env.DependsOnModule("services/stream-over-mqtt")
+env.DependsOnModule("services/stm32-system-clock")
+env.DependsOnModule("services/stm32-rtc")
+env.DependsOnModule("services/mqtt-file-server")
+env.DependsOnModule("services/mqtt-sensor-upload")
+env.DependsOnModule("services/mqtt-tcpip")
+env.DependsOnModule("services/data-process")
+env.DependsOnModule("services/stm32-adc")
+env.DependsOnModule("services/radio-ax5243")
+env.DependsOnModule("services/gsm-quectel")
+env.DependsOnModule("services/stm32-i2c-sensors")
+env.DependsOnModule("services/uxb-ldet")
+env.DependsOnModule("services/uxb-can")
+env.DependsOnModule("services/uxb-waveform-source")
+env.DependsOnModule("services/uxb-solar-charger")
+env.DependsOnModule("services/uxb-master")
+env.DependsOnModule("services/sensor-over-can")
+env.DependsOnModule("services/plocator")
 
 Return("objs")

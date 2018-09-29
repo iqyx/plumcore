@@ -4,6 +4,7 @@
 # ignore all object files
 *.o
 *.pyc
+*.a
 
 # ignore generated protobuf files
 *.pb.h

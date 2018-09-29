@@ -20,7 +20,7 @@
 #include "pb_encode.h"
 #include "umesh_l2_status.h"
 #include "umesh_l2_status.pb.h"
-#include "uhal/interfaces/sensor.h"
+#include "interfaces/sensor.h"
 
 
 #ifdef MODULE_NAME

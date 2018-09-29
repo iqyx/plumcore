@@ -9,7 +9,7 @@
 #include "queue.h"
 
 #include "umesh_l3_protocol.h"
-#include "uhal/interfaces/sensor.h"
+#include "interfaces/sensor.h"
 #include "interface_power.h"
 
 

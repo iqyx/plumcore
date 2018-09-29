@@ -2,48 +2,8 @@ import os
 
 Import("env")
 
-# Build all interface files from the YAML definitions
-env.Command(
-	source = Glob("interfaces/adc.yaml"),
-	target = [
-		"interfaces/adc.c",
-		"interfaces/adc.h",
-	],
-	action = Action("python tools/interface_generator.py $SOURCE", env['GENIFACECOMSTR'])
-)
-
-env.Command(
-	source = Glob("interfaces/uxbbus.yaml"),
-	target = [
-		"interfaces/uxbbus.c",
-		"interfaces/uxbbus.h",
-	],
-	action = Action("python tools/interface_generator.py $SOURCE", env['GENIFACECOMSTR'])
-)
-
-env.Command(
-	source = Glob("interfaces/uxbdevice.yaml"),
-	target = [
-		"interfaces/uxbdevice.c",
-		"interfaces/uxbdevice.h",
-	],
-	action = Action("python tools/interface_generator.py $SOURCE", env['GENIFACECOMSTR'])
-)
-
-env.Command(
-	source = Glob("interfaces/uxbslot.yaml"),
-	target = [
-		"interfaces/uxbslot.c",
-		"interfaces/uxbslot.h",
-	],
-	action = Action("python tools/interface_generator.py $SOURCE", env['GENIFACECOMSTR'])
-)
-
-
 objs = env.Object(source = [
 	File(Glob("common/*.c")),
-	File(Glob("interfaces/*.c")),
-	File(Glob("modules/*.c")),
 ])
 
 

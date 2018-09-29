@@ -35,15 +35,15 @@
 
 /* Common functions and helpers for the CLI service. */
 #include "cli_table_helper.h"
-#include "services/cli.h"
+#include "cli.h"
 
 /* Helper defines for tree construction. */
 #include "services/cli/system_cli_tree.h"
 
 #include "services/interfaces/servicelocator.h"
-#include "uhal/interfaces/uxbbus.h"
-#include "uhal/interfaces/uxbdevice.h"
-#include "uhal/interfaces/uxbslot.h"
+#include "interfaces/uxbbus.h"
+#include "interfaces/uxbdevice.h"
+#include "interfaces/uxbslot.h"
 #include "port.h"
 
 #include "device_uxb.h"

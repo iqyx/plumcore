@@ -1,39 +1,23 @@
+import os
 Import("env")
-
-env.Command(
-	source = Glob("interfaces/*.yaml"),
-	target = [
-		"interfaces/servicelocator.c",
-		"interfaces/servicelocator.h",
-	],
-	action = Action("python tools/interface_generator.py $SOURCE", env['GENIFACECOMSTR'])
-)
 
 objs = env.Object(source = [
 	File(Glob("*.c")),
 	File(Glob("interfaces/*.c")),
 	File(Glob("interfaces/plog/*.c")),
 	File(Glob("interfaces/clock/*.c")),
-	File(Glob("plog/*.c")),
-	File(Glob("clock/*.c")),
-	File(Glob("data-process/*.c")),
-	File(Glob("cli/system_cli_tree.c")),
-	File(Glob("cli/service_data_process.c")),
-	File(Glob("cli/service_plog_router.c")),
-	File(Glob("cli/device_clock.c")),
-	File(Glob("cli/device_uxb.c")),
-	File(Glob("cli/device_can.c")),
-	File(Glob("cli/device_can_sensor.c")),
-	File(Glob("cli/system_bootloader.c")),
-	File(Glob("cli/config_export.c")),
-	File(Glob("stm32-system-clock/*.c")),
-	File(Glob("stm32-rtc/*.c")),
 ])
 
 env.Append(CPPPATH = [
 	Dir("."),
-	Dir("cli"),
+	Dir("interfaces"),
 
 ])
+
+for d in next(os.walk("."))[1]:
+	f = os.path.join(d, "SConscript")
+	if os.path.isfile(f):
+		SConscript(f)
+
 
 Return("objs")
