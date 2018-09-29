@@ -199,6 +199,23 @@ program = env.Command(
 	""" % (env["OOCD_INTERFACE"], env["OOCD_TARGET"])
 )
 
+program_bare = env.Command(
+	source = env["PORTFILE"] + ".bin",
+	target = "program_bare",
+	action = """
+	$OOCD \
+	-s /usr/share/openocd/scripts/ \
+	-f interface/%s.cfg \
+	-f target/%s.cfg \
+	-c "init" \
+	-c "reset init" \
+	-c "flash write_image erase $SOURCE 0x08000000 bin" \
+	-c "reset" \
+	-c "shutdown"
+	""" % (env["OOCD_INTERFACE"], env["OOCD_TARGET"])
+)
+
+
 # And do something by default.
 env.Alias("umeshfw", source = env["PORTFILE"] + ".fw")
 env.Alias("proto", proto);
