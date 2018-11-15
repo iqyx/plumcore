@@ -1,0 +1,64 @@
+0x00 RegFifo FIFO read/write access
+0x01 RegOpMode Operating modes of the transceiver
+0x02 RegDataModul Data operation mode and Modulation settings
+0x03 RegBitrateMsb Bit Rate setting, Most Significant Bits
+0x04 RegBitrateLsb Bit Rate setting, Least Significant Bits
+0x05 RegFdevMsb Frequency Deviation setting, Most Significant Bits
+0x06 RegFdevLsb Frequency Deviation setting, Least Significant Bits
+0x07 RegFrfMsb RF Carrier Frequency, Most Significant Bits
+0x08 RegFrfMid RF Carrier Frequency, Intermediate Bits
+0x09 RegFrfLsb RF Carrier Frequency, Least Significant Bits
+0x0A RegOsc1 RC Oscillators Settings
+0x0B RegAfcCtrl AFC control in low modulation index situations
+0x0C RegLowBat Low Battery Indicator Settings
+0x0D RegListen1 Listen Mode settings
+0x0E RegListen2 Listen Mode Idle duration
+0x0F RegListen3 Listen Mode Rx duration
+0x10 RegVersion Semtech ID relating the silicon revision
+0x11 RegPaLevel PA selection and Output Power control
+0x12 RegPaRamp Control of the PA ramp time in FSK mode
+0x13 RegOcp Over Current Protection control
+0x14 Reserved14 -
+0x15 Reserved15 -
+0x16 Reserved16 -
+0x17 Reserved17 -
+0x18 RegLna LNA settings
+0x19 RegRxBw Channel Filter BW Control
+0x1A RegAfcBw Channel Filter BW control during the AFC routine
+0x1B RegOokPeak OOK demodulator selection and control in peak mode
+0x1C RegOokAvg Average threshold control of the OOK demodulator
+0x1D RegOokFix Fixed threshold control of the OOK demodulator
+0x1E RegAfcFei AFC and FEI control and status
+0x1F RegAfcMsb MSB of the frequency correction of the AFC
+0x20 RegAfcLsb LSB of the frequency correction of the AFC
+0x21 RegFeiMsb MSB of the calculated frequency error
+0x22 RegFeiLsb LSB of the calculated frequency error
+0x23 RegRssiConfig RSSI-related settings
+0x24 RegRssiValue RSSI value in dBm
+0x25 RegDioMapping1 Mapping of pins DIO0 to DIO3
+0x26 RegDioMapping2 Mapping of pins DIO4 and DIO5, ClkOut frequency
+0x27 RegIrqFlags1 Status register: PLL Lock state, Timeout, RSSI > Threshold...
+0x28 RegIrqFlags2 Status register: FIFO handling flags, Low Battery detection...
+0x29 RegRssiThresh RSSI Threshold control
+0x2A RegRxTimeout1 Timeout duration between Rx request and RSSI detection
+0x2B RegRxTimeout2 Timeout duration between RSSI detection and PayloadReady
+0x2C RegPreambleMsb Preamble length, MSB
+0x2D RegPreambleLsb Preamble length, LSB
+0x2E RegSyncConfig Sync Word Recognition control
+0x2F RegSyncValue Sync Word bytes, first byte
+0x37 RegPacketConfig1 Packet mode settings
+0x38 RegPayloadLength Payload length setting
+0x39 RegNodeAdrs Node address
+0x3A RegBroadcastAdrs Broadcast address
+0x3B RegAutoModes Auto modes settings
+0x3C RegFifoThresh Fifo threshold, Tx start condition
+0x3D RegPacketConfig2 Packet mode settings
+0x3E RegAesKey 16 bytes of the cypher key, first byte
+0x4E RegTemp1 Temperature Sensor control
+0x4F RegTemp2 Temperature readout
+0x58 RegTestLna Sensitivity boost
+0x59 RegTestTcxo XTAL or TCXO input selection
+0x5F RegTestllBw PLL Bandwidth setting
+0x6F RegTestDagc Fading Margin Improvement
+0x71 RegTestAfc AFC offset for low modulation index AFC
+0x50 RegTest Internal test registers
