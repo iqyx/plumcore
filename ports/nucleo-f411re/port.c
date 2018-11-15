@@ -61,16 +61,19 @@
 #include "module_prng_simple.h"
 #include "interfaces/adc.h"
 #include "sffs.h"
+#include "services/radio-rfm69/rfm69.h"
 
 #include "interfaces/sensor.h"
 #include "interfaces/cellular.h"
 #include "interfaces/servicelocator.h"
+#include "interfaces/radio-mac/client.h"
 #include "services/stm32-adc/adc_stm32_locm3.h"
 #include "services/stm32-watchdog/watchdog.h"
 #include "services/plocator/plocator.h"
 #include "services/cli/system_cli_tree.h"
 #include "services/stm32-system-clock/clock.h"
 #include "services/stm32-rtc/rtc.h"
+#include "services/radio-mac-simple/radio-mac-simple.h"
 
 
 /**
@@ -95,7 +98,9 @@ PLocator plocator;
 IServiceLocator *locator;
 SystemClock system_clock;
 Stm32Rtc rtc;
-
+Rfm69 radio1;
+MacSimple mac1;
+Radio r;
 
 int32_t port_early_init(void) {
 	/* Relocate the vector table first. */
@@ -203,10 +208,6 @@ int32_t port_init(void) {
 		"rng1"
 	);
 
-	/* wtf? */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO2);
-	gpio_set(GPIOB, GPIO2);
 
 	/* Configure GPIO for radio & flash SPI bus (SPI2), enable SPI2 clock and
 	 * run spibus driver using libopencm3 to access it. */
@@ -216,6 +217,15 @@ int32_t port_init(void) {
 	rcc_periph_clock_enable(RCC_SPI2);
 	module_spibus_locm3_init(&spi2, "spi2", SPI2);
 	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
+
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
+	gpio_set(GPIOB, GPIO12);
+	module_spidev_locm3_init(&spi2_radio1, "spi2_radio1", &(spi2.iface), GPIOB, GPIO12);
+	hal_interface_set_name(&(spi2_radio1.iface.descriptor), "spi2_radio1");
+
+	rfm69_init(&radio1, &spi2_radio1.iface);
+	rfm69_start(&radio1);
 
 	/** @todo the watchdog is port-dependent. Rename the module accordingly and keep it here. */
 	watchdog_init(&watchdog, 20000, 0);
@@ -242,6 +252,35 @@ int32_t port_init(void) {
 	/* Do not mount the filesystem as there is no flash available. */
 
 	return PORT_INIT_OK;
+}
+
+
+int32_t system_test(void) {
+
+	radio_open(&r, &radio1.radio);
+	radio_set_tx_power(&r, 0);
+	radio_set_frequency(&r, 434200000);
+	radio_set_bit_rate(&r, 100000);
+
+	mac_simple_init(&mac1, &r);
+	mac_simple_set_mcs(&mac1, &mcs_GMSK03_100K);
+
+
+	RadioMac mac;
+	radio_mac_open(&mac, &mac1.iface, 1);
+
+	while (true) {
+		uint8_t buf[64];
+		uint32_t source;
+		size_t len = 0;
+		// radio_mac_receive(&mac, &source, buf, sizeof(buf), &len);
+		// u_log(system_log, LOG_TYPE_DEBUG, "mac rx packet len=%d", len);
+		radio_mac_send(&mac, 0, "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", 64);
+		vTaskDelay(400);
+		u_log(system_log, LOG_TYPE_DEBUG, "rxp=%d rxm=%d rssi=%d", mac1.nbtable.items[0].rxpackets, mac1.nbtable.items[0].rxmissed, (int32_t)(mac1.nbtable.items[0].rssi_dbm));
+	}
+
+	return 0;
 }
 
 

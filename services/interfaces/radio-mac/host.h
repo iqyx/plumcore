@@ -1,5 +1,5 @@
 /*
- * nucleo-f411re port-specific configuration
+ * A generic interface descriptor for accessing the radio MAC
  *
  * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
  * All rights reserved.
@@ -28,52 +28,31 @@
 #pragma once
 
 #include <stdint.h>
-#include "version.h"
-#include "module_led.h"
-#include "module_usart.h"
-#include "services/cli/cli.h"
-#include "interface_directory.h"
-#include "interfaces/servicelocator.h"
+#include <stdbool.h>
+#include <time.h>
+
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+
+#include "interfaces/radio-mac/descriptor.h"
 
 
-#define PORT_NAME                  "nucleo-f411re"
-#define PORT_BANNER                "plumCore"
-
-#define PORT_CLOG                  true
-#define ENABLE_PROFILING           false
-
-/* BUG: enabline clog reuse causes the logging buffer to be corrupted
- * when the messages wrap at the end. */
-#define PORT_CLOG_REUSE            false
-#define PORT_CLOG_BASE             0x20000000
-#define PORT_CLOG_SIZE             0x800
-
-extern struct module_led led_stat;
-extern struct module_spibus_locm3 spi1;
-extern struct module_spidev_locm3 spi1_radio1;
-extern struct module_spibus_locm3 spi2;
-extern struct module_spidev_locm3 spi2_flash1;
-extern struct module_spi_flash flash1;
-extern struct module_rtc_locm3 rtc1;
-extern struct sffs fs;
-extern struct module_prng_simple prng;
-extern struct module_umesh umesh;
-
-extern IServiceLocator *locator;
+typedef enum {
+	HRADIO_MAC_RET_OK = 0,
+	HRADIO_MAC_RET_FAILED,
+	HRADIO_MAC_RET_NULL,
+	HRADIO_MAC_RET_BAD_ARG,
+} hradio_mac_ret_t;
 
 
-int32_t port_early_init(void);
-#define PORT_EARLY_INIT_OK 0
-#define PORT_EARLY_INIT_FAILED -1
+typedef struct {
+	IRadioMac *iradio_mac;
 
-int32_t port_init(void);
-#define PORT_INIT_OK 0
-#define PORT_INIT_FAILED -1
-
-void port_task_timer_init(void);
-uint32_t port_task_timer_get_value(void);
-
-int32_t system_test(void);
+} HRadioMac;
 
 
-
+hradio_mac_ret_t hradio_mac_connect(HRadioMac *self, IRadioMac *iradio_mac);
+hradio_mac_ret_t hradio_mac_disconnect(HRadioMac *self);
+hradio_mac_ret_t hradio_mac_get_packet_to_send(HRadioMac *self, struct iradio_mac_tx_message *msg);
+hradio_mac_ret_t hradio_mac_put_received_packet(HRadioMac *self, const struct iradio_mac_rx_message *msg, uint32_t context);

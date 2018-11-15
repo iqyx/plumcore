@@ -6,6 +6,7 @@ objs = env.Object(source = [
 	File(Glob("interfaces/*.c")),
 	File(Glob("interfaces/plog/*.c")),
 	File(Glob("interfaces/clock/*.c")),
+	File(Glob("interfaces/radio-mac/*.c")),
 ])
 
 env.Append(CPPPATH = [
