@@ -43,5 +43,7 @@ env.DependsOnModule("services/uxb-solar-charger")
 env.DependsOnModule("services/uxb-master")
 env.DependsOnModule("services/sensor-over-can")
 env.DependsOnModule("services/plocator")
+env.DependsOnModule("services/radio-rfm69")
+env.DependsOnModule("services/radio-mac-simple")
 
 Return("objs")
