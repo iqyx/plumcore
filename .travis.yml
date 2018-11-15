@@ -11,6 +11,8 @@ script:
   - git submodule update
   - cd lib/other/nanopb/generator/proto && make && cd ../../../../..
   - cd lib/libopencm3 && make && cd ../..
+  - cp config/plumpot_cellular_defconfig .config
+  - olddefconfig
   - python /usr/bin/scons proto
   - python /usr/bin/scons
 
@@ -25,6 +27,7 @@ before_install:
 install:
   - pip install gitpython
   - pip install pyyaml
+  - pip install kconfiglib
   - mkdir -p $HOME/protobuf && pushd $HOME/protobuf
     && curl -LO 'https://github.com/google/protobuf/releases/download/v3.4.0/protoc-3.4.0-linux-x86_64.zip'
     && unzip protoc-3.4.0-linux-x86_64.zip
