@@ -1,3 +1,6 @@
 Import("env")
+Import("objs")
+Import("conf")
 
-env.DefineModule("stm32-rtc", File(Glob("*.c")))
+if conf["SERVICE_STM32_RTC"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))

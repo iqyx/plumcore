@@ -9,10 +9,4 @@ env.Append(CPPPATH = [
 
 ])
 
-env.DependsOnModule("services/plog-sensor-upload")
-env.DependsOnModule("services/data-process")
-env.DependsOnModule("services/plog-packager")
-env.DependsOnModule("services/plog-router")
-env.DependsOnModule("services/cli")
-
 Return("objs")

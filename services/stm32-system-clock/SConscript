@@ -1,3 +1,6 @@
 Import("env")
+Import("objs")
+Import("conf")
 
-env.DefineModule("stm32-system-clock", File(Glob("*.c")))
+if conf["SERVICE_STM32_SYSTEM_CLOCK"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))

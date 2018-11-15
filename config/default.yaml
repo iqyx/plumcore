@@ -1,8 +1,0 @@
-# Global build configuration
-build:
-    port: plumpot-cellular
-
-
-firmware:
-    signing-key: bin/test_key.key
-    create-key: true

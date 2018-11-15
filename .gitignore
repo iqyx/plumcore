@@ -25,3 +25,6 @@ version.h
 # python compiled
 *.pyc
 
+# ignore generated configuration files
+.config
+config.h

@@ -1,0 +1,293 @@
+mainmenu "plumCore configuration"
+
+menu "Target configuration"
+	choice
+		prompt "Select hardware port to build"
+
+		config PORT_PLUMPOT_CELLULAR
+			bool "plumpot-cellular"
+
+		config PORT_NUCLEO_F411RE
+			bool "STM32 Nucleo-F411RE"
+
+		config PORT_QNODE4
+			bool "qNode4 testing platform"
+	endchoice
+
+	if PORT_PLUMPOT_CELLULAR
+		config PORT_NAME
+			string
+			default "plumpot-cellular"
+
+		config PLUMPOT_CELLULAR_ENABLE_GSM
+			bool "Enable onboard GSM modem"
+			select SERVICE_GSM_QUECTEL
+			default y
+
+		config PLUMPOT_CELLULAR_MQTT_OVER_GSM
+			bool "Create a default MQTT connection over the GSM modem"
+			select DEFAULT_MQTT_CONNECTION
+			default y
+
+		config PLUMPOT_CELLULAR_ENABLE_I2C_SENSORS
+			bool "Enable some I2C sensors on the I2C connector"
+			default n
+			select SERVICE_STM32_I2C_SENSORS
+
+		config PLUMPOT_CELLULAR_ENABLE_WATCHDOG
+			bool "Enable watchdog"
+			default y
+
+		config PLUMPOT_CELLULAR_ENABLE_UXB
+			bool "Enable UXB extension bus"
+			select SERVICE_UXB_MASTER
+			default y
+	endif
+
+	if PORT_NUCLEO_F411RE
+		config NUCLEO_F411RE_RFM69_RADIO
+			bool "RFM69 radio attached"
+			default n
+		config PORT_NAME
+			string
+			default "nucleo-f411re"
+	endif
+
+	if PORT_QNODE4
+		config QNODE4_SPI_FLASH
+			bool "SPI flash support"
+			default y
+
+		config QNODE4_I2C_EEPROM
+			bool "I2C EEPROM support"
+			default n
+
+		config QNODE4_I2C_MCP9808
+			bool "MCP9808 temperature sensor support"
+			default n
+
+		config PORT_NAME
+			string
+			default "qnode4"
+	endif
+endmenu
+
+menu "Firmware images"
+	config FW_IMAGE_LOAD_ADDRESS
+		hex "Load address of the firmware image"
+		default "0x10000"
+
+	config FW_IMAGE_VECTOR_TABLE_OFFSET
+		hex "Offset of the vector table"
+		default "0x400"
+
+	config FW_IMAGE_UBLOAD
+		bool "Generate uBLoad firmware image"
+		default y
+
+	menu "uBLoad firmware image configuration"
+		depends on FW_IMAGE_UBLOAD
+
+		config FW_IMAGE_SIGN
+			bool "Sign the image"
+			default y
+			select FW_IMAGE_HASH
+
+		config FW_IMAGE_SIGN_KEY
+			depends on FW_IMAGE_SIGN
+			string "Signing key"
+			default "default_fw.key"
+
+		config FW_IMAGE_SIGN_KEY_GENERATE
+			depends on FW_IMAGE_SIGN
+			bool "Generate a random key pair if no key is found"
+			default y
+
+		config FW_IMAGE_HASH
+			bool "Append hash for firmware integrity checking"
+			default y
+	endmenu
+
+	config OUTPUT_FILE_PREFIX
+		string "Generic prefix of output file names"
+		default "plumcore"
+
+	config OUTPUT_FILE_PORT_PREFIX
+		bool "Prefix PORT_NAME to output file names"
+		default "y"
+
+	config OUTPUT_FILE_VERSION_SUFFIX
+		bool "Append the current version string to output file names"
+		default y
+endmenu
+
+menu "System startup and configuration"
+	config HOSTNAME
+		string "System host name"
+		default "plumcore"
+
+	config DEFAULT_MQTT_CONNECTION
+		bool "Create a default MQTT connection using first TCP/IP interface available"
+		default y
+
+	if DEFAULT_MQTT_CONNECTION
+		config DEFAULT_MQTT_USE_HOSTNAME_ID
+			bool "Use hostname as a client ID"
+			default y
+
+		config DEFAULT_MQTT_CUSTOM_ID
+			string "Custom client ID"
+			default "unconfigured-id"
+			depends on !DEFAULT_MQTT_USE_HOSTNAME_ID
+
+		config DEFAULT_MQTT_PING_INTERVAL
+			int "MQTT ping interval"
+			default 60000
+
+		config DEFAULT_MQTT_BROKER_IP
+			string "MQTT broker IP address"
+			default "10.10.10.10"
+
+		config DEFAULT_MQTT_BROKER_PORT
+			int "MQTT broker TCP port"
+			default 1883
+	endif
+endmenu
+
+menu "Devices"
+	config SERVICE_UXB_MASTER
+		bool "Support master role on the UXB bus using STM32 SPI peripheral"
+		default y
+
+	menu "UXB interface drivers"
+		depends on SERVICE_UXB_MASTER
+
+		config SERVICE_UXB_SOLAR_CHARGER
+			bool "UXB solar-charger interface support"
+			default y
+
+		config SERVICE_UXB_LDET
+			bool "UXB ldet interface support (lightning detector samplers)"
+			default y
+
+		config SERVICE_UXB_WAVEFORM_SOURCE
+			bool "UXB waveform-source interface support"
+			default y
+
+		config SERVICE_UXB_CAN
+			bool "UXB can interface support"
+			default y
+	endmenu
+
+	config SERVICE_RADIO_RFM69
+		bool "SX1231/RFM69 sub-1GHz radio transceiver support"
+		default n
+
+	config SERVICE_SENSOR_OVER_CAN
+		bool "Support for attaching sensors over CAN bus"
+		default y
+
+	config SERVICE_RADIO_AX5243
+		bool "OnSemi AX5243 sub-1GHz radio transceiver support"
+		default n
+
+	config SERVICE_STM32_WATCHDOG
+		bool "STM32 watchdog support"
+		default y
+
+	config SERVICE_STM32_RTC
+		bool "STM32 RTC clock support"
+		default y
+
+	config SERVICE_STM32_ADC
+		bool "STM32 ADC support"
+		default y
+
+	config SERVICE_STM32_TIMER_CAPSENSE
+		bool "Support capacitive sensing using STM32 timer peripheral"
+		default n
+
+	config SERVICE_GSM_QUECTEL
+		bool "Support for Quectel GSM modems"
+		default y
+
+	config SERVICE_STM32_SYSTEM_CLOCK
+		bool "STM32 system clock implemented using STM32 timer peripheral"
+		default y
+
+	config SERVICE_STM32_I2C_SENSORS
+		bool "Support for some basic I2C sensors using STM32 I2C peripheral"
+		default y
+endmenu
+
+menu "System services"
+	config SERVICE_PLOG_ROUTER
+		bool "PLOG Message router service"
+		default y
+
+	config SERVICE_PLOCATOR
+		bool "System service locator service"
+		default y
+endmenu
+
+menu "Data manipulation/evaluation/processing services"
+	config SERVICE_DATA_PROCESS
+		bool "data-process framework for flow-graph like data processing"
+		default n
+
+	config SERVICE_PLOG_SENSOR_UPLOAD
+		bool "Service for uploading sensor data over the PLOG message router"
+		default y
+
+	config SERVICE_USART_LOGGER
+		bool "USART logger service"
+		default y
+
+	config SERVICE_MQTT_SENSOR_UPLOAD
+		bool "Upload sensor data over MQTT"
+		default y
+
+	config SERVICE_TCPIP_SENSOR_UPLOAD
+		bool "Upload sensor data as text over a raw TCP connection"
+		default y
+
+	config SERVICE_STREAM_OVER_MQTT
+		bool "Support for accessing stream interfaces using MQTT protocol"
+		default y
+
+	config SERVICE_MQTT_TCPIP
+		bool "MQTT protocol support over a raw TCP connection"
+		default y
+
+	config SERVICE_PLOG_PACKAGER
+		bool "Service for packaging PLOG messages into compressed blobs"
+		default y
+endmenu
+
+menu "User interface services"
+	config SERVICE_CLI
+		bool "Command line interface"
+		default y
+
+	menu "Command line interface configuration"
+		depends on SERVICE_CLI
+	endmenu
+
+endmenu
+
+menu "Communication services"
+	config SERVICE_MQTT_FILE_SERVER
+		bool "MQTT File server service"
+		default y
+
+	config SERVICE_RADIO_MAC_SIMPLE
+		bool "Simple radio MAC protocol support"
+		default y
+endmenu
+
+menu "Submodules/external library dependencies"
+	comment "Download, patch and compile external library dependencies"
+	config REQUIRE_FOO
+		bool "library foo"
+		default n
+endmenu

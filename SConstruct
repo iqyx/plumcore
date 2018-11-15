@@ -28,17 +28,43 @@
 import os
 import time
 import yaml
+import kconfiglib
 
 # Create default environment and export it. It will be modified later
 # by port-specific and other build scripts.
 env = Environment()
+env.Append(ENV = os.environ)
 Export("env")
 
 # Some helpers to make the build looks pretty
 SConscript("pretty.SConscript")
-SConscript("modules.SConscript")
 
-env.Append(ENV = os.environ)
+# Now load the Kconfig configuration
+kconf = kconfiglib.Kconfig("Kconfig")
+try:
+	kconf.load_config(".config")
+except kconfiglib._KconfigIOError:
+	print("Error: no configuration found in the .config file. Run menuconfig or alldefconfig to create one.")
+	exit(1)
+
+conf = {}
+for n in kconf.node_iter():
+	if isinstance(n.item, kconfiglib.Symbol):
+		conf[n.item.name] = n.item.str_value;
+
+Export("conf")
+
+# And generate the corresponding config.h file for inclusion in sources
+env.Command(
+	target = "config.h",
+	source = ".config",
+	action = Action("genconfig", env["GENCONFIGCOMSTR"])
+)
+
+
+# Examine the Git repository and build the version string
+SConscript("version.SConscript")
+
 
 ## @todo Check for the nanopb installation. Request download and build of the library
 ##       if it is not properly initialized.
@@ -48,22 +74,17 @@ def build_proto(target, source, env):
 		d = os.path.dirname(str(s))
 		os.system("protoc --plugin=lib/other/nanopb/generator/protoc-gen-nanopb --proto_path=%s --nanopb_out=%s --proto_path=lib/other/nanopb/generator/proto %s" % (d, d, s))
 
-
-
-# Load build configuration
-env["CONFIG"] = yaml.load(file("config/default.yaml", "r"))
-env["PORT"] = env["CONFIG"]["build"]["port"];
-
-# Examine the Git repository and build the version string
-SConscript("version.SConscript")
-
-env["PORTFILE"] = "bin/plumcore-" + env["PORT"] + "-" + env["VERSION"]
+env["PORTFILE"] = "bin/%s" % conf["OUTPUT_FILE_PREFIX"];
+if conf["OUTPUT_FILE_PORT_PREFIX"] == "y":
+	env["PORTFILE"] += "-" + conf["PORT_NAME"]
+if conf["OUTPUT_FILE_VERSION_SUFFIX"] == "y":
+	env["PORTFILE"] += "-" + env["VERSION"]
 
 
 objs = []
+Export("objs")
 
-objs.append(SConscript("ports/%s/SConscript" % env["PORT"]))
-
+SConscript("ports/SConscript")
 
 
 env["CC"] = "%s-gcc" % env["TOOLCHAIN"]
@@ -143,13 +164,6 @@ env.Append(CFLAGS = [
 	"-Wstrict-prototypes",
 ])
 
-for module in env["BUILD_MODULES"]:
-	p, m = os.path.split(module)
-	libf = "%s/%s/lib%s.a" % (p, m, m)
-	env.Depends(objs, libf)
-	env.AppendUnique(LIBS = [m])
-	env.Alias(module, libf)
-
 env.Append(LIBS = [
 	env["LIBOCM3"],
 	"c",
@@ -165,10 +179,6 @@ elf = env.Program(
 		File(env["PORTFILE"] + ".map"),
 	],
 )
-
-# Create the firmware image file
-env["FW_SIGNING_KEY"] = env["CONFIG"]["firmware"]["signing-key"];
-env["FW_CREATE_KEY"] = env["CONFIG"]["firmware"]["create-key"];
 
 SConscript("firmware.SConscript")
 

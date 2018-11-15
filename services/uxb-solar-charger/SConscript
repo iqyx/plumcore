@@ -1,3 +1,6 @@
 Import("env")
+Import("objs")
+Import("conf")
 
-env.DefineModule("uxb-solar-charger", File(Glob("*.c")))
+if conf["SERVICE_UXB_SOLAR_CHARGER"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))

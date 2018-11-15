@@ -24,3 +24,4 @@ env['FWCREATECOMSTR'] = cformat("{c.blue}{c.bold}Creating firmware image{c.white
 env['CREATEKEYCOMSTR'] = cformat("{c.blue}{c.bold}Generating  new firmware signing key{c.white} $TARGET{c.default}")
 env['CREATEBINCOMSTR'] = cformat("{c.blue}{c.bold}Creating binary firmware{c.white} $TARGET{c.default}")
 env['GENIFACECOMSTR'] = cformat("{c.blue}{c.bold}Generating interface files{c.white} $TARGET{c.default}")
+env['GENCONFIGCOMSTR'] = cformat("{c.blue}{c.bold}Generating configuration headers{c.white} $TARGET{c.default}")

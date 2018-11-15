@@ -1,8 +1,8 @@
 Import("env")
+Import("conf")
 
 
-# signing_key = "bin/test_key.key"
-signing_key = env.get("FW_SIGNING_KEY")
+signing_key = conf["FW_IMAGE_SIGN_KEY"]
 fw_sources = [env["PORTFILE"] + ".bin"]
 
 env.Command(
@@ -17,7 +17,7 @@ createfw_cmd += " --version \"$VERSION\""
 createfw_cmd += " --compatibility \"meh 0.x.x\""
 
 if signing_key:
-	if env.get("FW_CREATE_KEY"):
+	if conf["FW_IMAGE_SIGN_KEY_GENERATE"] == "y":
 		env.Command(
 			target = signing_key,
 			source = None,

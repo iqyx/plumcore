@@ -1,4 +1,5 @@
 Import("env")
+Import("conf")
 
 from git import Repo
 import time
@@ -44,4 +45,4 @@ def make_ver(target, source, env):
 	return None
 
 env.Append(BUILDERS = {"MakeVer": env.Builder(action = make_ver)})
-version = env.MakeVer(target = "ports/%s/version.h" % env["PORT"], source = None)
+version = env.MakeVer(target = "ports/%s/version.h" % conf["PORT_NAME"], source = None)

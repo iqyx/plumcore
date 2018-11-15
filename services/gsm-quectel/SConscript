@@ -1,3 +1,6 @@
 Import("env")
+Import("objs")
+Import("conf")
 
-env.DefineModule("gsm-quectel", File(Glob("*.c")))
+if conf["SERVICE_GSM_QUECTEL"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))
