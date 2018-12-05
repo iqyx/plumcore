@@ -29,7 +29,6 @@
 #include "queue.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "interface_stream.h"
 #include "interface_profiling.h"
 #include "module_fifo_profiler.h"
@@ -92,8 +91,6 @@ int32_t module_fifo_profiler_init(struct module_fifo_profiler *profiler, const c
 	}
 
 	memset(profiler, 0, sizeof(struct module_fifo_profiler));
-	hal_module_descriptor_init(&(profiler->module), name);
-	hal_module_descriptor_set_shm(&(profiler->module), (void *)profiler, sizeof(struct module_fifo_profiler));
 
 	/* Initialize the profiling interface. */
 	interface_profiling_init(&(profiler->iface));
@@ -106,11 +103,11 @@ int32_t module_fifo_profiler_init(struct module_fifo_profiler *profiler, const c
 		goto err;
 	}
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE "FIFO time profiler initialized, queue length %u", profiler->module.name, length);
+	u_log(system_log, LOG_TYPE_INFO, "FIFO time profiler initialized, queue length %u", length);
 	return MODULE_FIFO_PROFILER_INIT_OK;
 err:
 	module_fifo_profiler_free(profiler);
-	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE "FIFO time profiler failed to initialize", profiler->module.name);
+	u_log(system_log, LOG_TYPE_ERROR, "FIFO time profiler failed to initialize");
 	return MODULE_FIFO_PROFILER_INIT_FAILED;
 }
 

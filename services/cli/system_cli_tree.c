@@ -33,7 +33,6 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "port.h"
 #include "config.h"
 

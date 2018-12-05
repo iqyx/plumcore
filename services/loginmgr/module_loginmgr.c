@@ -27,7 +27,6 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "interface_stream.h"
 #include "module_loginmgr.h"
 #include "lineedit.h"
@@ -297,10 +296,9 @@ int32_t module_loginmgr_init(struct module_loginmgr *loginmgr, const char *name,
 	if (u_assert(loginmgr != NULL)) {
 		return MODULE_LOGINMGR_INIT_FAILED;
 	}
+	(void)name;
 
 	memset(loginmgr, 0, sizeof(struct module_loginmgr));
-	hal_module_descriptor_init(&(loginmgr->module), name);
-	hal_module_descriptor_set_shm(&(loginmgr->module), (void *)loginmgr, sizeof(struct module_loginmgr));
 
 	/* Initialize stream interface for shell interpreter. */
 	interface_stream_init(&(loginmgr->iface));
@@ -316,7 +314,7 @@ int32_t module_loginmgr_init(struct module_loginmgr *loginmgr, const char *name,
 	lineedit_set_prompt_callback(&(loginmgr->le), module_loginmgr_prompt_callback, (void *)loginmgr);
 
 	xTaskCreate(loginmgr_task, "loginmgr_task", configMINIMAL_STACK_SIZE + 64, (void *)loginmgr, 1, NULL);
-	u_log(system_log, LOG_TYPE_INFO, "%s: module loginmgr initialized on interface '%s'", loginmgr->module.name, host->descriptor.name);
+	u_log(system_log, LOG_TYPE_INFO, "module loginmgr initialized on interface '%s'", host->descriptor.name);
 
 	return MODULE_LOGINMGR_INIT_OK;
 }

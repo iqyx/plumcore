@@ -24,14 +24,11 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "hal_module.h"
 #include "interface_spibus.h"
 
 #define MODULE_CRYPTO_TEST_LENGTH 3000
 
 struct module_crypto_test {
-	struct hal_module_descriptor module;
-
 	/**
 	 * Test results are normally displayed in a readable form on a selected
 	 * stream interface.

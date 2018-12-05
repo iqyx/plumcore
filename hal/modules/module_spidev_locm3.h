@@ -23,14 +23,11 @@
 #define _MODULE_SPIDEV_LOCM3_H_
 
 #include <stdint.h>
-#include "hal_module.h"
 #include "interface_spibus.h"
 #include "interface_spidev.h"
 
 
 struct module_spidev_locm3 {
-
-	struct hal_module_descriptor module;
 	struct interface_spidev iface;
 	struct interface_spibus *spibus;
 

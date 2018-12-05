@@ -29,7 +29,6 @@
 #include "interface_flash.h"
 
 struct module_spi_flash {
-	struct hal_module_descriptor module;
 	struct interface_flash iface;
 	struct interface_spidev *spidev;
 };

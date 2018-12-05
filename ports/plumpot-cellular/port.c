@@ -57,7 +57,6 @@
 #include "interface_rng.h"
 #include "module_prng_simple.h"
 #include "interfaces/adc.h"
-#include "module_mac_csma.h"
 #include "interface_mac.h"
 // #include "module_umesh.h"
 #include "interface_profiling.h"
@@ -87,7 +86,6 @@ struct module_spidev_locm3 spi2_radio1;
 struct module_spi_flash flash1;
 struct module_rtc_locm3 rtc1;
 struct module_prng_simple prng;
-struct module_mac_csma radio1_mac;
 // struct module_umesh umesh;
 struct module_fifo_profiler profiler;
 struct module_usart gsm1_usart;

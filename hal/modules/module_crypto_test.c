@@ -29,7 +29,6 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "interface_stream.h"
 #include "module_crypto_test.h"
 
@@ -371,8 +370,6 @@ int32_t module_crypto_test_init(struct module_crypto_test *crypto, const char *n
 	}
 
 	memset(crypto, 0, sizeof(struct module_crypto_test));
-	hal_module_descriptor_init(&(crypto->module), name);
-	hal_module_descriptor_set_shm(&(crypto->module), (void *)crypto, sizeof(struct module_crypto_test));
 	crypto->stream = stream;
 
 	return MODULE_CRYPTO_TEST_INIT_OK;
