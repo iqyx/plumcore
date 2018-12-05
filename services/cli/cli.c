@@ -29,6 +29,8 @@
 #include "u_assert.h"
 #include "u_log.h"
 #include "hal_module.h"
+#include "port.h"
+#include "config.h"
 
 #include "interface_stream.h"
 #include "cli.h"

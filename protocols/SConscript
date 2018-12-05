@@ -1,20 +1,26 @@
 Import("env")
+Import("conf")
+Import("objs")
 
-objs = env.Object(source = [
+objs.append(env.Object(source = [
 	File(Glob("interfaces/*.c")),
-	File(Glob("umesh/*.c")),
-	File(Glob("umesh/proto/*.c")),
-	File(Glob("uxb/*.c")),
-])
+	# File(Glob("umesh/*.c")),
+	# File(Glob("umesh/proto/*.c")),
+]))
+
+env.AddSourceIf("SERVICE_UXB_SOLAR_CHARGER", File("uxb/solar_charger_iface.pb.c"), None)
+env.AddSourceIf("SERVICE_UXB_LDET", File("uxb/ldet.pb.c"), None)
+env.AddSourceIf("SERVICE_UXB_WAVEFORM_SOURCE", File("uxb/waveform.pb.c"), None)
+env.AddSourceIf("SERVICE_UXB_CAN", File("uxb/can.pb.c"), None)
+
 
 env.Append(CPPPATH = [
 	Dir("."),
 	Dir("umesh"),
 	Dir("uxb"),
-	Dir("umesh/proto"),
+	# Dir("umesh/proto"),
 ])
 
-Return("objs")
 
 
 

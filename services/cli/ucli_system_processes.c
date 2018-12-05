@@ -36,6 +36,10 @@ static int32_t ucli_system_processes_print_table(struct treecli_parser *parser, 
 		total_runtime += task_status[i].ulRunTimeCounter;
 	}
 
+	if (task_cnt == 0 || total_runtime == 0) {
+		module_cli_output("Task statistics are disabled\r\n", parser->context);
+	}
+
 	if (total_runtime > 0) {
 
 		module_cli_output(

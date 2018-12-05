@@ -51,7 +51,6 @@ static void init_task(void *p) {
 
 
 int main(void) {
-
 	port_early_init();
 	u_log_init();
 

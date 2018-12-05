@@ -29,17 +29,10 @@
 #include "port.h"
 #include "u_assert.h"
 #include "u_log.h"
+#include "config.h"
 
 #include "system.h"
-
 #include "interfaces/servicelocator.h"
-#include "module_loginmgr.h"
-#include "services/cli/cli.h"
-#include "services/cli/system_cli_tree.h"
-#include "services/plog-router/plog_router.h"
-#include "services/plog-sensor-upload/plog_sensor_upload.h"
-#include "interfaces/plog/descriptor.h"
-#include "interfaces/plog/client.h"
 
 #ifdef MODULE_NAME
 #undef MODULE_NAME
@@ -52,6 +45,10 @@
  * Discover the first stream interface in the system, it should be the system console.
  * Use it to initialize a login manager service which then runs a command line interface.
  */
+#if defined(CONFIG_DEFAULT_CONSOLE_CLI)
+#include "services/loginmgr/module_loginmgr.h"
+#include "services/cli/cli.h"
+#include "services/cli/system_cli_tree.h"
 static void main_console_init(void) {
 	Interface *console;
 	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_STREAM, 0, &console) != ISERVICELOCATOR_RET_OK) {
@@ -74,17 +71,23 @@ static void main_console_init(void) {
 	service_cli_init(console_cli, &(console_loginmgr->iface), system_cli_tree);
 	service_cli_start(console_cli);
 
-	/* Wait for the extension board discovery. */
-	vTaskDelay(4000);
+	#if defined(CONFIG_CONFIG_LOAD_FILE)
+		/* Wait for the extension board discovery. */
+		vTaskDelay(4000);
 
-	service_cli_load_file(console_cli, "default.cfg");
+		service_cli_load_file(console_cli, CONFIG_CONFIG_LOAD_FILE_FILENAME);
+	#endif
 }
-
+#endif
 
 /**
  * Initialize and run the system-wide message router. It is used for system logging purposes and
  * to deliver measured data to an appropriate sink (memory, network, etc.)
  */
+#if defined(CONFIG_DEFAULT_PLOG_ROUTER)
+#include "services/plog-router/plog_router.h"
+#include "interfaces/plog/descriptor.h"
+#include "interfaces/plog/client.h"
 PlogRouter plog_router;
 static void system_plog_router_init(void) {
 	plog_router_init(&plog_router);
@@ -95,20 +98,40 @@ static void system_plog_router_init(void) {
 		"plog-router"
 	);
 }
+#endif
 
 
 /**
  * Plog sensor upload is a service which periodically searches for all connected sensors,
  * reads their values and publishes them to the plog message router.
  */
+#if defined(CONFIG_DEFAULT_PLOG_SENSOR_UPLOAD)
+#include "services/plog-sensor-upload/plog_sensor_upload.h"
 PlogSensorUpload plog_sensor_upload;
 static void system_plog_sensor_upload_init(void) {
 	plog_sensor_upload_init(&plog_sensor_upload, 1000);
 }
+#endif
 
+
+#if defined(CONFIG_SERVICE_DATA_PROCESS)
+#include "services/data-process/data-process.h"
+static void system_data_process_init(void) {
+	dp_graph_init(&data_process_graph);
+}
+#endif
 
 void system_init(void) {
-	main_console_init();
-	system_plog_router_init();
-	system_plog_sensor_upload_init();
+	#if defined(CONFIG_DEFAULT_CONSOLE_CLI)
+		main_console_init();
+	#endif
+	#if defined(CONFIG_DEFAULT_PLOG_ROUTER)
+		system_plog_router_init();
+	#endif
+	#if defined(CONFIG_DEFAULT_PLOG_SENSOR_UPLOAD)
+		system_plog_sensor_upload_init();
+	#endif
+	#if defined(CONFIG_SERVICE_DATA_PROCESS)
+		system_data_process_init();
+	#endif
 }

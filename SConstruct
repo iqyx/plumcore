@@ -65,7 +65,6 @@ env.Command(
 # Examine the Git repository and build the version string
 SConscript("version.SConscript")
 
-
 ## @todo Check for the nanopb installation. Request download and build of the library
 ##       if it is not properly initialized.
 def build_proto(target, source, env):
@@ -84,6 +83,7 @@ if conf["OUTPUT_FILE_VERSION_SUFFIX"] == "y":
 objs = []
 Export("objs")
 
+SConscript("kconfig.SConscript")
 SConscript("ports/SConscript")
 
 
@@ -95,6 +95,7 @@ env["LD"] = "%s-gcc" % env["TOOLCHAIN"]
 env["OBJCOPY"] = "%s-objcopy" % env["TOOLCHAIN"]
 env["OBJDUMP"] = "%s-objdump" % env["TOOLCHAIN"]
 env["SIZE"] = "%s-size" % env["TOOLCHAIN"]
+env["READELF"] = "%s-readelf" % env["TOOLCHAIN"]
 env["OOCD"] = "openocd"
 env["CREATEFW"] = "tools/createfw.py"
 
@@ -112,8 +113,8 @@ objs.append(env.Object(source = [
 
 objs.append(SConscript("uhal/SConscript"))
 objs.append(SConscript("system/SConscript"))
-objs.append(SConscript("protocols/SConscript"))
-objs.append(SConscript("lib/SConscript"))
+SConscript("protocols/SConscript")
+SConscript("lib/SConscript")
 objs.append(SConscript("services/SConscript"))
 
 
@@ -130,10 +131,25 @@ env.Append(LINKFLAGS = [
 	"-Wl,--gc-sections",
 ])
 
+
+env["LOAD_ADDRESS"] = "0x0";
+if conf["FW_IMAGE_ELF"] == "y":
+	env["LOAD_ADDRESS"] = conf["ELF_IMAGE_LOAD_ADDRESS"]
+if conf["FW_IMAGE_UBLOAD"] == "y":
+	if conf["FW_IMAGE_UBLOAD_PIC"] == "y":
+		env["LOAD_ADDRESS"] = "0x0"
+	else:
+		env["LOAD_ADDRESS"] = conf["FW_IMAGE_LOAD_ADDRESS"]
+
+env.Append(LINKFLAGS = [
+	"-Wl,--defsym=LOAD_ADDRESS=%s" % env["LOAD_ADDRESS"],
+])
+
+
 env.Append(CFLAGS = [
 	"-Os",
 	"-g",
-	#~ "-flto",
+	"-flto",
 	"-fno-common",
 	"-fdiagnostics-color=always",
 	"-ffunction-sections",
@@ -171,15 +187,6 @@ env.Append(LIBS = [
 	"nosys",
 ])
 
-# link the whole thing
-elf = env.Program(
-	source = objs,
-	target = [
-		File(env["PORTFILE"] + ".elf"),
-		File(env["PORTFILE"] + ".map"),
-	],
-)
-
 SConscript("firmware.SConscript")
 
 proto = env.Command(
@@ -191,43 +198,5 @@ proto = env.Command(
 	action = build_proto
 )
 
-elfsize = env.Command(source = elf, target = "elfsize", action = "$SIZE $SOURCE")
-
-program = env.Command(
-	source = env["PORTFILE"] + ".fw",
-	target = "program",
-	action = """
-	$OOCD \
-	-s /usr/share/openocd/scripts/ \
-	-f interface/%s.cfg \
-	-f target/%s.cfg \
-	-c "init" \
-	-c "reset init" \
-	-c "flash write_image erase $SOURCE 0x08010000 bin" \
-	-c "reset" \
-	-c "shutdown"
-	""" % (env["OOCD_INTERFACE"], env["OOCD_TARGET"])
-)
-
-program_bare = env.Command(
-	source = env["PORTFILE"] + ".bin",
-	target = "program_bare",
-	action = """
-	$OOCD \
-	-s /usr/share/openocd/scripts/ \
-	-f interface/%s.cfg \
-	-f target/%s.cfg \
-	-c "init" \
-	-c "reset init" \
-	-c "flash write_image erase $SOURCE 0x08000000 bin" \
-	-c "reset" \
-	-c "shutdown"
-	""" % (env["OOCD_INTERFACE"], env["OOCD_TARGET"])
-)
-
-
-# And do something by default.
-env.Alias("umeshfw", source = env["PORTFILE"] + ".fw")
 env.Alias("proto", proto);
-Default(env["PORTFILE"] + ".fw")
-
+Default("firmware")
