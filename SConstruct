@@ -149,7 +149,6 @@ env.Append(LINKFLAGS = [
 env.Append(CFLAGS = [
 	"-Os",
 	"-g",
-	"-flto",
 	"-fno-common",
 	"-fdiagnostics-color=always",
 	"-ffunction-sections",

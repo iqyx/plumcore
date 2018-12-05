@@ -94,21 +94,6 @@ void vApplicationIdleHook(void) {
 }
 
 
-void sys_tick_handler(void);
-void sys_tick_handler(void) {
-	/* Patch to prevent HardFaults in FreeRTOS when the systick interrupt
-	 * occurs before the scheduler is started.
-	 * https://my.st.com/public/STe2ecommunities/mcu/Lists/STM32Java/Flat.aspx?
-	 * RootFolder=%2Fpublic%2FSTe2ecommunities%2Fmcu%2FLists%2FSTM32Java%2FCube
-	 * MX%204.3.1%20-%20FreeRTOS%20SysTick%20and%20HardFault&FolderCTID=0x01200
-	 * 200770978C69A1141439FE559EB459D758000F9A0E3A95BA69146A17C2E80209ADC21
-	 * &currentviews=310 */
-	if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
-		xPortSysTickHandler();
-	}
-}
-
-
 void hard_fault_hook(uint32_t *stack) __attribute__((used));
 void hard_fault_hook(uint32_t *stack) {
 	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("processor hard fault at 0x%08x"), stack[6]);
