@@ -1,3 +1,6 @@
 Import("env")
+Import("objs")
+Import("conf")
 
-env.DefineModule("plog-packager", File(Glob("*.c")))
+if conf["SERVICE_PLOG_PACKAGER"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))

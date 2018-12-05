@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "cli_table_helper.h"
 
 #define DNODE_INDEX(p, i) p->pos.levels[p->pos.depth + i].dnode_index
 

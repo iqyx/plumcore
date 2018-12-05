@@ -1,3 +1,6 @@
 Import("env")
+Import("objs")
+Import("conf")
 
-env.DefineModule("mqtt-file-server", File(Glob("*.c")))
+if conf["SERVICE_MQTT_FILE_SERVER"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))

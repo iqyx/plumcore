@@ -34,36 +34,56 @@
 #include "u_assert.h"
 #include "u_log.h"
 #include "hal_module.h"
+#include "port.h"
+#include "config.h"
 
 #include "system_cli_tree.h"
+#include "cli.h"
 
-#include "ucli_interface_mac.c"
+// #include "ucli_interface_mac.c"
 //~ #include "config_tree/ucli_umesh_ke.c"
-#include "ucli_umesh_l2_keymgr.c"
-#include "ucli_umesh_l2_filetransfer.c"
-#include "ucli_umesh_nbtable.c"
-#include "ucli_umesh.c"
+// #include "ucli_umesh_l2_keymgr.c"
+// #include "ucli_umesh_l2_filetransfer.c"
+// #include "ucli_umesh_nbtable.c"
+// #include "ucli_umesh.c"
 #if defined(TESTS)
 	#include "ucli_tools_tests.c"
 #endif
-#include "ucli_tools_crypto.c"
-#include "ucli_device_power.c"
+// #include "ucli_tools_crypto.c"
+// #include "ucli_device_power.c"
 #include "ucli_system_log.c"
 #include "ucli_system_memory.c"
 #include "ucli_system_processes.c"
 #include "ucli_system.c"
 #include "ucli_files.c"
-#include "device_sensor.c"
-#include "device_cellular.c"
-
-#include "service_data_process.h"
-#include "service_plog_router.h"
-#include "device_uxb.h"
-#include "system_bootloader.h"
-#include "device_can.h"
-#include "device_can_sensor.h"
+#if defined(CONFIG_SERVICE_CLI_DEVICE_SENSOR)
+	#include "device_sensor.c"
+#endif
+#if defined(CONFIG_SERVICE_CLI_DEVICE_CELLULAR)
+	#include "device_cellular.c"
+#endif
+#if defined(CONFIG_SERVICE_CLI_SERVICE_DATA_PROCESS)
+	#include "service_data_process.h"
+#endif
+#if defined(CONFIG_SERVICE_CLI_SERVICE_PLOG_ROUTER)
+	#include "service_plog_router.h"
+#endif
+#if defined(CONFIG_SERVICE_CLI_DEVICE_UXB)
+	#include "device_uxb.h"
+#endif
+#if defined(CONFIG_SERVICE_CLI_SYSTEM_BOOTLOADER)
+	#include "system_bootloader.h"
+#endif
+#if defined(CONFIG_SERVICE_CLI_DEVICE_CAN)
+	#include "device_can.h"
+#endif
+#if defined(CONFIG_SERVICE_CLI_DEVICE_DRIVER_SENSOR_OVER_CAN)
+	#include "device_can_sensor.h"
+#endif
+#if defined(CONFIG_SERVICE_CLI_DEVICE_CLOCK)
+	#include "device_clock.h"
+#endif
 #include "config_export.h"
-#include "device_clock.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -116,6 +136,7 @@ const struct treecli_node *system_cli_tree = Node {
 					},
 				},
 				#endif
+				#if 0
 				Node {
 					Name "crypto",
 					Commands {
@@ -126,6 +147,7 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					},
 				},
+				#endif
 				End
 
 			}
@@ -150,6 +172,7 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					},
 					Subnodes {
+						#if defined(CONFIG_SERVICE_CLI_DEVICE_DRIVER_SENSOR_OVER_CAN)
 						Node {
 							Name "can-sensor",
 							Commands {
@@ -175,10 +198,11 @@ const struct treecli_node *system_cli_tree = Node {
 								End
 							},
 						},
+						#endif
 						End
 					},
 				},
-				#if defined(INTERFACE_POWER)
+				#if 0
 				Node {
 					Name "power",
 					Commands {
@@ -190,6 +214,7 @@ const struct treecli_node *system_cli_tree = Node {
 					},
 				},
 				#endif
+				#if defined(CONFIG_SERVICE_CLI_DEVICE_SENSOR)
 				Node {
 					Name "sensor",
 					Commands {
@@ -200,6 +225,8 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					},
 				},
+				#endif
+				#if defined(CONFIG_SERVICE_CLI_DEVICE_CELLULAR)
 				Node {
 					Name "cellular",
 					Commands {
@@ -216,6 +243,8 @@ const struct treecli_node *system_cli_tree = Node {
 						}
 					}
 				},
+				#endif
+				#if defined(CONFIG_SERVICE_CLI_DEVICE_UXB)
 				Node {
 					Name "uxb",
 					Commands {
@@ -226,6 +255,8 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					},
 				},
+				#endif
+				#if defined(CONFIG_SERVICE_CLI_DEVICE_CAN)
 				Node {
 					Name "can",
 					Commands {
@@ -242,6 +273,8 @@ const struct treecli_node *system_cli_tree = Node {
 						}
 					}
 				},
+				#endif
+				#if defined(CONFIG_SERVICE_CLI_DEVICE_CLOCK)
 				Node {
 					Name "clock",
 					Commands {
@@ -258,12 +291,15 @@ const struct treecli_node *system_cli_tree = Node {
 						}
 					}
 				},
+				#endif
 				End
 			},
 		},
 		Node {
 			Name "service",
 			Subnodes {
+
+				#if defined(CONFIG_SERVICE_CLI_SERVICE_PLOG_ROUTER)
 				Node {
 					Name "plog-router",
 					Commands {
@@ -274,6 +310,8 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					}
 				},
+				#endif
+				#if defined(CONFIG_SERVICE_CLI_SERVICE_DATA_PROCESS)
 				Node {
 					Name "data-process",
 					Commands {
@@ -362,6 +400,7 @@ const struct treecli_node *system_cli_tree = Node {
 						End,
 					}
 				},
+				#endif
 				End
 
 			}
@@ -406,6 +445,7 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					},
 				},
+				#if defined(CONFIG_SERVICE_CLI_SYSTEM_BOOTLOADER)
 				Node {
 					Name "bootloader",
 					Subnodes {
@@ -458,6 +498,7 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					}
 				},
+				#endif
 				Node {
 					Name "config",
 					Commands {

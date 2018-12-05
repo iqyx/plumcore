@@ -23,9 +23,9 @@
 
 #include <stdint.h>
 #include "version.h"
+#include "config.h"
 #include "module_led.h"
 #include "module_usart.h"
-#include "services/cli/cli.h"
 #include "interface_directory.h"
 #include "interfaces/servicelocator.h"
 
@@ -49,7 +49,11 @@ extern struct module_spibus_locm3 spi2;
 extern struct module_spidev_locm3 spi2_flash1;
 extern struct module_spi_flash flash1;
 extern struct module_rtc_locm3 rtc1;
-extern struct sffs fs;
+
+#if defined(CONFIG_LIB_SFFS)
+	#include "sffs.h"
+	extern struct sffs fs;
+#endif
 extern struct module_prng_simple prng;
 extern struct module_umesh umesh;
 

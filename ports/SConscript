@@ -1,0 +1,7 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+# Select the appropriate port SConscript file based on the configuration
+
+objs.append(SConscript("%s/SConscript" % conf["PORT_NAME"]))

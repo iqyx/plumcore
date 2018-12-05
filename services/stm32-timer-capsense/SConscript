@@ -1,3 +1,6 @@
 Import("env")
+Import("objs")
+Import("conf")
 
-env.DefineModule("stm32-timer-capsense", File(Glob("*.c")))
+if conf["SERVICE_STM32_TIMER_CAPSENSE"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))

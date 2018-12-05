@@ -1,3 +1,6 @@
 Import("env")
+Import("objs")
+Import("conf")
 
-env.DefineModule("usart-logger", File(Glob("*.c")))
+if conf["SERVICE_USART_LOGGER"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))

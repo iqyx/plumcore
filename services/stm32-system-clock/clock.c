@@ -38,6 +38,7 @@
 #include "port.h"
 
 #include <libopencm3/stm32/timer.h>
+#include <libopencm3/stm32/gpio.h>
 
 #include "clock.h"
 #include "interfaces/clock/descriptor.h"
@@ -139,8 +140,9 @@ system_clock_ret_t system_clock_init(SystemClock *self, uint32_t timer, uint32_t
 
 	/** @todo remove */
 	system_clock_set(self, &(struct timespec){.tv_sec = 1537213488, .tv_nsec = 0});
-
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("system clock timer started"));
+
+	gpio_set(GPIOB, GPIO10);
 	self->initialized = true;
 	return SYSTEM_CLOCK_RET_OK;
 }

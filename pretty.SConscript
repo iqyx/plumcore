@@ -20,7 +20,9 @@ if ARGUMENTS.get('VERBOSE') != "1":
 	env['LINKCOMSTR'] = cformat("{c.bold}{c.blue}Linking{c.white} $TARGET{c.default}")
 	env['ARCOMSTR'] = cformat("{c.blue}{c.bold}Creating library{c.white} $TARGET{c.default}")
 
-env['FWCREATECOMSTR'] = cformat("{c.blue}{c.bold}Creating firmware image{c.white} $TARGET{c.default}")
+env['CREATEUBFCOMSTR'] = cformat("{c.blue}{c.bold}Creating uBLoad firmware image{c.white} $TARGET{c.default}")
 env['CREATEKEYCOMSTR'] = cformat("{c.blue}{c.bold}Generating  new firmware signing key{c.white} $TARGET{c.default}")
 env['CREATEBINCOMSTR'] = cformat("{c.blue}{c.bold}Creating binary firmware{c.white} $TARGET{c.default}")
 env['GENIFACECOMSTR'] = cformat("{c.blue}{c.bold}Generating interface files{c.white} $TARGET{c.default}")
+env['GENCONFIGCOMSTR'] = cformat("{c.blue}{c.bold}Generating configuration headers{c.white} $TARGET{c.default}")
+env['IMAGEELFSIZECOMSTR'] = cformat("{c.blue}{c.bold}Generated ELF image info:{c.default}")

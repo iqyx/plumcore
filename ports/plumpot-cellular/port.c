@@ -40,6 +40,7 @@
 #include "u_assert.h"
 #include "u_log.h"
 #include "port.h"
+#include "config.h"
 
 #include "module_led.h"
 #include "interface_led.h"
@@ -53,35 +54,21 @@
 #include "module_spidev_locm3.h"
 #include "interface_rtc.h"
 #include "module_rtc_locm3.h"
-#include "sffs.h"
 #include "interface_rng.h"
 #include "module_prng_simple.h"
 #include "interfaces/adc.h"
 #include "module_mac_csma.h"
 #include "interface_mac.h"
-#include "module_umesh.h"
+// #include "module_umesh.h"
 #include "interface_profiling.h"
 #include "module_fifo_profiler.h"
 #include "umesh_l2_status.h"
-#include "libuxb.h"
 
 #include "interfaces/sensor.h"
 #include "interfaces/cellular.h"
-#include "services/uxb-master/puxb.h"
-#include "services/uxb-master/puxb_discovery.h"
 #include "interfaces/servicelocator.h"
-#include "services/stm32-adc/adc_stm32_locm3.h"
-#include "services/radio-ax5243/ax5243.h"
-#include "services/gsm-quectel/gsm_quectel.h"
-#include "services/stm32-i2c-sensors/i2c_sensors.h"
-#include "services/stm32-watchdog/watchdog.h"
-#include "services/mqtt-tcpip/mqtt_tcpip.h"
-#include "services/mqtt-sensor-upload/mqtt_sensor_upload.h"
 #include "services/plocator/plocator.h"
-#include "services/data-process/data-process.h"
-#include "services/stream-over-mqtt/stream_over_mqtt.h"
 #include "services/cli/system_cli_tree.h"
-#include "services/mqtt-file-server/mqtt_file_server.h"
 #include "services/stm32-system-clock/clock.h"
 #include "services/stm32-rtc/rtc.h"
 
@@ -101,36 +88,78 @@ struct module_spi_flash flash1;
 struct module_rtc_locm3 rtc1;
 struct module_prng_simple prng;
 struct module_mac_csma radio1_mac;
-struct module_umesh umesh;
+// struct module_umesh umesh;
 struct module_fifo_profiler profiler;
 struct module_usart gsm1_usart;
-struct sffs fs;
 
-uint8_t slot1_buffer[256];
-uxb_master_locm3_ret_t uxb_ret;
+#if defined(CONFIG_LIB_SFFS)
+	#include "sffs.h"
+	struct sffs fs;
+#endif
 
 /*New-style HAL and services. */
-AdcStm32Locm3 adc1;
-Ax5243 radio1;
-GsmQuectel gsm1;
-I2cSensors i2c_test;
-Watchdog watchdog;
-Mqtt mqtt;
-MqttSensorUpload mqtt_sensor;
-StreamOverMqtt mqtt_cli_stream;
-ServiceCli mqtt_cli;
-MqttFileServer mqtt_file_server;
+#if defined(CONFIG_SERVICE_STM32_ADC)
+	#include "services/stm32-adc/adc_stm32_locm3.h"
+	AdcStm32Locm3 adc1;
+#endif
+
+#if defined(CONFIG_SERVICE_RADIO_AX5243)
+	#include "services/radio-ax5243/ax5243.h"
+	Ax5243 radio1;
+#endif
+
+#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_GSM)
+	#include "services/gsm-quectel/gsm_quectel.h"
+	GsmQuectel gsm1;
+#endif
+
+#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_I2C_SENSORS)
+	#include "services/stm32-i2c-sensors/i2c_sensors.h"
+	I2cSensors i2c_test;
+#endif
+
+#if defined(CONFIG_SERVICE_STM32_WATCHDOG)
+	#include "services/stm32-watchdog/watchdog.h"
+	Watchdog watchdog;
+#endif
+
+#if defined(CONFIG_PLUMPOT_CELLULAR_MQTT_OVER_GSM)
+	#include "services/cli/cli.h"
+	#include "services/mqtt-tcpip/mqtt_tcpip.h"
+	#include "services/mqtt-sensor-upload/mqtt_sensor_upload.h"
+	#include "services/stream-over-mqtt/stream_over_mqtt.h"
+	#include "services/mqtt-file-server/mqtt_file_server.h"
+
+	Mqtt mqtt;
+	MqttSensorUpload mqtt_sensor;
+	StreamOverMqtt mqtt_cli_stream;
+	ServiceCli mqtt_cli;
+	MqttFileServer mqtt_file_server;
+#endif
+
 PLocator plocator;
 IServiceLocator *locator;
-PUxbBus puxb_bus;
-PUxbDiscovery puxb_discovery;
+
+#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_UXB)
+	#include "libuxb.h"
+	#include "services/uxb-master/puxb.h"
+	#include "services/uxb-master/puxb_discovery.h"
+
+	uint8_t slot1_buffer[256];
+	uxb_master_locm3_ret_t uxb_ret;
+	PUxbBus puxb_bus;
+	PUxbDiscovery puxb_discovery;
+#endif
+
 SystemClock system_clock;
 Stm32Rtc rtc;
 
 
 int32_t port_early_init(void) {
-	/* Relocate the vector table first. */
-	SCB_VTOR = 0x00010400;
+	/* Relocate the vector table first if required. */
+	#if defined(CONFIG_RELOCATE_VECTOR_TABLE)
+		SCB_VTOR = CONFIG_VECTOR_TABLE_ADDRESS;
+	#endif
 
 	/* Select HSE as SYSCLK source, no PLL, 16MHz. */
 	rcc_osc_on(RCC_HSE);
@@ -170,12 +199,9 @@ int32_t port_early_init(void) {
 int32_t port_init(void) {
 
 	/* Serial console. */
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6);
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO7);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO6);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO7);
-	gpio_set_af(GPIOB, GPIO_AF7, GPIO6);
-	gpio_set_af(GPIOB, GPIO_AF7, GPIO7);
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6 | GPIO7);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO6 | GPIO7);
+	gpio_set_af(GPIOB, GPIO_AF7, GPIO6 | GPIO7);
 
 	/* Main system console is created on the first USART interface. Enable
 	 * USART clocks and interrupts and start the corresponding HAL module. */
@@ -204,6 +230,9 @@ int32_t port_init(void) {
 		"console"
 	);
 
+	/** @deprecated
+	 * Old real-time clock service will be removed. There is
+	 * a new clock interface and services providing system and RTC clocks. */
 	/* Initialize the Real-time clock. */
 	module_rtc_locm3_init(&rtc1, "rtc1");
 	hal_interface_set_name(&(rtc1.iface.descriptor), "rtc1");
@@ -248,11 +277,6 @@ int32_t port_init(void) {
 		"profiler1"
 	);
 
-	/* wtf? */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO2);
-	gpio_set(GPIOB, GPIO2);
-
 	/* Configure GPIO for radio & flash SPI bus (SPI2), enable SPI2 clock and
 	 * run spibus driver using libopencm3 to access it. */
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14 | GPIO15);
@@ -273,52 +297,58 @@ int32_t port_init(void) {
 	hal_interface_set_name(&(flash1.iface.descriptor), "flash1");
 	/** @todo advertise the flash device, does not mount here */
 
-	sffs_init(&fs);
-	if (sffs_mount(&fs, &(flash1.iface)) == SFFS_MOUNT_OK) {
-		u_log(system_log, LOG_TYPE_INFO, "sffs: filesystem mounted successfully");
+	#if defined(CONFIG_LIB_SFFS)
+		sffs_init(&fs);
+		if (sffs_mount(&fs, &(flash1.iface)) == SFFS_MOUNT_OK) {
+			u_log(system_log, LOG_TYPE_INFO, "sffs: filesystem mounted successfully");
 
-		struct sffs_info info;
-		if (sffs_get_info(&fs, &info) == SFFS_GET_INFO_OK) {
-			u_log(system_log, LOG_TYPE_INFO,
-				"sffs: sectors t=%u e=%u u=%u f=%u d=%u o=%u, pages t=%u e=%u u=%u o=%u",
-				info.sectors_total,
-				info.sectors_erased,
-				info.sectors_used,
-				info.sectors_full,
-				info.sectors_dirty,
-				info.sectors_old,
+			struct sffs_info info;
+			if (sffs_get_info(&fs, &info) == SFFS_GET_INFO_OK) {
+				u_log(system_log, LOG_TYPE_INFO,
+					"sffs: sectors t=%u e=%u u=%u f=%u d=%u o=%u, pages t=%u e=%u u=%u o=%u",
+					info.sectors_total,
+					info.sectors_erased,
+					info.sectors_used,
+					info.sectors_full,
+					info.sectors_dirty,
+					info.sectors_old,
 
-				info.pages_total,
-				info.pages_erased,
-				info.pages_used,
-				info.pages_old
-			);
-			u_log(system_log, LOG_TYPE_INFO,
-				"sffs: space total %u bytes, used %u bytes, free %u bytes",
-				info.space_total,
-				info.space_used,
-				info.space_total - info.space_used
-			);
+					info.pages_total,
+					info.pages_erased,
+					info.pages_used,
+					info.pages_old
+				);
+				u_log(system_log, LOG_TYPE_INFO,
+					"sffs: space total %u bytes, used %u bytes, free %u bytes",
+					info.space_total,
+					info.space_used,
+					info.space_total - info.space_used
+				);
+			}
 		}
-	}
+	#endif
 
 	/* ADC initialization (power metering, prng seeding) */
-	adc_stm32_locm3_init(&adc1, ADC1);
+	#if defined(CONFIG_SERVICE_STM32_ADC)
+		adc_stm32_locm3_init(&adc1, ADC1);
+	#endif
 
 	/* Battery power device (using ADC). */
 	/** @todo resolve incompatible interfaces */
 	// module_power_adc_init(&vin1, "vin1", &(adc1.iface), &vin1_config);
 	// module_power_adc_init(&ubx_voltage, "ubx1", &(adc1.iface), &ubx_voltage_config);
 
-	/* Initialize the radio interface. */
-	// gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
-	// gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO2);
-	// module_spidev_locm3_init(&spi2_radio1, "spi2_radio1", &(spi2.iface), GPIOB, GPIO2);
-	// hal_interface_set_name(&(spi2_radio1.iface.descriptor), "spi2_radio1");
+	#if defined(CONFIG_SERVICE_RADIO_AX5243)
+		/* Initialize the radio interface. */
+		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
+		gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO2);
+		module_spidev_locm3_init(&spi2_radio1, "spi2_radio1", &(spi2.iface), GPIOB, GPIO2);
+		hal_interface_set_name(&(spi2_radio1.iface.descriptor), "spi2_radio1");
 
-	// ax5243_init(&radio1, &(spi2_radio1.iface), 16000000);
-	// hal_interface_set_name(&(radio1.iface.descriptor), "radio1");
-	/** @todo advertise the radio interface */
+		ax5243_init(&radio1, &(spi2_radio1.iface), 16000000);
+		hal_interface_set_name(&(radio1.iface.descriptor), "radio1");
+		/** @todo advertise the radio interface */
+	#endif
 
 	/** @todo MAC and L3/L4 protocols are generic services, move them */
 	/* Start CSMA MAC in the radio1 interface. */
@@ -333,137 +363,152 @@ int32_t port_init(void) {
 	// module_umesh_set_profiler(&umesh, &(profiler.iface));
 	// umesh_l2_status_add_power_device(&(ubx_voltage.iface), "plumpot1_ubx");
 
-	/* Initialize the Quectel GSM/GPRS module. It requires some GPIO to turn on/off. */
-	gsm_quectel_init(&gsm1);
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO9);
-	gsm_quectel_set_pwrkey(&gsm1, GPIOA, GPIO9);
-	gpio_mode_setup(GPIOC, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO13);
-	gsm_quectel_set_vddext(&gsm1, GPIOC, GPIO13);
+	#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_GSM)
+		/* Initialize the Quectel GSM/GPRS module. It requires some GPIO to turn on/off. */
+		gsm_quectel_init(&gsm1);
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO9);
+		gsm_quectel_set_pwrkey(&gsm1, GPIOA, GPIO9);
+		gpio_mode_setup(GPIOC, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO13);
+		gsm_quectel_set_vddext(&gsm1, GPIOC, GPIO13);
 
-	/* Now initialize the USART2 port connected directly to the GSM modem. */
-	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
-	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
-	gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
-	rcc_periph_clock_enable(RCC_USART2);
-	nvic_enable_irq(NVIC_USART2_IRQ);
-	nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
-	module_usart_init(&gsm1_usart, "gsm1_usart", USART2);
-	hal_interface_set_name(&(gsm1_usart.iface.descriptor), "gsm1_usart");
+		/* Now initialize the USART2 port connected directly to the GSM modem. */
+		gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
+		gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
+		gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
+		rcc_periph_clock_enable(RCC_USART2);
+		nvic_enable_irq(NVIC_USART2_IRQ);
+		nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
+		module_usart_init(&gsm1_usart, "gsm1_usart", USART2);
+		hal_interface_set_name(&(gsm1_usart.iface.descriptor), "gsm1_usart");
 
-	/* Do not adverzise the USART interface as it is unusable for anything else.
-	 * Start the GSM driver on the USART instead. */
-	gsm_quectel_set_usart(&gsm1, &(gsm1_usart.iface));
-	gsm_quectel_start(&gsm1);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_CELLULAR,
-		&gsm1.cellular.interface,
-		"cellular1"
-	);
+		/* Do not adverzise the USART interface as it is unusable for anything else.
+		 * Start the GSM driver on the USART instead. */
+		gsm_quectel_set_usart(&gsm1, &(gsm1_usart.iface));
+		gsm_quectel_start(&gsm1);
+		iservicelocator_add(
+			locator,
+			ISERVICELOCATOR_TYPE_CELLULAR,
+			&gsm1.cellular.interface,
+			"cellular1"
+		);
+	#endif
 
-	/* Initialize the onboard I2C port. No resonable I2C bus/device implementation
-	 * exists now, initialize just the i2c_sensors module directly.  */
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO8 | GPIO9);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO8 | GPIO9);
-	gpio_set_af(GPIOB, GPIO_AF4, GPIO8 | GPIO9);
+	#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_I2C_SENSORS)
+		/* Initialize the onboard I2C port. No resonable I2C bus/device implementation
+		 * exists now, initialize just the i2c_sensors module directly.  */
+		gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO8 | GPIO9);
+		gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO8 | GPIO9);
+		gpio_set_af(GPIOB, GPIO_AF4, GPIO8 | GPIO9);
 
-	/** @todo move to the i2c_sensors module */
-	rcc_periph_clock_enable(RCC_I2C1);
-	i2c_peripheral_disable(I2C1);
-	i2c_reset(I2C1);
-	i2c_set_fast_mode(I2C1);
-	i2c_set_clock_frequency(I2C1, I2C_CR2_FREQ_20MHZ);
-	i2c_set_ccr(I2C1, 35);
-	i2c_set_trise(I2C1, 43);
-	i2c_peripheral_enable(I2C1);
+		/** @todo move to the i2c_sensors module */
+		rcc_periph_clock_enable(RCC_I2C1);
+		i2c_peripheral_disable(I2C1);
+		i2c_reset(I2C1);
+		i2c_set_fast_mode(I2C1);
+		i2c_set_clock_frequency(I2C1, I2C_CR2_FREQ_20MHZ);
+		i2c_set_ccr(I2C1, 35);
+		i2c_set_trise(I2C1, 43);
+		i2c_peripheral_enable(I2C1);
 
-	i2c_sensors_init(&i2c_test, I2C1);
+		i2c_sensors_init(&i2c_test, I2C1);
 
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_SENSOR,
-		&i2c_test.si7021_temp.interface,
-		"meteo_temp"
-	);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_SENSOR,
-		&i2c_test.si7021_rh.interface,
-		"meteo_rh"
-	);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_SENSOR,
-		&i2c_test.lum.interface,
-		"meteo_lum"
-	);
+		iservicelocator_add(
+			locator,
+			ISERVICELOCATOR_TYPE_SENSOR,
+			&i2c_test.si7021_temp.interface,
+			"meteo_temp"
+		);
+		iservicelocator_add(
+			locator,
+			ISERVICELOCATOR_TYPE_SENSOR,
+			&i2c_test.si7021_rh.interface,
+			"meteo_rh"
+		);
+		iservicelocator_add(
+			locator,
+			ISERVICELOCATOR_TYPE_SENSOR,
+			&i2c_test.lum.interface,
+			"meteo_lum"
+		);
+	#endif
 
 	/** @todo generic service, move tot he system init */
-	mqtt_init(&mqtt, gsm_quectel_tcpip(&gsm1));
-	mqtt_set_client_id(&mqtt, "sample");
-	mqtt_set_ping_interval(&mqtt, 60000);
-	mqtt_connect(&mqtt, "10.10.10.10", 1883);
-	/** @todo advertise the mqtt interface */
 
-	/* Initialize the UXB bus. */
-	rcc_periph_clock_enable(RCC_SPI1);
-	rcc_periph_clock_enable(RCC_TIM9);
+	#if defined(CONFIG_PLUMPOT_CELLULAR_MQTT_OVER_GSM)
+		mqtt_init(&mqtt, gsm_quectel_tcpip(&gsm1));
+		#if defined(CONFIG_DEFAULT_MQTT_USE_HOSTNAME_ID)
+			mqtt_set_client_id(&mqtt, CONFIG_HOSTNAME);
+		#else
+			mqtt_set_client_id(&mqtt, CONFIG_DEFAULT_MQTT_CUSTOM_ID);
+		#endif
+		mqtt_set_ping_interval(&mqtt, CONFIG_DEFAULT_MQTT_PING_INTERVAL);
+		mqtt_connect(&mqtt, CONFIG_DEFAULT_MQTT_BROKER_IP, CONFIG_DEFAULT_MQTT_BROKER_PORT);
+		/** @todo advertise the mqtt interface */
+	#endif
 
-	/* Setup a timer for precise UXB protocol delays. */
-	timer_reset(TIM9);
-	timer_set_mode(TIM9, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
-	timer_continuous_mode(TIM9);
-	timer_direction_up(TIM9);
-	timer_disable_preload(TIM9);
-	timer_enable_update_event(TIM9);
-	timer_set_prescaler(TIM9, (rcc_ahb_frequency / 1000000) - 1);
-	timer_set_period(TIM9, 65535);
-	timer_enable_counter(TIM9);
+	#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_UXB)
+		/* Initialize the UXB bus. */
+		rcc_periph_clock_enable(RCC_SPI1);
+		rcc_periph_clock_enable(RCC_TIM9);
 
-	puxb_bus_init(&puxb_bus, &(struct uxb_master_locm3_config) {
-		.spi_port = SPI1,
-		.spi_af = GPIO_AF5,
-		.sck_port = GPIOB, .sck_pin = GPIO3,
-		.miso_port = GPIOB, .miso_pin = GPIO4,
-		.mosi_port = GPIOB, .mosi_pin = GPIO5,
-		.frame_port = GPIOA, .frame_pin = GPIO15,
-		.id_port = GPIOA, .id_pin = GPIO10,
-		.delay_timer = TIM9,
-		.delay_timer_freq_mhz = 1,
-		.control_prescaler = SPI_CR1_BR_FPCLK_DIV_16,
-		.data_prescaler = SPI_CR1_BR_FPCLK_DIV_16,
-	});
+		/* Setup a timer for precise UXB protocol delays. */
+		timer_reset(TIM9);
+		timer_set_mode(TIM9, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
+		timer_continuous_mode(TIM9);
+		timer_direction_up(TIM9);
+		timer_disable_preload(TIM9);
+		timer_enable_update_event(TIM9);
+		timer_set_prescaler(TIM9, (rcc_ahb_frequency / 1000000) - 1);
+		timer_set_period(TIM9, 65535);
+		timer_enable_counter(TIM9);
 
-	nvic_enable_irq(NVIC_EXTI15_10_IRQ);
-	nvic_set_priority(NVIC_EXTI15_10_IRQ, 5 * 16);
-	rcc_periph_clock_enable(RCC_SYSCFG);
-	exti_select_source(EXTI15, GPIOA);
-	exti_set_trigger(EXTI15, EXTI_TRIGGER_FALLING);
-	exti_enable_request(EXTI15);
+		puxb_bus_init(&puxb_bus, &(struct uxb_master_locm3_config) {
+			.spi_port = SPI1,
+			.spi_af = GPIO_AF5,
+			.sck_port = GPIOB, .sck_pin = GPIO3,
+			.miso_port = GPIOB, .miso_pin = GPIO4,
+			.mosi_port = GPIOB, .mosi_pin = GPIO5,
+			.frame_port = GPIOA, .frame_pin = GPIO15,
+			.id_port = GPIOA, .id_pin = GPIO10,
+			.delay_timer = TIM9,
+			.delay_timer_freq_mhz = 1,
+			.control_prescaler = SPI_CR1_BR_FPCLK_DIV_16,
+			.data_prescaler = SPI_CR1_BR_FPCLK_DIV_16,
+		});
 
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_UXBBUS,
-		(Interface *)puxb_bus_interface(&puxb_bus),
-		"uxb1"
-	);
+		nvic_enable_irq(NVIC_EXTI15_10_IRQ);
+		nvic_set_priority(NVIC_EXTI15_10_IRQ, 5 * 16);
+		rcc_periph_clock_enable(RCC_SYSCFG);
+		exti_select_source(EXTI15, GPIOA);
+		exti_set_trigger(EXTI15, EXTI_TRIGGER_FALLING);
+		exti_enable_request(EXTI15);
 
-	puxb_discovery_init(&puxb_discovery, puxb_bus_interface(&puxb_bus));
+		iservicelocator_add(
+			locator,
+			ISERVICELOCATOR_TYPE_UXBBUS,
+			(Interface *)puxb_bus_interface(&puxb_bus),
+			"uxb1"
+		);
 
-	/** @todo the watchdog is port-dependent. Rename the module accordingly and keep it here. */
-	watchdog_init(&watchdog, 20000, 0);
+		puxb_discovery_init(&puxb_discovery, puxb_bus_interface(&puxb_bus));
+	#endif
 
-	/** @todo generic service move to the system init */
-	mqtt_sensor_upload_init(&mqtt_sensor, &mqtt, "plumpot1/s", 120000);
+	#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_WATCHDOG)
+		watchdog_init(&watchdog, 20000, 0);
+	#endif
 
-	dp_graph_init(&data_process_graph);
+	#if defined(CONFIG_PLUMPOT_CELLULAR_MQTT_OVER_GSM)
 
-	stream_over_mqtt_init(&mqtt_cli_stream, &mqtt, "plumpot1/cli", 0);
-	stream_over_mqtt_start(&mqtt_cli_stream);
-	service_cli_init(&mqtt_cli, &(mqtt_cli_stream.stream), system_cli_tree);
-	service_cli_start(&mqtt_cli);
+		/** @todo generic service move to the system init */
+		mqtt_sensor_upload_init(&mqtt_sensor, &mqtt, "plumpot1/s", 120000);
 
-	mqtt_file_server_init(&mqtt_file_server, &mqtt, "plumpot1/file", &fs);
+		stream_over_mqtt_init(&mqtt_cli_stream, &mqtt, "plumpot1/cli", 0);
+		stream_over_mqtt_start(&mqtt_cli_stream);
+		service_cli_init(&mqtt_cli, &(mqtt_cli_stream.stream), system_cli_tree);
+		service_cli_start(&mqtt_cli);
+
+		mqtt_file_server_init(&mqtt_file_server, &mqtt, "plumpot1/file", &fs);
+	#endif
 
 	rcc_periph_clock_enable(RCC_TIM2);
 	nvic_enable_irq(NVIC_TIM2_IRQ);
@@ -474,6 +519,8 @@ int32_t port_init(void) {
 		&system_clock.iface.interface,
 		"main"
 	);
+
+
 
 	stm32_rtc_init(&rtc);
 	iservicelocator_add(
@@ -516,16 +563,18 @@ void usart1_isr(void) {
 	module_usart_interrupt_handler(&console);
 }
 
-
+#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_GSM)
 void usart2_isr(void) {
 	module_usart_interrupt_handler(&gsm1_usart);
 }
+#endif
 
+#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_UXB)
+	void exti15_10_isr(void) {
+		exti_reset_request(EXTI15);
 
-void exti15_10_isr(void) {
-	exti_reset_request(EXTI15);
-
-	exti_disable_request(EXTI15);
-	uxb_ret = libuxb_bus_frame_irq(&puxb_bus.bus);
-	exti_enable_request(EXTI15);
-}
+		exti_disable_request(EXTI15);
+		uxb_ret = libuxb_bus_frame_irq(&puxb_bus.bus);
+		exti_enable_request(EXTI15);
+	}
+#endif
