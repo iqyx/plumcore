@@ -29,122 +29,82 @@
 #include "flash.h"
 
 
-flash_ret_t flash_init(IFlash *self) {
+iflash_ret_t iflash_init(IFlash *self) {
 	if (u_assert(self != NULL)) {
-		return FLASH_RET_FAILED;
+		return IFLASH_RET_FAILED;
 	}
 
 	memset(self, 0, sizeof(IFlash));
 	uhal_interface_init(&self->interface);
 
-	return FLASH_RET_OK;
+	return IFLASH_RET_OK;
 }
 
 
-flash_ret_t flash_free(IFlash *self) {
+iflash_ret_t iflash_free(IFlash *self) {
 	if (u_assert(self != NULL)) {
-		return FLASH_RET_FAILED;
+		return IFLASH_RET_FAILED;
 	}
 
 	/* Nothing to free yet. */
 
-	return FLASH_RET_OK;
+	return IFLASH_RET_OK;
 }
 
 
-flash_ret_t flash_get_id(IFlash *self, uint32_t *id) {
-	if (u_assert(self != NULL) ||
-	    u_assert(id != NULL)) {
-		return FLASH_RET_FAILED;
-	}
-
-	if (self->vmt.get_id != NULL) {
-		return self->vmt.get_id(self->vmt.context, id);
-	}
-
-	return FLASH_RET_FAILED;
-}
-
-
-flash_ret_t flash_get_info(IFlash *self, struct flash_info *info) {
+iflash_ret_t iflash_get_info(IFlash *self, struct iflash_info *info) {
 	if (u_assert(self != NULL) ||
 	    u_assert(info != NULL)) {
-		return FLASH_RET_FAILED;
+		return IFLASH_RET_FAILED;
 	}
 
 	if (self->vmt.get_info != NULL) {
 		return self->vmt.get_info(self->vmt.context, info);
 	}
 
-	return FLASH_RET_FAILED;
+	return IFLASH_RET_FAILED;
 }
 
 
-flash_ret_t flash_chip_erase(IFlash *self) {
+iflash_ret_t iflash_erase(IFlash *self, const uint64_t addr, uint32_t sector_size_index) {
 	if (u_assert(self != NULL)) {
-		return FLASH_RET_FAILED;
+		return IFLASH_RET_FAILED;
 	}
 
-	if (self->vmt.chip_erase != NULL) {
-		return self->vmt.chip_erase(self->vmt.context);
+	if (self->vmt.erase != NULL) {
+		return self->vmt.erase(self->vmt.context, addr, sector_size_index);
 	}
 
-	return FLASH_RET_FAILED;
+	return IFLASH_RET_FAILED;
 }
 
 
-flash_ret_t flash_block_erase(IFlash *self, const uint64_t addr) {
-	if (u_assert(self != NULL)) {
-		return FLASH_RET_FAILED;
-	}
-
-	if (self->vmt.block_erase != NULL) {
-		return self->vmt.block_erase(self->vmt.context, addr);
-	}
-
-	return FLASH_RET_FAILED;
-}
-
-
-flash_ret_t flash_sector_erase(IFlash *self, const uint64_t addr) {
-	if (u_assert(self != NULL)) {
-		return FLASH_RET_FAILED;
-	}
-
-	if (self->vmt.sector_erase != NULL) {
-		return self->vmt.sector_erase(self->vmt.context, addr);
-	}
-
-	return FLASH_RET_FAILED;
-}
-
-
-flash_ret_t flash_page_write(IFlash *self, const uint64_t addr, const uint8_t *data, const uint32_t len) {
+iflash_ret_t iflash_write(IFlash *self, const uint64_t addr, const uint8_t *data, size_t len) {
 	if (u_assert(self != NULL) ||
 	    u_assert(data != NULL) ||
 	    u_assert(len > 0)) {
-		return FLASH_RET_FAILED;
+		return IFLASH_RET_FAILED;
 	}
 
-	if (self->vmt.page_write != NULL) {
-		return self->vmt.page_write(self->vmt.context, addr, data, len);
+	if (self->vmt.write != NULL) {
+		return self->vmt.write(self->vmt.context, addr, data, len);
 	}
 
-	return FLASH_RET_FAILED;
+	return IFLASH_RET_FAILED;
 }
 
 
-flash_ret_t flash_page_read(IFlash *self, const uint64_t addr, uint8_t *data, const uint32_t len) {
+iflash_ret_t iflash_read(IFlash *self, const uint64_t addr, uint8_t *data, size_t len) {
 	if (u_assert(self != NULL) ||
 	    u_assert(data != NULL) ||
 	    u_assert(len > 0)) {
-		return FLASH_RET_FAILED;
+		return IFLASH_RET_FAILED;
 	}
 
-	if (self->vmt.page_read != NULL) {
-		return self->vmt.page_read(self->vmt.context, addr, data, len);
+	if (self->vmt.read != NULL) {
+		return self->vmt.read(self->vmt.context, addr, data, len);
 	}
 
-	return FLASH_RET_FAILED;
+	return IFLASH_RET_FAILED;
 }
 

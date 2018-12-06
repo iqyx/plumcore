@@ -309,6 +309,10 @@ menu "Enable services"
 		config SERVICE_GSM_QUECTEL
 			bool "Support for Quectel GSM modems"
 			default y
+
+		config SERVICE_SPI_FLASH
+			bool "SPI NOR flash memory driver"
+			default y
 	endmenu
 
 	menu "System services"

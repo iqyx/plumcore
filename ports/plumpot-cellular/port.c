@@ -149,6 +149,13 @@ IServiceLocator *locator;
 	PUxbDiscovery puxb_discovery;
 #endif
 
+#if defined(CONFIG_SERVICE_SPI_FLASH)
+	#include "services/spi-flash/spi-flash.h"
+	#include "interfaces/flash.h"
+	SpiFlash spi_flash1;
+#endif
+
+
 SystemClock system_clock;
 Stm32Rtc rtc;
 
@@ -294,6 +301,19 @@ int32_t port_init(void) {
 	module_spi_flash_init(&flash1, "flash1", &(spi2_flash1.iface));
 	hal_interface_set_name(&(flash1.iface.descriptor), "flash1");
 	/** @todo advertise the flash device, does not mount here */
+
+	#if defined(CONFIG_SERVICE_SPI_FLASH)
+		if (spi_flash_init(&spi_flash1, &(spi2_flash1.iface)) == SPI_FLASH_RET_OK) {
+			iservicelocator_add(
+				locator,
+				ISERVICELOCATOR_TYPE_FLASH,
+				&(spi_flash_interface(&spi_flash1)->interface),
+				"spi-flash1"
+			);
+		}
+	#endif
+
+
 
 	#if defined(CONFIG_LIB_SFFS)
 		sffs_init(&fs);
