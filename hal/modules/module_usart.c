@@ -30,7 +30,6 @@
 #include "queue.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "interface_stream.h"
 #include "module_usart.h"
 
@@ -95,10 +94,9 @@ int32_t module_usart_init(struct module_usart *usart, const char *name, uint32_t
 	if (u_assert(usart != NULL)) {
 		return MODULE_USART_INIT_FAILED;
 	}
+	(void)name;
 
 	memset(usart, 0, sizeof(struct module_usart));
-	hal_module_descriptor_init(&(usart->module), name);
-	hal_module_descriptor_set_shm(&(usart->module), (void *)usart, sizeof(struct module_usart));
 
 	/* Initialize stream interface. */
 	interface_stream_init(&(usart->iface));
@@ -127,12 +125,12 @@ int32_t module_usart_init(struct module_usart *usart, const char *name, uint32_t
 	/* Interrupts can be enabled now. */
 	usart_enable_rx_interrupt(usart->port);
 
-	u_log(system_log, LOG_TYPE_INFO, "%s: module USART initialized using default settings", usart->module.name);
+	u_log(system_log, LOG_TYPE_INFO, "module USART initialized using default settings");
 	return MODULE_USART_INIT_OK;
 
 err:
 	module_usart_free(usart);
-	u_log(system_log, LOG_TYPE_ERROR, "%s: module USART failed to initialize", usart->module.name);
+	u_log(system_log, LOG_TYPE_ERROR, "module USART failed to initialize");
 	return MODULE_USART_INIT_FAILED;
 }
 

@@ -28,7 +28,6 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "interface_spibus.h"
 #include "interface_spidev.h"
 #include "module_spidev_locm3.h"
@@ -90,10 +89,9 @@ int32_t module_spidev_locm3_init(struct module_spidev_locm3 *spidev, const char 
 	if (u_assert(spidev != NULL && spibus != NULL)) {
 		return MODULE_SPIDEV_LOCM3_INIT_FAILED;
 	}
+	(void)name;
 
 	memset(spidev, 0, sizeof(struct module_spidev_locm3));
-	hal_module_descriptor_init(&(spidev->module), name);
-	hal_module_descriptor_set_shm(&(spidev->module), (void *)spidev, sizeof(struct module_spidev_locm3));
 
 	/* Initialize spidev interface. */
 	interface_spidev_init(&(spidev->iface));
@@ -109,7 +107,7 @@ int32_t module_spidev_locm3_init(struct module_spidev_locm3 *spidev, const char 
 	spidev->spibus = spibus;
 	// module_spidev_locm3_deselect((void *)spidev);
 
-	u_log(system_log, LOG_TYPE_INFO, "%s: SPI device initialized on bus %s", spidev->module.name, spidev->spibus->descriptor.name);
+	u_log(system_log, LOG_TYPE_INFO, "SPI device initialized on bus %s", spidev->spibus->descriptor.name);
 
 	return MODULE_SPIDEV_LOCM3_INIT_OK;
 }

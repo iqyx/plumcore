@@ -26,7 +26,6 @@
 #include <stdint.h>
 #include "FreeRTOS.h"
 #include "queue.h"
-#include "hal_module.h"
 #include "interface_stream.h"
 
 
@@ -34,8 +33,6 @@
 #define MODULE_USART_TX_QUEUE_LEN 32
 
 struct module_usart {
-
-	struct hal_module_descriptor module;
 	struct interface_stream iface;
 
 	/**

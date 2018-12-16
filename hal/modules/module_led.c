@@ -28,7 +28,6 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "interface_led.h"
 #include "module_led.h"
 
@@ -100,10 +99,9 @@ int32_t module_led_init(struct module_led *led, const char *name) {
 	if (u_assert(led != NULL)) {
 		return MODULE_LED_INIT_FAILED;
 	}
+	(void)name;
 
 	memset(led, 0, sizeof(struct module_led));
-	hal_module_descriptor_init(&(led->module), name);
-	hal_module_descriptor_set_shm(&(led->module), (void *)led, sizeof(struct module_led));
 
 	/* Initialize LED interface. */
 	interface_led_init(&(led->iface));
@@ -119,7 +117,7 @@ int32_t module_led_init(struct module_led *led, const char *name) {
 
 	xTaskCreate(led_task, "led_task", configMINIMAL_STACK_SIZE, (void *)led, 1, NULL);
 
-	u_log(system_log, LOG_TYPE_INFO, "%s: LED module initialized", led->module.name);
+	u_log(system_log, LOG_TYPE_INFO, "LED module initialized");
 
 	return MODULE_LED_INIT_OK;
 }

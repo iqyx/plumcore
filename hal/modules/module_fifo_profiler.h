@@ -26,7 +26,6 @@
 #include <stdbool.h>
 #include "FreeRTOS.h"
 #include "queue.h"
-#include "hal_module.h"
 #include "interface_stream.h"
 #include "interface_profiling.h"
 
@@ -39,7 +38,6 @@ struct module_fifo_profiler_msg {
 };
 
 struct module_fifo_profiler {
-	struct hal_module_descriptor module;
 	struct interface_profiling iface;
 	uint32_t timer;
 

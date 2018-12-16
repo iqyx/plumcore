@@ -26,14 +26,11 @@
 #include "FreeRTOS.h"
 #include "queue.h"
 #include "semphr.h"
-#include "hal_module.h"
 #include "interface_rng.h"
 #include "sha2.h"
 
 
 struct module_prng_simple {
-
-	struct hal_module_descriptor module;
 	struct interface_rng iface;
 
 	/**

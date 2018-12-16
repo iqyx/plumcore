@@ -29,7 +29,6 @@
 #include "semphr.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "interface_rng.h"
 #include "module_prng_simple.h"
 #include "sha2.h"
@@ -93,8 +92,6 @@ int32_t module_prng_simple_init(struct module_prng_simple *prng, const char *nam
 	}
 
 	memset(prng, 0, sizeof(struct module_prng_simple));
-	hal_module_descriptor_init(&(prng->module), name);
-	hal_module_descriptor_set_shm(&(prng->module), (void *)prng, sizeof(struct module_prng_simple));
 
 	/* Initialize the internal state. */
 	sha512_init(&(prng->state));
@@ -117,7 +114,7 @@ int32_t module_prng_simple_init(struct module_prng_simple *prng, const char *nam
 		return MODULE_PRNG_INIT_FAILED;
 	}
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE "module PRNG-simple initialized", prng->module.name);
+	u_log(system_log, LOG_TYPE_INFO, "module PRNG-simple initialized");
 	return MODULE_PRNG_INIT_OK;
 }
 

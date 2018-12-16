@@ -30,7 +30,6 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "module_spi_flash.h"
 #include "interface_spibus.h"
 #include "interface_flash.h"
@@ -252,10 +251,9 @@ int32_t module_spi_flash_init(struct module_spi_flash *flash, const char *name, 
 	if (u_assert(flash != NULL && spidev != NULL)) {
 		return MODULE_SPI_FLASH_INIT_FAILED;
 	}
+	(void)name;
 
 	memset(flash, 0, sizeof(struct module_spi_flash));
-	hal_module_descriptor_init(&(flash->module), name);
-	hal_module_descriptor_set_shm(&(flash->module), (void *)flash, sizeof(struct module_spi_flash));
 
 	flash->spidev = spidev;
 
@@ -276,16 +274,15 @@ int32_t module_spi_flash_init(struct module_spi_flash *flash, const char *name, 
 	if (ret != INTERFACE_FLASH_GET_INFO_OK) {
 		/* Communication failed or unknown flash memory detected. */
 		if (ret == INTERFACE_FLASH_GET_INFO_UNKNOWN) {
-			u_log(system_log, LOG_TYPE_WARN, "%s: unknown flash chip detected (id = 0x%08x)", flash->module.name, info.id);
+			u_log(system_log, LOG_TYPE_WARN, "unknown flash chip detected (id = 0x%08x)", info.id);
 		} else {
-			u_log(system_log, LOG_TYPE_WARN, "%s: flash chip detection failed", flash->module.name);
+			u_log(system_log, LOG_TYPE_WARN, "flash chip detection failed");
 		}
 		return MODULE_SPI_FLASH_INIT_FAILED;
 	}
 
 	u_log(system_log, LOG_TYPE_INFO,
-		"%s: flash detected %s %s, size %u bytes",
-		flash->module.name,
+		"flash detected %s %s, size %u bytes",
 		info.manufacturer,
 		info.part,
 		info.capacity

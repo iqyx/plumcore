@@ -27,7 +27,6 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 
 #include "interfaces/adc.h"
 #include "module_power_adc.h"
@@ -97,8 +96,6 @@ int32_t module_power_adc_init(struct module_power_adc *self, const char *name, s
 	}
 
 	memset(self, 0, sizeof(struct module_power_adc));
-	hal_module_descriptor_init(&(self->module), name);
-	hal_module_descriptor_set_shm(&(self->module), (void *)self, sizeof(struct module_power_adc));
 
 	interface_power_init(&(self->iface));
 	self->iface.descriptor.iface_ptr = (void *)(&self->iface);
@@ -114,10 +111,10 @@ int32_t module_power_adc_init(struct module_power_adc *self, const char *name, s
 
 	module_power_adc_measure(self);
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE "initialized, voltage=%dmV, current=%dmA", self->module.name, self->voltage, self->current);
+	u_log(system_log, LOG_TYPE_INFO, "initialized, voltage=%dmV, current=%dmA", self->voltage, self->current);
 	return MODULE_POWER_ADC_INIT_OK;
 err:
-	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE "initialization failed", self->module.name);
+	u_log(system_log, LOG_TYPE_ERROR, "initialization failed");
 	return MODULE_POWER_ADC_INIT_FAILED;
 }
 

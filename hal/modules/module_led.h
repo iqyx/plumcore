@@ -23,12 +23,9 @@
 #define _MODULE_LED_H_
 
 #include <stdint.h>
-#include "hal_module.h"
 #include "interface_led.h"
 
 struct module_led {
-
-	struct hal_module_descriptor module;
 	struct interface_led iface;
 
 	uint32_t port;

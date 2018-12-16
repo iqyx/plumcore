@@ -25,7 +25,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "hal_module.h"
 #include "interfaces/adc.h"
 #include "interface_power.h"
 
@@ -54,8 +53,6 @@ struct module_power_adc_config {
 };
 
 struct module_power_adc {
-
-	struct hal_module_descriptor module;
 	struct interface_power iface;
 
 	struct interface_adc *adc;

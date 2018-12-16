@@ -23,12 +23,10 @@
 #define _MODULE_RTC_LOCM3_H_
 
 #include <stdint.h>
-#include "hal_module.h"
 #include "interface_rtc.h"
 
 
 struct module_rtc_locm3 {
-	struct hal_module_descriptor module;
 	struct interface_rtc iface;
 };
 

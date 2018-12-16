@@ -25,7 +25,6 @@
 #include <stdbool.h>
 
 #include "u_assert.h"
-#include "hal_module.h"
 //~ #include "hal_process.h"
 #include "hal_interface.h"
 

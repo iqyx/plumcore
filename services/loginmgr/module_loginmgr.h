@@ -24,7 +24,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "hal_module.h"
 #include "interface_stream.h"
 #include "lineedit.h"
 #include "module_crypto_test.h"
@@ -42,8 +41,6 @@ enum module_loginmgr_state {
 };
 
 struct module_loginmgr {
-	struct hal_module_descriptor module;
-
 	/**
 	 * Interface provided for the shell interpreter.
 	 */

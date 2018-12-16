@@ -30,7 +30,6 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "interface_rtc.h"
 #include "module_rtc_locm3.h"
 
@@ -65,8 +64,6 @@ int32_t module_rtc_locm3_init(struct module_rtc_locm3 *rtc, const char *name) {
 	}
 
 	memset(rtc, 0, sizeof(struct module_rtc_locm3));
-	hal_module_descriptor_init(&(rtc->module), name);
-	hal_module_descriptor_set_shm(&(rtc->module), (void *)rtc, sizeof(struct module_rtc_locm3));
 
 	/* Initialize RTC interface. */
 	interface_rtc_init(&(rtc->iface));
@@ -83,20 +80,20 @@ int32_t module_rtc_locm3_init(struct module_rtc_locm3 *rtc, const char *name) {
 	RCC_CSR |= RCC_CSR_LSION;
 	vTaskDelay(50);
 	if (!(RCC_CSR & RCC_CSR_LSIRDY)) {
-		u_log(system_log, LOG_TYPE_ERROR, "%s: LSI not ready", rtc->module.name);
+		u_log(system_log, LOG_TYPE_ERROR, "LSI not ready");
 		return MODULE_RTC_LOCM3_INIT_FAILED;
 	}
 
 	/* Old init code removed. */
 
-	u_log(system_log, LOG_TYPE_INFO, "%s: module RTC initialized", rtc->module.name);
+	u_log(system_log, LOG_TYPE_INFO, "module RTC initialized");
 
 	struct interface_rtc_datetime_t datetime;
 	char s[30];
 	interface_rtc_get_datetime(&(rtc->iface), &datetime);
 	interface_rtc_datetime_to_str(&(rtc->iface), s, sizeof(s), &datetime);
 
-	u_log(system_log, LOG_TYPE_INFO, "%s: current date/time is %s", rtc->module.name, s);
+	u_log(system_log, LOG_TYPE_INFO, "current date/time is %s", s);
 
 
 	return MODULE_RTC_LOCM3_INIT_OK;

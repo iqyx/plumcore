@@ -28,7 +28,6 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "hal_module.h"
 #include "interface_spibus.h"
 #include "module_spibus_locm3.h"
 
@@ -79,10 +78,9 @@ int32_t module_spibus_locm3_init(struct module_spibus_locm3 *spibus, const char 
 	if (u_assert(spibus != NULL)) {
 		return MODULE_SPIBUS_LOCM3_INIT_FAILED;
 	}
+	(void)name;
 
 	memset(spibus, 0, sizeof(struct module_spibus_locm3));
-	hal_module_descriptor_init(&(spibus->module), name);
-	hal_module_descriptor_set_shm(&(spibus->module), (void *)spibus, sizeof(struct module_spibus_locm3));
 
 	/* Initialize spibus interface. */
 	interface_spibus_init(&(spibus->iface));
@@ -105,7 +103,7 @@ int32_t module_spibus_locm3_init(struct module_spibus_locm3 *spibus, const char 
 	spi_set_nss_high(spibus->port);
 	spi_enable(spibus->port);
 
-	u_log(system_log, LOG_TYPE_INFO, "%s: module SPI bus initialized using default settings", spibus->module.name);
+	u_log(system_log, LOG_TYPE_INFO, "module SPI bus initialized using default settings");
 
 	return MODULE_SPIBUS_LOCM3_INIT_OK;
 }
