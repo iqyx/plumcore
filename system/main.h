@@ -1,5 +1,5 @@
 /*
- * plumCore entry point
+ * plumCore entry point and main system include file
  *
  * Copyright (c) 2015-2018, Marek Koza (qyx@krtko.org)
  * All rights reserved.
@@ -25,50 +25,16 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
+#pragma once
 
-#include "main.h"
+#include "platform.h"
+#include "port.h"
+#include "system.h"
 
-#ifdef MODULE_NAME
-#undef MODULE_NAME
-#endif
-#define MODULE_NAME "system"
+#include "FreeRTOS.h"
+#include "task.h"
 
-
-static void init_task(void *p) {
-	(void)p;
-
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Platform initialization..."));
-	platform_init();
-
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing port-specific components..."));
-	port_init();
-
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing services..."));
-	system_init();
-
-	vTaskDelete(NULL);
-}
-
-
-int main(void) {
-	port_early_init();
-	u_log_init();
-
-	xTaskCreate(init_task, "init", configMINIMAL_STACK_SIZE + 512, NULL, 1, NULL);
-	vTaskStartScheduler();
-
-	/* Not reachable. */
-	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("scheduler failed"));
-	while (1) {
-		/* Cycle forever. The watchdog will reset the board soon. */
-		;
-	}
-}
-
-
-
+#include "u_assert.h"
+#include "u_log.h"
 
 

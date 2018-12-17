@@ -35,12 +35,12 @@
 #include <libopencm3/stm32/i2c.h>
 #include <libopencm3/stm32/exti.h>
 
+#include "config.h"
 #include "FreeRTOS.h"
 #include "timers.h"
 #include "u_assert.h"
 #include "u_log.h"
 #include "port.h"
-#include "config.h"
 
 #include "module_led.h"
 #include "interface_led.h"

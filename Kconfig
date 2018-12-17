@@ -25,6 +25,10 @@ menu "Target configuration"
 			string
 			default "plumpot-cellular"
 
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
 		config PORT_FLASH_ADDRESS
 			hex
 			default "0x08000000"
@@ -63,9 +67,14 @@ menu "Target configuration"
 		config NUCLEO_F411RE_RFM69_RADIO
 			bool "RFM69 radio attached"
 			default n
+
 		config PORT_NAME
 			string
 			default "nucleo-f411re"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
 	endif
 
 	if PORT_QNODE4
@@ -84,6 +93,10 @@ menu "Target configuration"
 		config PORT_NAME
 			string
 			default "qnode4"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
 	endif
 endmenu
 
@@ -445,6 +458,53 @@ menu "Enable services"
 
 endmenu
 
+menu "Scheduler & IPC"
+	menu "FreeRTOS configuration"
+		config FREERTOS_USE_PREEMPTION
+			bool "Use preemption"
+			default y
+
+		config FREERTOS_TICK_RATE_HZ
+			int "Tick rate (Hz)"
+			default 1000
+
+		config FREERTOS_MAX_PRIORITIES
+			int "Maximum priorities"
+			default 5
+
+		config FREERTOS_MINIMAL_STACK_SIZE
+			int "Minimal stack size"
+			default 130
+
+		config FREERTOS_MAX_TASK_NAME_LEN
+			int "Maximum task name length"
+			default 32
+
+		config FREERTOS_USE_MUTEXES
+			bool "Use mutexes"
+			default y
+
+		config CONFIG_FREERTOS_USE_RECURSIVE_MUTEXES
+			depends on FREERTOS_USE_MUTEXES
+			bool "Use recursive mutexes"
+			default y
+
+		config FREERTOS_QUEUE_REGISTRY_SIZE
+			int "Queue registry size"
+			default 8
+
+		config FREERTOS_CHECK_FOR_STACK_OVERFLOW
+			bool "Check for stack overflows"
+			default y
+
+		config FREERTOS_CHECK_FOR_STACK_OVERFLOW_METHOD2
+			depends on FREERTOS_CHECK_FOR_STACK_OVERFLOW
+			bool "Use method 2"
+			default y
+
+
+	endmenu
+endmenu
 
 menu "Libraries"
 	comment "Download, patch and compile external library dependencies"
