@@ -184,6 +184,7 @@ env.Append(LIBS = [
 	"c",
 	"gcc",
 	"nosys",
+	"m",
 ])
 
 SConscript("firmware.SConscript")
