@@ -1,0 +1,6 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+SConscript("%s/SConscript" % conf["PLATFORM_NAME"])
+

@@ -1,0 +1,22 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+objs.append(env.Object(source = [
+	File("platform.c"),
+]))
+
+env.Replace(FREERTOS_PORT = "GCC/ARM_CM4F")
+
+env.Replace(TOOLCHAIN = "arm-none-eabi")
+
+env.Append(CFLAGS = [
+	"-mthumb",
+	"-mcpu=cortex-m4",
+	"-mfloat-abi=hard",
+	"-mfpu=fpv4-sp-d16"
+])
+
+env.Append(CPPPATH = [Dir(".")])
+
+
