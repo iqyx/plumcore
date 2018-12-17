@@ -16,3 +16,6 @@
 [submodule "lib/other/heatshrink"]
 	path = lib/other/heatshrink
 	url = https://github.com/atomicobject/heatshrink
+[submodule "lib/script/duktape"]
+	path = lib/script/duktape
+	url = https://github.com/svaarala/duktape

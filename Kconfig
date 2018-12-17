@@ -447,6 +447,14 @@ menu "Enable services"
 		endmenu
 	endmenu
 
+	menu "Language interpreters"
+		config SERVICE_SCRIPT_ES
+			bool "ECMAScript language interpreter (Duktape)"
+			default n
+			select LIB_DUKTAPE
+
+	endmenu
+
 endmenu
 
 
@@ -480,4 +488,8 @@ menu "Libraries"
 	config LIB_TREECLI
 		bool "treecli tree-structured command line interface library"
 		default y
+
+	config LIB_DUKTAPE
+		bool "duktape ECMAScript interpreter library"
+		default n
 endmenu
