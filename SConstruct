@@ -84,6 +84,7 @@ objs = []
 Export("objs")
 
 SConscript("kconfig.SConscript")
+SConscript("platforms/SConscript")
 SConscript("ports/SConscript")
 
 
