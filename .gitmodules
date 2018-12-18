@@ -19,3 +19,6 @@
 [submodule "lib/script/duktape"]
 	path = lib/script/duktape
 	url = https://github.com/svaarala/duktape
+[submodule "lib/filesystem/spiffs"]
+	path = lib/filesystem/spiffs
+	url = https://github.com/pellepl/spiffs
