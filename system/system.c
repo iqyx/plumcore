@@ -75,7 +75,11 @@ static void main_console_init(void) {
 		/* Wait for the extension board discovery. */
 		vTaskDelay(4000);
 
-		service_cli_load_file(console_cli, CONFIG_CONFIG_LOAD_FILE_FILENAME);
+		Interface *interface;
+		if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, &interface) == ISERVICELOCATOR_RET_OK) {
+			IFs *fs = (IFs *)interface;
+			service_cli_load_file(console_cli, fs, CONFIG_CONFIG_LOAD_FILE_FILENAME);
+		}
 	#endif
 }
 #endif

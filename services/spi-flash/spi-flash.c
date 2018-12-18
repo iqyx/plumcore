@@ -169,12 +169,14 @@ static iflash_ret_t flash_erase(void *context, const uint64_t addr, uint32_t sec
 				(addr >> 8) & 0xff,
 				addr & 0xff,
 			}, 4);
+			break;
 		case 3:
 			/* This is usually used as a full chip erase (the sector size
 			 * is equal to the memory size. */
 			interface_spidev_send(self->spi_dev, (const uint8_t[]){
 				0xc7,
 			}, 1);
+			break;
 
 		default:
 			interface_spidev_deselect(self->spi_dev);
@@ -273,7 +275,7 @@ static spi_flash_ret_t spi_flash_lookup_id(SpiFlash *self, uint32_t id, struct i
 			info->page_size_bytes = 256;
 			info->sector_size_bytes[0] = 4 * 1024; /* sector */
 			info->sector_size_bytes[2] = 64 * 1024; /* block */
-			info->sector_size_bytes[2] = 1024 * 1024; /* chip */
+			info->sector_size_bytes[3] = 1024 * 1024; /* chip */
 			info->manufacturer = "Spansion";
 			info->part = "S25FL208K";
 			break;

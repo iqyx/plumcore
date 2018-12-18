@@ -63,17 +63,26 @@ int32_t system_bootloader_config_load(struct treecli_parser *parser, void *exec_
 
 	module_cli_output("loading ubload configuration...\r\n", cli);
 
-	struct sffs_file f;
-	if (sffs_open(&fs, &f, "ubload.cfg", SFFS_READ) != SFFS_OPEN_OK) {
-		module_cli_output("error: cannot open saved configuration\r\n", cli);
+	Interface *interface;
+	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, &interface) == ISERVICELOCATOR_RET_OK) {
+		IFs *fs = (IFs *)interface;
+
+		IFsFile f;
+		if (ifs_open(fs, &f, "ubload.cfg", IFS_MODE_READONLY) != IFS_RET_OK) {
+			module_cli_output("error: cannot open saved configuration\r\n", cli);
+			return 1;
+		}
+		size_t read = 0;
+		if (ifs_fread(fs, f, (uint8_t *)&ubload_current_config, sizeof(struct ubload_config), &read) != IFS_RET_OK || read != sizeof(struct ubload_config)) {
+			module_cli_output("error: configuration reading failed\r\n", cli);
+			return 1;
+		}
+		ifs_fclose(fs, f);
+		module_cli_output("OK\r\n", cli);
+	} else {
+		module_cli_output("error: no 'system' fs found\r\n", cli);
 		return 1;
 	}
-	if (sffs_read(&f, (uint8_t *)&ubload_current_config, sizeof(struct ubload_config)) != sizeof(struct ubload_config)) {
-		module_cli_output("error: configuration reading failed\r\n", cli);
-		return 1;
-	}
-	sffs_close(&f);
-	module_cli_output("OK\r\n", cli);
 
 	return 0;
 }
@@ -125,17 +134,26 @@ int32_t system_bootloader_config_save(struct treecli_parser *parser, void *exec_
 
 	module_cli_output("saving ubload configuration...\r\n", cli);
 
-	struct sffs_file f;
-	if (sffs_open(&fs, &f, "ubload.cfg", SFFS_OVERWRITE) != SFFS_OPEN_OK) {
-		module_cli_output("error: cannot open configuration file for writing\r\n", cli);
+	Interface *interface;
+	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, &interface) == ISERVICELOCATOR_RET_OK) {
+		IFs *fs = (IFs *)interface;
+
+		IFsFile f;
+		if (ifs_open(fs, &f, "ubload.cfg", IFS_MODE_CREATE | IFS_MODE_WRITEONLY | IFS_MODE_TRUNCATE) != IFS_RET_OK) {
+			module_cli_output("error: cannot open configuration file for writing\r\n", cli);
+			return 1;
+		}
+		size_t written = 0;
+		if (ifs_fwrite(fs, f, (uint8_t *)&ubload_current_config, sizeof(struct ubload_config), &written) != IFS_RET_OK || written != sizeof(struct ubload_config)) {
+			module_cli_output("error: configuration saving failed\r\n", cli);
+			return 1;
+		}
+		ifs_fclose(fs, f);
+		module_cli_output("OK\r\n", cli);
+	} else {
+		module_cli_output("error: no 'system' fs found\r\n", cli);
 		return 1;
 	}
-	if (sffs_write(&f, (uint8_t *)&ubload_current_config, sizeof(struct ubload_config)) != sizeof(struct ubload_config)) {
-		module_cli_output("error: configuration saving failed\r\n", cli);
-		return 1;
-	}
-	sffs_close(&f);
-	module_cli_output("OK\r\n", cli);
 
 	return 0;
 }

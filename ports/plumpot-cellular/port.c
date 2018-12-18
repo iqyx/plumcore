@@ -90,10 +90,6 @@ struct module_prng_simple prng;
 struct module_fifo_profiler profiler;
 struct module_usart gsm1_usart;
 
-#if defined(CONFIG_LIB_SFFS)
-	#include "sffs.h"
-	struct sffs fs;
-#endif
 
 /*New-style HAL and services. */
 #if defined(CONFIG_SERVICE_STM32_ADC)
@@ -153,6 +149,11 @@ IServiceLocator *locator;
 	#include "services/spi-flash/spi-flash.h"
 	#include "interfaces/flash.h"
 	SpiFlash spi_flash1;
+#endif
+
+#if defined(CONFIG_SERVICE_FS_SPIFFS)
+	#include "services/fs-spiffs/fs-spiffs.h"
+	FsSpiffs spiffs1;
 #endif
 
 
@@ -297,11 +298,6 @@ int32_t port_init(void) {
 	module_spidev_locm3_init(&spi2_flash1, "spi2_flash1", &(spi2.iface), GPIOB, GPIO12);
 	hal_interface_set_name(&(spi2_flash1.iface.descriptor), "spi2_flash1");
 
-	/* Initialize flash device on the SPI2 bus. */
-	module_spi_flash_init(&flash1, "flash1", &(spi2_flash1.iface));
-	hal_interface_set_name(&(flash1.iface.descriptor), "flash1");
-	/** @todo advertise the flash device, does not mount here */
-
 	#if defined(CONFIG_SERVICE_SPI_FLASH)
 		if (spi_flash_init(&spi_flash1, &(spi2_flash1.iface)) == SPI_FLASH_RET_OK) {
 			iservicelocator_add(
@@ -311,39 +307,19 @@ int32_t port_init(void) {
 				"spi-flash1"
 			);
 		}
-	#endif
 
-
-
-	#if defined(CONFIG_LIB_SFFS)
-		sffs_init(&fs);
-		if (sffs_mount(&fs, &(flash1.iface)) == SFFS_MOUNT_OK) {
-			u_log(system_log, LOG_TYPE_INFO, "sffs: filesystem mounted successfully");
-
-			struct sffs_info info;
-			if (sffs_get_info(&fs, &info) == SFFS_GET_INFO_OK) {
-				u_log(system_log, LOG_TYPE_INFO,
-					"sffs: sectors t=%u e=%u u=%u f=%u d=%u o=%u, pages t=%u e=%u u=%u o=%u",
-					info.sectors_total,
-					info.sectors_erased,
-					info.sectors_used,
-					info.sectors_full,
-					info.sectors_dirty,
-					info.sectors_old,
-
-					info.pages_total,
-					info.pages_erased,
-					info.pages_used,
-					info.pages_old
-				);
-				u_log(system_log, LOG_TYPE_INFO,
-					"sffs: space total %u bytes, used %u bytes, free %u bytes",
-					info.space_total,
-					info.space_used,
-					info.space_total - info.space_used
+		#if defined(CONFIG_SERVICE_FS_SPIFFS)
+			fs_spiffs_init(&spiffs1);
+			// fs_spiffs_format(&spiffs1, spi_flash_interface(&spi_flash1));
+			if (fs_spiffs_mount(&spiffs1, spi_flash_interface(&spi_flash1)) == FS_SPIFFS_RET_OK) {
+				iservicelocator_add(
+					locator,
+					ISERVICELOCATOR_TYPE_FS,
+					&(fs_spiffs_interface(&spiffs1)->interface),
+					"system"
 				);
 			}
-		}
+		#endif
 	#endif
 
 	/* ADC initialization (power metering, prng seeding) */
@@ -525,7 +501,7 @@ int32_t port_init(void) {
 		service_cli_init(&mqtt_cli, &(mqtt_cli_stream.stream), system_cli_tree);
 		service_cli_start(&mqtt_cli);
 
-		mqtt_file_server_init(&mqtt_file_server, &mqtt, "plumpot1/file", &fs);
+		// mqtt_file_server_init(&mqtt_file_server, &mqtt, "plumpot1/file", &fs);
 	#endif
 
 	rcc_periph_clock_enable(RCC_TIM2);

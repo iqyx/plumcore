@@ -45,6 +45,7 @@
 #include "interfaces/clock/descriptor.h"
 
 #include "device_clock.h"
+#include "port.h"
 
 
 const char *clock_source_str[] = {

@@ -82,9 +82,16 @@ int32_t config_save(struct treecli_parser *parser, void *exec_context) {
 	(void)exec_context;
 	ServiceCli *cli = (ServiceCli *)parser->context;
 
-	service_cli_start_out_logging(cli, "default.cfg");
-	treecli_parser_parse_line(parser, "/ export");
-	service_cli_stop_out_logging(cli);
+	Interface *interface;
+	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, &interface) == ISERVICELOCATOR_RET_OK) {
+		IFs *fs = (IFs *)interface;
+
+		if (service_cli_start_out_logging(cli, fs, "startup.cfg") != SERVICE_CLI_RET_OK) {
+			module_cli_output("cannot open file\r\n", cli);
+		}
+		treecli_parser_parse_line(parser, "/ export");
+		service_cli_stop_out_logging(cli);
+	}
 
 	return 0;
 }
@@ -94,7 +101,11 @@ int32_t config_load(struct treecli_parser *parser, void *exec_context) {
 	(void)exec_context;
 	ServiceCli *cli = (ServiceCli *)parser->context;
 
-	service_cli_load_file(cli, "default.cfg");
+	Interface *interface;
+	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, &interface) == ISERVICELOCATOR_RET_OK) {
+		IFs *fs = (IFs *)interface;
+		service_cli_load_file(cli, fs, "startup.cfg");
+	}
 
 	return 0;
 }

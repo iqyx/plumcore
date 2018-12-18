@@ -19,6 +19,7 @@ env.AddSourceIf("LIB_LIBUXB", File(Glob("other/uxb/*.c")), Dir("other/uxb"))
 env.AddSourceIf("LIB_SFFS", File(Glob("filesystem/sffs/*.c")), Dir("filesystem/sffs"))
 env.AddSourceIf("LIB_TREECLI", File(Glob("cli/treecli/*.c")), Dir("cli/treecli"))
 env.AddSourceIf("LIB_DUKTAPE", File(Glob("script/duktape/src-custom/duktape.c")), Dir("script/duktape/src-custom"))
+env.AddSourceIf("LIB_SPIFFS", File(Glob("filesystem/spiffs/src/*.c")), Dir("filesystem/spiffs/src"))
 
 duktape = env.Command(
 	source = None,
