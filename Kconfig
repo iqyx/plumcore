@@ -328,6 +328,14 @@ menu "Enable services"
 			default y
 	endmenu
 
+	menu "Filesystem and memory management services"
+		config SERVICE_FS_SPIFFS
+			bool "SPIFFS NOR flash memory filesystem service"
+			default y
+			select LIB_SPIFFS
+
+	endmenu
+
 	menu "System services"
 		config SERVICE_PLOG_ROUTER
 			bool "PLOG Message router service"
@@ -552,4 +560,8 @@ menu "Libraries"
 	config LIB_DUKTAPE
 		bool "duktape ECMAScript interpreter library"
 		default n
+
+	config LIB_SPIFFS
+		bool "SPIFFS NOR flash memory filesystem library"
+		default y
 endmenu
