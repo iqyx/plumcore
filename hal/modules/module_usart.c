@@ -36,7 +36,11 @@
 
 void module_usart_interrupt_handler(struct module_usart *usart) {
 
+	#if defined(STM32L4)
+	if ((USART_ISR(usart->port) & USART_ISR_RXNE)) {
+	#else
 	if ((USART_SR(usart->port) & USART_SR_RXNE)) {
+	#endif
 		/* The byte is already received, get it. */
 		uint8_t byte = usart_recv(usart->port);
 
