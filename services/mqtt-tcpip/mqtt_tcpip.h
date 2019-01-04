@@ -121,6 +121,7 @@ typedef struct queue_subscribe {
 	uint8_t *buffer;
 	size_t buffer_size;
 	size_t *data_len;
+	char msg_topic[64];
 	mqtt_ret_t ret;
 
 	struct queue_subscribe *next;

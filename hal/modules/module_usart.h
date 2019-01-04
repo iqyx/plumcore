@@ -56,5 +56,9 @@ int32_t module_usart_free(struct module_usart *usart);
 #define MODULE_USART_FREE_OK 0
 #define MODULE_USART_FREE_FAILED -1
 
+int32_t module_usart_set_baudrate(struct module_usart *usart, uint32_t baudrate);
+#define MODULE_USART_SET_BAUDRATE_OK 0
+#define MODULE_USART_SET_BAUDRATE_FAILED -1
+
 
 #endif

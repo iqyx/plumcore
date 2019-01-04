@@ -28,6 +28,7 @@
 #include "task.h"
 #include "queue.h"
 #include "semphr.h"
+#include "stream_buffer.h"
 
 #include "interface_stream.h"
 #include "interfaces/tcpip.h"
@@ -142,10 +143,12 @@ typedef struct {
 	const uint8_t *data_to_send;
 	size_t data_to_send_len;
 
-	uint8_t *data_to_receive;
-	size_t data_to_receive_len;
-	size_t data_to_receive_read;
+	// uint8_t *data_to_receive;
+	// size_t data_to_receive_len;
+	// size_t data_to_receive_read;
 	SemaphoreHandle_t data_waiting;
+
+	StreamBufferHandle_t rxdata;
 
 	ITcpIpSocket tcpip_socket;
 	volatile bool tcpip_socket_used;

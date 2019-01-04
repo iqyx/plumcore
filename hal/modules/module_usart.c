@@ -36,7 +36,11 @@
 
 void module_usart_interrupt_handler(struct module_usart *usart) {
 
+	#if defined(STM32L4)
+	if ((USART_ISR(usart->port) & USART_ISR_RXNE)) {
+	#else
 	if ((USART_SR(usart->port) & USART_SR_RXNE)) {
+	#endif
 		/* The byte is already received, get it. */
 		uint8_t byte = usart_recv(usart->port);
 
@@ -150,4 +154,15 @@ int32_t module_usart_free(struct module_usart *usart) {
 	}
 
 	return MODULE_USART_FREE_OK;
+}
+
+
+int32_t module_usart_set_baudrate(struct module_usart *usart, uint32_t baudrate) {
+	if (u_assert(usart != NULL)) {
+		return MODULE_USART_SET_BAUDRATE_FAILED;
+	}
+
+	usart_set_baudrate(usart->port, baudrate);
+
+	return MODULE_USART_SET_BAUDRATE_OK;
 }

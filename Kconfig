@@ -18,6 +18,9 @@ menu "Target configuration"
 
 		config PORT_QNODE4
 			bool "qNode4 testing platform"
+
+		config PORT_NWDAQ_G201
+			bool "nwDaq-G201"
 	endchoice
 
 	if PORT_PLUMPOT_CELLULAR
@@ -61,6 +64,17 @@ menu "Target configuration"
 			bool "Enable UXB extension bus"
 			select SERVICE_UXB_MASTER
 			default y
+
+		choice
+			prompt "Clock speed"
+
+			config PLUMPOT_CELLULAR_CLOCK_HSE_16MHZ
+				bool "16MHz (HSE, no PLL)"
+
+			config PLUMPOT_CELLULAR_CLOCK_HSE_84MHZ
+				bool "84MHz (HSE, PLL)"
+		endchoice
+
 	endif
 
 	if PORT_NUCLEO_F411RE
@@ -93,6 +107,16 @@ menu "Target configuration"
 		config PORT_NAME
 			string
 			default "qnode4"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+	endif
+
+	if PORT_NWDAQ_G201
+		config PORT_NAME
+			string
+			default "nwdaq-g201"
 
 		config PLATFORM_NAME
 			string
@@ -425,6 +449,10 @@ menu "Enable services"
 
 			config SERVICE_MQTT_SENSOR_UPLOAD
 				bool "Upload sensor data over MQTT"
+				default y
+
+			config SERVICE_MQTT_FILE_DOWNLOAD
+				bool "Download files published on the MQTT broker"
 				default y
 		endmenu
 

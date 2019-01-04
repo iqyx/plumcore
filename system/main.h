@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "config.h"
 #include "platform.h"
 #include "port.h"
 #include "system.h"

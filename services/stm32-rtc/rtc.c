@@ -106,7 +106,11 @@ stm32_rtc_ret_t stm32_rtc_set(Stm32Rtc *self, struct timespec *time) {
 		(((ts.tm_mday % 10) & RTC_DR_DU_MASK) << RTC_DR_DU_SHIFT);
 
 	/* Unlock the RTC write access. */
-	PWR_CR |= PWR_CR_DBP;
+	#if defined(STM32L4)
+		PWR_CR1 |= PWR_CR1_DBP;
+	#else
+		PWR_CR |= PWR_CR_DBP;
+	#endif
 	RTC_WPR = (uint8_t)0xca;
 	RTC_WPR = (uint8_t)0x53;
 
@@ -174,7 +178,11 @@ static stm32_rtc_ret_t stm32_rtc_init_rtc(Stm32Rtc *self) {
 		return STM32_RTC_RET_NULL;
 	}
 
-	PWR_CR |= PWR_CR_DBP;
+	#if defined(STM32L4)
+		PWR_CR1 |= PWR_CR1_DBP;
+	#else
+		PWR_CR |= PWR_CR_DBP;
+	#endif
 	stm32_rtc_set_clock(self);
 	RCC_BDCR |= RCC_BDCR_RTCEN;
 
@@ -229,8 +237,13 @@ stm32_rtc_ret_t stm32_rtc_init(Stm32Rtc *self) {
 
 	/* Enable the peripheral and disable backup domain write protection. */
 	rcc_periph_clock_enable(RCC_PWR);
-	rcc_periph_clock_enable(RCC_RTC);
-	PWR_CR |= PWR_CR_DBP;
+
+	#if defined(STM32L4)
+		PWR_CR1 |= PWR_CR1_DBP;
+	#else
+		rcc_periph_clock_enable(RCC_RTC);
+		PWR_CR |= PWR_CR_DBP;
+	#endif
 
 	/* Enable LSE oscillator and wait for it to stabilize. */
 	RCC_BDCR |= RCC_BDCR_LSEON;

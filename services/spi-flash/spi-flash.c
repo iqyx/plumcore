@@ -280,6 +280,17 @@ static spi_flash_ret_t spi_flash_lookup_id(SpiFlash *self, uint32_t id, struct i
 			info->part = "S25FL208K";
 			break;
 
+		case 0x00709d15:
+			info->size_bytes = 2 * 1024 * 1024;
+			info->page_size_bytes = 256;
+			info->sector_size_bytes[0] = 4 * 1024; /* sector */
+			info->sector_size_bytes[1] = 32 * 1024; /* half block */
+			info->sector_size_bytes[2] = 64 * 1024; /* block */
+			info->sector_size_bytes[3] = 2 * 1024 * 1024; /* chip */
+			info->manufacturer = "ISSI";
+			info->part = "IS25xP016D";
+			break;
+
 		default:
 			return SPI_FLASH_RET_FAILED;
 	}
