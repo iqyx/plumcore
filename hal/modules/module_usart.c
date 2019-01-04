@@ -155,3 +155,14 @@ int32_t module_usart_free(struct module_usart *usart) {
 
 	return MODULE_USART_FREE_OK;
 }
+
+
+int32_t module_usart_set_baudrate(struct module_usart *usart, uint32_t baudrate) {
+	if (u_assert(usart != NULL)) {
+		return MODULE_USART_SET_BAUDRATE_FAILED;
+	}
+
+	usart_set_baudrate(usart->port, baudrate);
+
+	return MODULE_USART_SET_BAUDRATE_OK;
+}
