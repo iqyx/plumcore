@@ -121,7 +121,6 @@ system_clock_ret_t system_clock_init(SystemClock *self, uint32_t timer, uint32_t
 	self->period = period;
 
 	/* COnfigure the selected hardware timer. */
-	timer_reset(self->timer);
 	timer_set_prescaler(self->timer, self->prescaler);
 	timer_continuous_mode(self->timer);
 	timer_set_period(self->timer, self->period);

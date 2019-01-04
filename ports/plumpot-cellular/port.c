@@ -457,7 +457,7 @@ int32_t port_init(void) {
 		rcc_periph_clock_enable(RCC_TIM9);
 
 		/* Setup a timer for precise UXB protocol delays. */
-		timer_reset(TIM9);
+		rcc_periph_reset_pulse(RST_TIM9);
 		timer_set_mode(TIM9, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
 		timer_continuous_mode(TIM9);
 		timer_direction_up(TIM9);
@@ -516,6 +516,7 @@ int32_t port_init(void) {
 	#endif
 
 	rcc_periph_clock_enable(RCC_TIM2);
+	rcc_periph_reset_pulse(RST_TIM2);
 	nvic_enable_irq(NVIC_TIM2_IRQ);
 	system_clock_init(&system_clock, TIM2, SystemCoreClock / 1000000 - 1, UINT32_MAX);
 	iservicelocator_add(
@@ -550,7 +551,7 @@ void tim2_isr(void) {
 /* Configure dedicated timer (tim3) for runtime task statistics. It should be later
  * redone to use one of the system monotonic clocks with interface_clock. */
 void port_task_timer_init(void) {
-	timer_reset(TIM11);
+	rcc_periph_reset_pulse(RST_TIM11);
 	/* The timer should run at 10kHz */
 	timer_set_prescaler(TIM11, SystemCoreClock / 10000 - 1);
 	timer_continuous_mode(TIM11);
