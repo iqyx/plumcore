@@ -61,6 +61,17 @@ menu "Target configuration"
 			bool "Enable UXB extension bus"
 			select SERVICE_UXB_MASTER
 			default y
+
+		choice
+			prompt "Clock speed"
+
+			config PLUMPOT_CELLULAR_CLOCK_HSE_16MHZ
+				bool "16MHz (HSE, no PLL)"
+
+			config PLUMPOT_CELLULAR_CLOCK_HSE_84MHZ
+				bool "84MHz (HSE, PLL)"
+		endchoice
+
 	endif
 
 	if PORT_NUCLEO_F411RE

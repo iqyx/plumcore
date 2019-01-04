@@ -167,26 +167,38 @@ int32_t port_early_init(void) {
 		SCB_VTOR = CONFIG_VECTOR_TABLE_ADDRESS;
 	#endif
 
-	/* Select HSE as SYSCLK source, no PLL, 16MHz. */
-	rcc_osc_on(RCC_HSE);
-	rcc_wait_for_osc_ready(RCC_HSE);
-	rcc_set_sysclk_source(RCC_CFGR_SW_HSE);
+	#if defined(CONFIG_PLUMPOT_CELLULAR_CLOCK_HSE_16MHZ)
+		/* Select HSE as SYSCLK source, no PLL, 16MHz. */
+		rcc_osc_on(RCC_HSE);
+		rcc_wait_for_osc_ready(RCC_HSE);
+		rcc_set_sysclk_source(RCC_CFGR_SW_HSE);
 
-	rcc_set_hpre(RCC_CFGR_HPRE_DIV_NONE);
-	rcc_set_ppre1(RCC_CFGR_PPRE_DIV_NONE);
-	rcc_set_ppre2(RCC_CFGR_PPRE_DIV_NONE);
+		rcc_set_hpre(RCC_CFGR_HPRE_DIV_NONE);
+		rcc_set_ppre1(RCC_CFGR_PPRE_DIV_NONE);
+		rcc_set_ppre2(RCC_CFGR_PPRE_DIV_NONE);
+
+		/* System clock is now at 16MHz (without PLL). */
+		SystemCoreClock = 84000000;
+		rcc_apb1_frequency = 84000000;
+		rcc_apb2_frequency = 84000000;
+
+	#elif defined(CONFIG_PLUMPOT_CELLULAR_CLOCK_HSE_84MHZ)
+		rcc_clock_setup_hse_3v3(&rcc_hse_16mhz_3v3[RCC_CLOCK_3V3_84MHZ]);
+
+		SystemCoreClock = 16000000;
+		rcc_apb1_frequency = 16000000;
+		rcc_apb2_frequency = 16000000;
+
+	#else
+		#error "no clock speed defined"
+	#endif
 
 	/* Initialize systick interrupt for FreeRTOS. */
 	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
 	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
-	systick_set_reload(15999);
+	systick_set_reload(SystemCoreClock / 1000 - 1);
 	systick_interrupt_enable();
 	systick_counter_enable();
-
-	/* System clock is now at 16MHz (without PLL). */
-	SystemCoreClock = 16000000;
-	rcc_apb1_frequency = 16000000;
-	rcc_apb2_frequency = 16000000;
 
 	/* Initialize all required clocks for GPIO ports. */
 	rcc_periph_clock_enable(RCC_GPIOA);
@@ -196,7 +208,6 @@ int32_t port_early_init(void) {
 	/* Timer 11 needs to be initialized prior to startint the scheduler. It is
 	 * used as a reference clock for getting task statistics. */
 	rcc_periph_clock_enable(RCC_TIM11);
-
 
 	return PORT_EARLY_INIT_OK;
 }
@@ -506,7 +517,7 @@ int32_t port_init(void) {
 
 	rcc_periph_clock_enable(RCC_TIM2);
 	nvic_enable_irq(NVIC_TIM2_IRQ);
-	system_clock_init(&system_clock, TIM2, 15, UINT32_MAX);
+	system_clock_init(&system_clock, TIM2, SystemCoreClock / 1000000 - 1, UINT32_MAX);
 	iservicelocator_add(
 		locator,
 		ISERVICELOCATOR_TYPE_CLOCK,
@@ -540,8 +551,8 @@ void tim2_isr(void) {
  * redone to use one of the system monotonic clocks with interface_clock. */
 void port_task_timer_init(void) {
 	timer_reset(TIM11);
-	/* The timer should run at 1MHz */
-	timer_set_prescaler(TIM11, 1599);
+	/* The timer should run at 10kHz */
+	timer_set_prescaler(TIM11, SystemCoreClock / 10000 - 1);
 	timer_continuous_mode(TIM11);
 	timer_set_period(TIM11, UINT16_MAX);
 	timer_enable_counter(TIM11);
