@@ -72,9 +72,13 @@ int32_t module_rtc_locm3_init(struct module_rtc_locm3 *rtc, const char *name) {
 	rtc->iface.vmt.get_date = module_rtc_locm3_get_date;
 
 	rcc_periph_clock_enable(RCC_PWR);
-	rcc_periph_clock_enable(RCC_RTC);
 
-	PWR_CR |= PWR_CR_DBP;
+	#if defined(STM32L4)
+		PWR_CR1 |= PWR_CR1_DBP;
+	#else
+		rcc_periph_clock_enable(RCC_RTC);
+		PWR_CR |= PWR_CR_DBP;
+	#endif
 
 	/* Enable LSI oscillator and wait a bit. */
 	RCC_CSR |= RCC_CSR_LSION;
