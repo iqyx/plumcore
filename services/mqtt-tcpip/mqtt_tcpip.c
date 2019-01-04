@@ -53,6 +53,53 @@ static const char *mqtt_state_strings[] = {
 };
 
 
+static bool match_topic(const char *filter, const char *topic) {
+	if (*filter == '#') {
+		return true;
+	}
+
+	char last_filter = '\0';
+	while (true) {
+		printf("%c == %c\n", *filter, *topic);
+		if (*filter == '#' && *topic != '\0') {
+			topic++;
+			continue;
+		}
+		if (*filter == '+' && *topic != '\0' && *topic != '/') {
+			topic++;
+			continue;
+		}
+		if (*filter == '+' && *topic == '/') {
+			last_filter = *filter;
+			filter++;
+			continue;
+		}
+		if (*filter == '#' && last_filter != '/') {
+			break;
+		}
+		if (*filter == '+' && last_filter != '/') {
+			break;
+		}
+		if ((*filter == '/' || *filter == '#' || *filter == '+') && *topic == '\0') {
+			last_filter = *filter;
+			filter++;
+			continue;
+		}
+		if (*filter == '\0' && *topic == '\0') {
+			return true;
+		}
+		if (*filter == *topic) {
+			topic++;
+			last_filter = *filter;
+			filter++;
+			continue;
+		}
+		break;
+	}
+	return false;
+}
+
+
 /* Helper function to get time interval in which the next reconnection attempt
  * should be executed. It performs a basic exponential backoff algo (multiply by 2)
  * to avoid excessive data traffic when the remote broker server does not respond. */
@@ -167,10 +214,11 @@ static int mqtt_msg(MqttClient *client, MqttMessage *message, byte msg_new, byte
 	/** @todo more advanced topic matching */
 	QueueSubscribe *q = self->subscribes;
 	while (q != NULL) {
-		if (!strcmp(topic, q->topic_name)) {
+		if (match_topic(q->topic_name, topic)) {
 			if (message->total_len <= q->buffer_size) {
 				memcpy(q->buffer, message->buffer, message->total_len);
 				*(q->data_len) = message->total_len;
+				strcpy(q->msg_topic, topic);
 				q->ret = MQTT_RET_OK;
 			} else {
 				q->ret = MQTT_RET_FAILED;
@@ -326,6 +374,7 @@ static mqtt_ret_t mqtt_step(Mqtt *self) {
 			} else {
 				/* We were not able to subscribe to a topic. Try again. */
 				u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot subscribe to a topic name='%s', qos=%d, '%s'"), sub.topics[0].topic_filter, sub.topics[0].qos, MqttClient_ReturnCodeToString(rc));
+				vTaskDelay(1000);
 			}
 			break;
 		}
@@ -493,7 +542,7 @@ mqtt_ret_t mqtt_init(Mqtt *self, ITcpIp *tcpip) {
 	self->state = MQTT_STATE_INIT;
 
 	self->can_run = true;
-	xTaskCreate(mqtt_task, "mqtt", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->task));
+	xTaskCreate(mqtt_task, "mqtt", configMINIMAL_STACK_SIZE + 384, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		return MQTT_RET_FAILED;
