@@ -39,6 +39,7 @@
 #include "u_assert.h"
 #include "u_log.h"
 #include "semphr.h"
+#include "stream_buffer.h"
 #include <libopencm3/stm32/gpio.h>
 
 /* HAL includes */
@@ -53,6 +54,18 @@
 #undef MODULE_NAME
 #endif
 #define MODULE_NAME "gsm-quectel"
+
+/**
+ * @todo
+ *   - change license to BSD
+ *   - keep common things here (init, free), split the rest
+ *   - move main loop and response loop to dedicated files
+ *   - move all commands to a single task, use direct to task notifications
+ *   - generic response/URC parser
+ *   - consolidate string operations
+ */
+
+
 
 static const char *gsm_quectel_tcpip_states[GSM_QUECTEL_TCPIP_STATUS_MAX] = {
 	"UNKNOWN",
@@ -222,9 +235,14 @@ static gsm_quectel_ret_t command(GsmQuectel *self, enum gsm_quectel_command comm
 			}
 			break;
 
-		case GSM_QUECTEL_CMD_IP_RECV:
-			if (self->data_to_receive != NULL && self->data_to_receive_len > 0) {
-				snprintf(command_str, sizeof(command_str), "AT+QIRD=0,1,0,%u", self->data_to_receive_len);
+		case GSM_QUECTEL_CMD_IP_RECV: {
+				size_t free = xStreamBufferSpacesAvailable(self->rxdata);
+				if (free > 16) {
+					free = 16;
+				}
+				if (free > 0) {
+					snprintf(command_str, sizeof(command_str), "AT+QIRD=0,1,0,%u", free);
+				}
 			}
 			break;
 
@@ -493,17 +511,30 @@ static void gsm_quectel_process_task(void *p) {
 				sscanf(&(buf[i]), "%u", &len);
 
 				/* CR is being processed by the previous readline command. Read the LF byte. */
-				interface_stream_read_timeout(self->usart, self->data_to_receive, 1, 100);
+				uint8_t lf = 0;
+				interface_stream_read_timeout(self->usart, &lf, 1, 100);
+
+
+				// u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("avail %d"), len);
 
 				/* Read the exact number of bytes now. */
 				while (len > 0) {
-					/** @todo make reading more optimal */
-					int r = interface_stream_read_timeout(self->usart, self->data_to_receive, 1, 100);
-					if (r == 1) {
-						/* If the byte was correctly read, append it to the buffer. */
-						self->data_to_receive++;
-						len--;
-						self->data_to_receive_read++;
+					uint8_t data[16];
+					size_t can_read = sizeof(data);
+					if (can_read > len) {
+						can_read = len;
+					}
+
+					// u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("reading %u space %u"), can_read, xStreamBufferSpacesAvailable(self->rxdata));
+
+					int r = interface_stream_read_timeout(self->usart, data, can_read, 100);
+					if (r > 0) {
+						int w = xStreamBufferSend(self->rxdata, data, r, 0);
+						// u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("rxdata %d"), w);
+						if (r != w) {
+							// u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("rx overflow"));
+						}
+						len -= w;
 					}
 				}
 			}
@@ -608,6 +639,11 @@ static void gsm_quectel_main_task(void *p) {
 	enum gsm_quectel_tcpip_status last_tcpip_status = GSM_QUECTEL_TCPIP_STATUS_UNKNOWN;
 	while (self->can_run) {
 
+		if (self->tcp_ready && self->tcpip_ready) {
+			/* Check for data every cycle. */
+			command(self, GSM_QUECTEL_CMD_IP_RECV, 1000);
+		}
+
 		if ((cnt % 20) == 0) {
 			if (self->modem_status == GSM_QUECTEL_MODEM_STATUS_FULL) {
 				command(self, GSM_QUECTEL_CMD_GET_REGISTRATION, 300);
@@ -708,7 +744,11 @@ static void gsm_quectel_main_task(void *p) {
 
 
 		cnt++;
-		vTaskDelay(100);
+
+		/* Continue if data is available, wait 100ms if not. */
+		xSemaphoreTake(self->data_waiting, 100);
+
+		// vTaskDelay(100);
 	}
 
 	gsm_quectel_power(self, false);
@@ -784,6 +824,7 @@ static tcpip_ret_t gsm_quectel_tcpip_socket_send(void *context, const uint8_t *d
 		return TCPIP_RET_DISCONNECTED;
 	}
 
+	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("write %d bytes"), len);
 	self->data_to_send = data;
 	self->data_to_send_len = len;
 	if (command(self, GSM_QUECTEL_CMD_IP_SEND, 2000) == GSM_QUECTEL_RET_OK) {
@@ -798,7 +839,7 @@ static tcpip_ret_t gsm_quectel_tcpip_socket_send(void *context, const uint8_t *d
 }
 
 
-static tcpip_ret_t gsm_quectel_tcpip_socket_receive(void *context, const uint8_t *data, size_t len, size_t *read) {
+static tcpip_ret_t gsm_quectel_tcpip_socket_receive(void *context, uint8_t *data, size_t len, size_t *read) {
 	if (u_assert(context != NULL) ||
 	    u_assert(data != NULL) ||
 	    u_assert(len > 0) ||
@@ -813,29 +854,15 @@ static tcpip_ret_t gsm_quectel_tcpip_socket_receive(void *context, const uint8_t
 		return TCPIP_RET_DISCONNECTED;
 	}
 
+	command(self, GSM_QUECTEL_CMD_IP_RECV, 1000);
+	int r = xStreamBufferReceive(self->rxdata, data, len, 100);
 
-	/* Fill in the socket buffer to receive the data. */
-	self->data_to_receive = data;
-	self->data_to_receive_len = len;
-	self->data_to_receive_read = 0;
-	*read = 0;
-	while (1) {
-		if (command(self, GSM_QUECTEL_CMD_IP_RECV, 1000) == GSM_QUECTEL_RET_OK) {
-			if (self->data_to_receive_read == 0) {
-				/* Wait on the semaphore until some data is ready. */
-				if (xSemaphoreTake(self->data_waiting, 100) == pdFALSE) {
-					*read = 0;
-					return TCPIP_RET_NODATA;
-				} else {
-					continue;
-				}
-			} else {
-				*read = self->data_to_receive_read;
-				return TCPIP_RET_OK;
-			}
-		} else {
-			return TCPIP_RET_FAILED;
-		}
+	*read = r;
+	if (r) {
+		// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("read %d bytes"), r);
+		return TCPIP_RET_OK;
+	} else {
+		return TCPIP_RET_NODATA;
 	}
 
 	return TCPIP_RET_OK;
@@ -976,6 +1003,12 @@ gsm_quectel_ret_t gsm_quectel_init(GsmQuectel *self) {
 	if (self->data_waiting == NULL) {
 		return GSM_QUECTEL_RET_FAILED;
 	}
+
+	self->rxdata = xStreamBufferCreate(128, 1);
+	if (self->rxdata == NULL) {
+		return GSM_QUECTEL_RET_FAILED;
+	}
+
 
 	tcpip_init(&(self->tcpip));
 	self->tcpip.vmt.context = (void *)self;
