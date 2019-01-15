@@ -101,7 +101,7 @@ int32_t port_early_init(void) {
 		SCB_VTOR = CONFIG_VECTOR_TABLE_ADDRESS;
 	#endif
 
-	/* Keep HSI as sysclk. */
+	/* Keep MSI as sysclk. */
 	rcc_set_hpre(RCC_CFGR_HPRE_NODIV);
 	rcc_set_ppre1(RCC_CFGR_PPRE1_NODIV);
 	rcc_set_ppre2(RCC_CFGR_PPRE2_NODIV);
@@ -148,6 +148,7 @@ int32_t port_init(void) {
 	nvic_enable_irq(NVIC_USART2_IRQ);
 	nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
 	module_usart_init(&console, "console", USART2);
+	module_usart_set_baudrate(&console, 9600);
 	hal_interface_set_name(&(console.iface.descriptor), "console");
 
 	/* Console is now initialized, set its stream to be used as u_log output. */
@@ -217,6 +218,7 @@ int32_t port_init(void) {
 	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO5 | GPIO6 | GPIO7);
 	gpio_set_af(GPIOA, GPIO_AF5, GPIO5 | GPIO6 | GPIO7);
 	rcc_periph_clock_enable(RCC_SPI1);
+	rcc_periph_reset_pulse(RST_SPI1);
 	module_spibus_locm3_init(&spi1, "spi1", SPI1);
 	hal_interface_set_name(&(spi1.iface.descriptor), "spi1");
 
@@ -228,6 +230,7 @@ int32_t port_init(void) {
 	hal_interface_set_name(&(spi1_radio1.iface.descriptor), "spi1_radio1");
 
 	/* SPI flash. */
+
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO0);
 	module_spidev_locm3_init(&spi1_flash1, "spi1_flash1", &(spi1.iface), GPIOB, GPIO0);
@@ -243,6 +246,7 @@ int32_t port_init(void) {
 			);
 		}
 	#endif
+
 
 	rfm69_init(&radio1, &spi1_radio1.iface);
 	rfm69_start(&radio1);
