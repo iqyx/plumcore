@@ -39,7 +39,11 @@ static int32_t module_spibus_locm3_send(void *context, const uint8_t *txbuf, siz
 	struct module_spibus_locm3 *spibus = (struct module_spibus_locm3 *)context;
 
 	for (uint32_t i = 0; i < txlen; i++) {
-		spi_xfer(spibus->port, txbuf[i]);
+		#if defined(STM32L4)
+			spi_send8(spibus->port, txbuf[i]);
+		#else
+			spi_xfer(spibus->port, txbuf[i]);
+		#endif
 	}
 
 	return INTERFACE_SPIBUS_SEND_OK;
@@ -53,7 +57,13 @@ static int32_t module_spibus_locm3_receive(void *context, uint8_t *rxbuf, size_t
 	struct module_spibus_locm3 *spibus = (struct module_spibus_locm3 *)context;
 
 	for (uint32_t i = 0; i < rxlen; i++) {
-		rxbuf[i] = spi_xfer(spibus->port, 0x00);
+		#if defined(STM32L4)
+			spi_send8(spibus->port, 0x00);
+			rxbuf[i] = spi_read8(spibus->port);
+		#else
+			rxbuf[i] = spi_xfer(spibus->port, 0x00);
+		#endif
+
 	}
 
 	return INTERFACE_SPIBUS_RECEIVE_OK;
@@ -67,7 +77,12 @@ static int32_t module_spibus_locm3_exchange(void *context, const uint8_t *txbuf,
 	struct module_spibus_locm3 *spibus = (struct module_spibus_locm3 *)context;
 
 	for (uint32_t i = 0; i < len; i++) {
-		rxbuf[i] = spi_xfer(spibus->port, txbuf[i]);
+		#if defined(STM32L4)
+			spi_send8(spibus->port, txbuf[i]);
+			rxbuf[i] = spi_read8(spibus->port);
+		#else
+			rxbuf[i] = spi_xfer(spibus->port, txbuf[i]);
+		#endif
 	}
 
 	return INTERFACE_SPIBUS_EXCHANGE_OK;
@@ -101,6 +116,9 @@ int32_t module_spibus_locm3_init(struct module_spibus_locm3 *spibus, const char 
 	spi_enable_software_slave_management(spibus->port);
 	spi_send_msb_first(spibus->port);
 	spi_set_nss_high(spibus->port);
+	#if defined(STM32L4)
+		spi_set_data_size(spibus->port, SPI_CR2_DS_8BIT);
+	#endif
 	spi_enable(spibus->port);
 
 	u_log(system_log, LOG_TYPE_INFO, "module SPI bus initialized using default settings");
