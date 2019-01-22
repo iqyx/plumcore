@@ -33,10 +33,14 @@
 #include "u_log.h"
 
 #include "interfaces/radio.h"
-#include "radio-mac-simple.h"
 #include "interfaces/radio-mac/host.h"
+#include "interfaces/clock/descriptor.h"
 #include "crc.h"
 #include "fec_golay.h"
+
+#include "radio-mac-simple.h"
+#include "radio-scheduler.h"
+#include "nb-table.h"
 
 #define MODULE_NAME "mac-simple"
 
@@ -122,105 +126,9 @@ static void debug_log_buf(uint8_t *buf, size_t len) {
 }
 
 
-static mac_simple_ret_t nbtable_init(NbTable *self, size_t items) {
-	ASSERT(self != NULL, MAC_SIMPLE_RET_NULL);
-
-	memset(self, 0, sizeof(NbTable));
-
-	self->items = malloc(sizeof(struct nbtable_item) * items);
-	if (self->items == NULL) {
-		return MAC_SIMPLE_RET_FAILED;
-	}
-	self->count = items;
-	for (size_t i = 0; i < items; i++) {
-		self->items[i].used = false;
-	}
-
-	return MAC_SIMPLE_RET_OK;
-}
-
-
-static mac_simple_ret_t nbtable_free(NbTable *self) {
-	ASSERT(self != NULL, MAC_SIMPLE_RET_NULL);
-
-	free(self->items);
-	self->count = 0;
-
-	return MAC_SIMPLE_RET_OK;
-}
-
-
-static struct nbtable_item *nbtable_find_id(NbTable *self, uint32_t id) {
-	for (size_t i = 0; i < self->count; i++) {
-		if (self->items[i].used && self->items[i].id == id) {
-			return &(self->items[i]);
-		}
-	}
-	return NULL;
-}
-
-
-static struct nbtable_item *nbtable_find_empty(NbTable *self) {
-	for (size_t i = 0; i < self->count; i++) {
-		if (self->items[i].used ==false) {
-			return &(self->items[i]);
-		}
-	}
-	return NULL;
-}
-
-
-static mac_simple_ret_t nbtable_add_nb(NbTable *self, uint32_t id, float rssi_dbm, uint8_t counter, size_t len) {
-
-	/* Find the corresponding neighbor table item. Try to create a new one
-	 * if not found. */
-	struct nbtable_item *item = nbtable_find_id(self, id);
-	if (item == NULL) {
-		item = nbtable_find_empty(self);
-		if (item == NULL) {
-			return MAC_SIMPLE_RET_FAILED;
-		}
-		memset(item, 0, sizeof(struct nbtable_item));
-		item->used = true;
-		item->id = id;
-		item->counter = counter;
-	}
-
-	/* Exponential moving average of the packet RSSI. */
-	item->rssi_dbm = (15 * item->rssi_dbm + rssi_dbm) / 16.0;
-
-	/* Check if the packet counter was incremented by 1. Compute
-	 * number of missed packets. */
-	int8_t counter_diff = counter - item->counter;
-	if (counter_diff > 0) {
-		item->rxmissed += counter_diff - 1;
-		item->counter = counter;
-	}
-	// if (counter_diff > 1 && self->debug) {
-		// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("miss rxp=%d rxm=%d"),
-		      // item->rxpackets, item->rxmissed);
-	// }
-
-	/* Update neighbor statistics and reset the item age value. */
-	item->rxpackets++;
-	item->rxbytes += len;
-	item->time = 0;
-
-	// if (self->debug) {
-		// u_log(system_log, LOG_TYPE_DEBUG,
-		      // U_LOG_MODULE_PREFIX("NB id=%08x rssi=%d counter=%d rxp=%d rxb=%d rxm=%d"),
-		      // item->id, (int32_t)item->rssi_dbm, (int32_t)item->counter,
-		      // item->rxpackets, item->rxbytes, item->rxmissed);
-	// }
-
-	return MAC_SIMPLE_RET_OK;
-}
-
-
-static mac_simple_ret_t process_packet(MacSimple *self, uint8_t *buf, size_t len, int32_t rssi_dbm) {
+mac_simple_ret_t process_packet(MacSimple *self, uint8_t *buf, size_t len, int32_t rssi_dbm) {
 	ASSERT(self != NULL, MAC_SIMPLE_RET_NULL);
 	ASSERT(buf != NULL, MAC_SIMPLE_RET_BAD_ARG);
-
 
 	/* Total length is less than the minimum header length. */
 	/** @todo remove */
@@ -269,12 +177,18 @@ static mac_simple_ret_t process_packet(MacSimple *self, uint8_t *buf, size_t len
 
 	if (crc_received != crc_computed) {
 		if (self->debug) {
-			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("crc check failed"));
+			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("crc check failed %04x != %04x"), crc_received, crc_computed);
 		}
 		return MAC_SIMPLE_RET_FAILED;
 	}
 
-	nbtable_add_nb(&self->nbtable, source, rssi_dbm / 10.0, counter, data_len);
+	struct nbtable_item *item = nbtable_find_or_add_id(&self->nbtable, source);
+	if (item == NULL) {
+		/* If we cannot manage the neighbor, drop the packet. */
+		return MAC_SIMPLE_RET_FAILED;
+	}
+	nbtable_update_rx_counter(&self->nbtable, item, counter, data_len);
+	nbtable_update_rssi(&self->nbtable, item, rssi_dbm / 10.0);
 
 	if (destination == 0 || destination == self->node_id) {
 		struct iradio_mac_rx_message msg = {0};
@@ -293,120 +207,13 @@ static mac_simple_ret_t process_packet(MacSimple *self, uint8_t *buf, size_t len
 }
 
 
-static mac_simple_ret_t receive_packet(MacSimple *self) {
-	ASSERT(self != NULL, MAC_SIMPLE_RET_NULL);
-
-	/* Prepare the receiver. */
-	radio_set_sync(self->radio, self->network_id, MAC_SIMPLE_NETWORK_ID_SIZE);
-
-	/* Wait for a packet for a specified time. */
-	/** @todo adjust the listening time */
-
-	/* Buffers for received packet. */
-	uint8_t buf[256];
-	size_t len = 0;
-	struct iradio_receive_params rxparams = {0};
-
-	iradio_ret_t ret = IRADIO_RET_FAILED;
-
-	if (self->low_power) {
-		ret = radio_receive(self->radio, buf, sizeof(buf), &len, &rxparams, 20000);
-	} else {
-		ret = radio_receive(self->radio, buf, sizeof(buf), &len, &rxparams, 200000);
-	}
-
-	if (ret == IRADIO_RET_OK) {
-		// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("rx packet len=%d rssi=%d"), len, rxparams.rssi_dbm);
-		if (process_packet(self, buf, len, rxparams.rssi_dbm) == MAC_SIMPLE_RET_OK) {
-			return MAC_SIMPLE_RET_OK;
-		}
-	} else if (ret == IRADIO_RET_TIMEOUT) {
-		return MAC_SIMPLE_RET_TIMEOUT;
-	}
-
-	return MAC_SIMPLE_RET_FAILED;
-}
-
-
-static mac_simple_ret_t transmit_packet(MacSimple *self) {
-	ASSERT(self != NULL, MAC_SIMPLE_RET_NULL);
-
-	struct iradio_mac_tx_message msg = {0};
-	struct iradio_send_params params = {0};
-	if (hradio_mac_get_packet_to_send(&self->iface_host, &msg) == HRADIO_MAC_RET_OK) {
-
-		/* 126B is the maximum message length when using Golay encoding. */
-		if (msg.len > (126 - 16)) {
-			return MAC_SIMPLE_RET_FAILED;
-		}
-
-		uint8_t buf[256];
-		size_t len = 0;
-
-		u32tb(msg.destination, buf);
-		u32tb(self->node_id, buf + 4);
-		u32tb(msg.context, buf + 8);
-		buf[12] = self->tx_counter;
-		self->tx_counter++;
-		buf[13] = msg.len;
-		memcpy(buf + 14, msg.buf, msg.len);
-		uint16_t crc_computed = crc16(buf, 14 + msg.len);
-		u16tb(crc_computed, buf + 14 + msg.len);
-		len = msg.len + 16;
-
-		/* Pad the length to be divisible by 3. */
-		while (len % 3) {
-			len++;
-		}
-
-		for (int32_t i = len; i >= 0; i--) {
-			uint32_t triplet = btu24(&(buf[i * 3]));
-			uint32_t g1 = fec_golay_encode((triplet >> 12) & 0x0fff);
-			uint32_t g2 = fec_golay_encode(triplet & 0x0fff);
-			u24tb(g1, &(buf[i * 6]));
-			u24tb(g2, &(buf[i * 6 + 3]));
-		}
-		len *= 2;
-
-		radio_send(self->radio, buf, len, &params);
-		return MAC_SIMPLE_RET_OK;
-	}
-
-	return MAC_SIMPLE_RET_FAILED;
-}
-
-
-static void mac_task(void *p) {
+static void rx_process_task(void *p) {
 	MacSimple *self = (MacSimple *)p;
 
 	while (true) {
-
-		if (self->low_power) {
-			/* In the low power mode, we do not want to receive all the time. Instead
-			 * the transmit queue is checked occasionally and packets are transmitted
-			 * until the queue is empty. Then a reception window is opened for a
-			 * specified time. If a packet is received, it is lengthened until no more
-			 * packets are received. Radio is then turned off to preserve power. */
-			while (transmit_packet(self) == MAC_SIMPLE_RET_OK) {
-				while (receive_packet(self) != MAC_SIMPLE_RET_TIMEOUT) {
-					;
-				}
-			}
-
-			/** @todo this time should be configurable */
-			vTaskDelay(200);
-		} else {
-			/* In the full-power mode, wait for a packet. Match it to the corresponding
-			 * neighbor and check if it is in the low power mode. If yes, this is
-			 * the right time to respond. Get up to n packets from the neighbor
-			 * queue and send them. If the neighbor is in full power mode too,
-			 * basically the same thing could be done except the timing is not
-			 * so strict. */
-			if (receive_packet(self) != MAC_SIMPLE_RET_TIMEOUT) {
-				while (transmit_packet(self) == MAC_SIMPLE_RET_OK) {
-					;
-				}
-			}
+		struct radio_scheduler_rxpacket packet = {0};
+		if (radio_scheduler_rx(self, &packet) == MAC_SIMPLE_RET_OK) {
+			process_packet(self, packet.buf, packet.len, packet.rxparams.rssi_dbm);
 		}
 
 		if (self->state == MAC_SIMPLE_STATE_STOP_REQ) {
@@ -416,6 +223,62 @@ static void mac_task(void *p) {
 
 	vTaskDelete(NULL);
 }
+
+
+static void tx_process_task(void *p) {
+	MacSimple *self = (MacSimple *)p;
+
+	while (true) {
+
+		struct iradio_mac_tx_message msg = {0};
+		if (hradio_mac_get_packet_to_send(&self->iface_host, &msg) == HRADIO_MAC_RET_OK) {
+
+			struct radio_scheduler_txpacket packet = {0};
+
+			u32tb(msg.destination, packet.buf);
+			u32tb(self->node_id, &(packet.buf[4]));
+			u32tb(msg.context, &packet.buf[8]);
+			packet.buf[12] = self->tx_counter;
+			self->tx_counter++;
+			packet.buf[13] = msg.len;
+			memcpy(&(packet.buf[14]), msg.buf, msg.len);
+			uint16_t crc_computed = crc16(packet.buf, 14 + msg.len);
+			u16tb(crc_computed, &(packet.buf[14 + msg.len]));
+			packet.len = msg.len + 16;
+
+			if (self->mcs->fec == MAC_SIMPLE_FEC_TYPE_GOLAY1224) {
+				/* 126B is the maximum message length when using Golay encoding.
+				 * Drop the packet if it is larger. */
+				if (msg.len > 126) {
+					continue;
+				}
+
+				/* Pad the length to be divisible by 3. */
+				while (packet.len % 3) {
+					packet.len++;
+				}
+
+				for (int32_t i = packet.len; i >= 0; i--) {
+					uint32_t triplet = btu24(&(packet.buf[i * 3]));
+					uint32_t g1 = fec_golay_encode((triplet >> 12) & 0x0fff);
+					uint32_t g2 = fec_golay_encode(triplet & 0x0fff);
+					u24tb(g1, &(packet.buf[i * 6]));
+					u24tb(g2, &(packet.buf[i * 6 + 3]));
+				}
+				packet.len *= 2;
+			}
+
+			radio_scheduler_tx(self, &packet);
+		}
+
+		if (self->state == MAC_SIMPLE_STATE_STOP_REQ) {
+			break;
+		}
+	}
+
+	vTaskDelete(NULL);
+}
+
 
 
 mac_simple_ret_t mac_simple_init(MacSimple *self, Radio *radio) {
@@ -436,18 +299,25 @@ mac_simple_ret_t mac_simple_init(MacSimple *self, Radio *radio) {
 	mac_simple_set_network_name(self, "default");
 	mac_simple_set_mcs(self, 0);
 
-	if (nbtable_init(&self->nbtable, 16) != MAC_SIMPLE_RET_OK) {
+	if (nbtable_init(&self->nbtable, 16) != NBTABLE_RET_OK) {
 		goto err;
 	}
 
 	fec_golay_table_fill();
-	self->low_power = true;
+	self->low_power = false;
 	self->debug = false;
 
-	self->state = MAC_SIMPLE_STATE_RUNNING;
-	xTaskCreate(mac_task, "mac-simple", configMINIMAL_STACK_SIZE + 1024, (void *)self, 2, &(self->task));
-	if (self->task == NULL) {
+	if (radio_scheduler_start(self) != MAC_SIMPLE_RET_OK) {
 		goto err;
+	}
+
+	xTaskCreate(rx_process_task, "rmac-rxprocess", configMINIMAL_STACK_SIZE + 512, (void *)self, 1, &(self->rx_process_task));
+	if (self->rx_process_task == NULL) {
+		return MAC_SIMPLE_RET_FAILED;
+	}
+	xTaskCreate(tx_process_task, "rmac-txprocess", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->tx_process_task));
+	if (self->tx_process_task == NULL) {
+		return MAC_SIMPLE_RET_FAILED;
 	}
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("service started"));
@@ -474,6 +344,7 @@ mac_simple_ret_t mac_simple_set_network_name(MacSimple *self, const char *networ
 
 	/** @todo convert network name to the network_id */
 	memcpy(self->network_id, "abcd", 4);
+	radio_set_sync(self->radio, self->network_id, MAC_SIMPLE_NETWORK_ID_SIZE);
 
 	return MAC_SIMPLE_RET_OK;
 }
@@ -489,5 +360,25 @@ mac_simple_ret_t mac_simple_set_mcs(MacSimple *self, struct mac_simple_mcs *mcs)
 }
 
 
+mac_simple_ret_t mac_simple_set_clock(MacSimple *self, IClock *clock) {
+	ASSERT(self != NULL, MAC_SIMPLE_RET_NULL);
+	ASSERT(clock != NULL, MAC_SIMPLE_RET_BAD_ARG);
 
+	self->clock = clock;
+
+	return MAC_SIMPLE_RET_OK;
+}
+
+
+uint64_t mac_simple_time(MacSimple *self) {
+	ASSERT(self != NULL, MAC_SIMPLE_RET_NULL);
+
+	if (self->clock) {
+		struct timespec t;
+		iclock_get(self->clock, &t);
+		return (uint64_t)t.tv_sec * 1000000ull + (uint64_t)t.tv_nsec / 1000ull;
+	}
+
+	return 0;
+}
 

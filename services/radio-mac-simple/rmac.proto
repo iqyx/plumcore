@@ -1,0 +1,36 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+
+message RmacPacket {
+	/* Destination identifier may be omitted. In this case it defaults to 0 (broadcast). */
+	optional uint32 destination = 1 [default = 0];
+
+	required uint32 source = 2;
+
+	/* Context is an information for the recipient to determine the task/process responsible
+	 * for processing the received data. It may define which transfer protocol is used.
+	 * If the packet contains no data the context field can be omitted. */
+	optional uint32 context = 3;
+
+	/* The counter is incremented on every packet sent. It is required for multiple reasons
+	 * (reception statistics, encryption). */
+	optional uint32 counter = 4;
+
+	optional bytes data = 5;
+
+	/* The transmitter advertises its radio is always in the RX mode whenever possible.
+	 * This is usually the case on gateways and routers with heavier traffic. If a peer
+	 * has such node in the neighborhood it may use it as a gateway and put itself in
+	 * a low power mode. */
+	optional bool full_rx_mode = 6;
+
+	/* The transmitter is probably in the low power mode which means its radio is turned
+	 * off most of the time. It listens for traffic from its neighbors only a limited time
+	 * after a packet has been transmitted. If not packet is received the radio is turn
+	 * off. */
+	optional uint32 immediate_rx_ms = 7;
+
+
+
+}

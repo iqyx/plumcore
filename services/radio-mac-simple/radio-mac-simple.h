@@ -58,6 +58,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include "semphr.h"
 
 #include "u_assert.h"
 
@@ -65,7 +66,9 @@
 #include "interfaces/radio.h"
 #include "interfaces/radio-mac/descriptor.h"
 #include "interfaces/radio-mac/host.h"
+#include "interfaces/clock/descriptor.h"
 #include "mcs.h"
+#include "nb-table.h"
 
 
 #define MAC_SIMPLE_MAC_KEY_LEN 32
@@ -80,6 +83,7 @@ typedef enum {
 	MAC_SIMPLE_RET_BAD_ARG,
 	MAC_SIMPLE_RET_FAILED,
 	MAC_SIMPLE_RET_TIMEOUT,
+	MAC_SIMPLE_RET_NOOP,
 } mac_simple_ret_t;
 
 
@@ -144,25 +148,52 @@ enum mac_simple_vtype {
 };
 
 
-struct nbtable_item {
-	bool used;
-	uint32_t id;
-	float rssi_dbm;
-	uint32_t rxpackets;
-	uint32_t rxbytes;
-	uint32_t rxmissed;
-	uint32_t txpackets;
-	uint32_t txbytes;
-	uint8_t counter;
-	uint8_t time;
+enum rmac_slot_type {
+	/* Radio is in the RX mode during the search slot. The scheduler is not
+	 * expecting any data to be received from current neighbors. */
+	RMAC_SLOT_TYPE_RX_SEARCH,
+
+	/* Unmanaged slots can be used to receive data from any neighbor, even from
+	 * an unmanaged one (eg. from a newly connected neighbor). */
+	RMAC_SLOT_TYPE_RX_UNMANAGED,
+
+	/* The slot is scheduled in the same time as the neighbor's unicast TX slot. */
+	RMAC_SLOT_TYPE_RX_UNICAST,
+
+	/* Data to be received by all neighbors. */
+	RMAC_SLOT_TYPE_TX_BROADCAST,
+
+	/* Small control slots received by all neighbors. */
+	RMAC_SLOT_TYPE_TX_CONTROL,
+
+	/* The slot is scheduled in the same time as the neighbors unicast RX slot. */
+	RMAC_SLOT_TYPE_TX_UNICAST,
+};
+
+struct rmac_slot {
+	/* Absolute time in microseconds when the slot starts. */
+	uint64_t slot_start_us;
+
+	/* Length of the slot in microseconds. */
+	uint32_t slot_length_us;
+
+	enum rmac_slot_type type;
+	uint32_t peer_id;
+
 };
 
 
-typedef struct {
-	size_t count;
-	struct nbtable_item *items;
+struct rmac_slot_queue {
+	struct rmac_slot *items;
 
-} NbTable;
+	/* Size of the items array (allocated). */
+	size_t size;
+
+	/* Number of items in the array. */
+	size_t len;
+
+	SemaphoreHandle_t lock;
+};
 
 
 typedef struct {
@@ -184,7 +215,21 @@ typedef struct {
 	bool debug;
 	bool low_power;
 
-	TaskHandle_t task;
+	TaskHandle_t radio_scheduler_task;
+	TaskHandle_t slot_scheduler_task;
+	QueueHandle_t radio_scheduler_txqueue;
+	QueueHandle_t radio_scheduler_rxqueue;
+
+	TaskHandle_t rx_process_task;
+	TaskHandle_t tx_process_task;
+
+	IClock *clock;
+
+	struct rmac_slot_queue slot_queue;
+
+	/* Debug statistics. */
+	int32_t slot_start_time_error_ema_us;
+
 } MacSimple;
 
 
@@ -193,4 +238,10 @@ mac_simple_ret_t mac_simple_init(MacSimple *self, Radio *radio);
 mac_simple_ret_t mac_simple_free(MacSimple *self);
 mac_simple_ret_t mac_simple_set_network_name(MacSimple *self, const char *network);
 mac_simple_ret_t mac_simple_set_mcs(MacSimple *self, struct mac_simple_mcs *mcs);
+
+
+mac_simple_ret_t process_packet(MacSimple *self, uint8_t *buf, size_t len, int32_t rssi_dbm);
+mac_simple_ret_t radio_scheduler_start(MacSimple *self);
+mac_simple_ret_t mac_simple_set_clock(MacSimple *self, IClock *clock);
+uint64_t mac_simple_time(MacSimple *self);
 
