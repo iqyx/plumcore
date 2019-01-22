@@ -85,6 +85,25 @@ static uint8_t register_read(Rfm69 *self, enum rfm69_register addr) {
 }
 
 
+static uint16_t register_read16(Rfm69 *self, enum rfm69_register addr) {
+	if (u_assert(self != NULL)) {
+		return 0;
+	}
+
+	uint8_t txbuf, rxbuf[2];
+
+	/* The first bit is always 0 to indicate read operation. */
+	txbuf = addr & 0x7f;
+
+	interface_spidev_select(self->spidev);
+	interface_spidev_send(self->spidev, &txbuf, 1);
+	interface_spidev_receive(self->spidev, rxbuf, 2);
+	interface_spidev_deselect(self->spidev);
+
+	return rxbuf[0] << 8 | rxbuf[1];
+}
+
+
 static rfm69_ret_t fifo_write(Rfm69 *self, const uint8_t *buf, uint8_t len) {
 	if (u_assert(self != NULL)) {
 		return RFM69_RET_NULL;
@@ -135,7 +154,7 @@ static rfm69_ret_t fifo_read(Rfm69 *self, uint8_t *buf, uint8_t len) {
 
 /* A bitmask of enum rfm69_rstatus is returned. */
 static uint32_t get_status(Rfm69 *self) {
-	return (register_read(self, RFM69_REG_IRQFLAGS1) << 8) | register_read(self, RFM69_REG_IRQFLAGS2);
+	return register_read16(self, RFM69_REG_IRQFLAGS1);
 }
 
 
