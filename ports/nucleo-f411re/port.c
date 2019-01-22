@@ -208,25 +208,6 @@ int32_t port_init(void) {
 		"rng1"
 	);
 
-
-	/* Configure GPIO for radio & flash SPI bus (SPI2), enable SPI2 clock and
-	 * run spibus driver using libopencm3 to access it. */
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14 | GPIO15);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
-	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
-	rcc_periph_clock_enable(RCC_SPI2);
-	module_spibus_locm3_init(&spi2, "spi2", SPI2);
-	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
-
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
-	gpio_set(GPIOB, GPIO12);
-	module_spidev_locm3_init(&spi2_radio1, "spi2_radio1", &(spi2.iface), GPIOB, GPIO12);
-	hal_interface_set_name(&(spi2_radio1.iface.descriptor), "spi2_radio1");
-
-	rfm69_init(&radio1, &spi2_radio1.iface);
-	rfm69_start(&radio1);
-
 	/** @todo the watchdog is port-dependent. Rename the module accordingly and keep it here. */
 	watchdog_init(&watchdog, 20000, 0);
 
@@ -248,6 +229,34 @@ int32_t port_init(void) {
 		"rtc"
 	);
 
+	/* Configure GPIO for radio & flash SPI bus (SPI2), enable SPI2 clock and
+	 * run spibus driver using libopencm3 to access it. */
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14 | GPIO15);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
+	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
+	rcc_periph_clock_enable(RCC_SPI2);
+	module_spibus_locm3_init(&spi2, "spi2", SPI2);
+	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
+
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
+	gpio_set(GPIOB, GPIO12);
+	module_spidev_locm3_init(&spi2_radio1, "spi2_radio1", &(spi2.iface), GPIOB, GPIO12);
+	hal_interface_set_name(&(spi2_radio1.iface.descriptor), "spi2_radio1");
+
+	rfm69_init(&radio1, &spi2_radio1.iface);
+	rfm69_start(&radio1);
+
+	radio_open(&r, &radio1.radio);
+	radio_set_tx_power(&r, 0);
+	radio_set_frequency(&r, 434132000);
+	radio_set_bit_rate(&r, 25000);
+
+	mac_simple_init(&mac1, &r);
+	mac1.low_power = false;
+	mac_simple_set_mcs(&mac1, &mcs_GMSK03_100K);
+	mac_simple_set_clock(&mac1, &system_clock.iface);
+
 	sffs_init(&fs);
 	/* Do not mount the filesystem as there is no flash available. */
 
@@ -256,15 +265,6 @@ int32_t port_init(void) {
 
 
 int32_t system_test(void) {
-
-	radio_open(&r, &radio1.radio);
-	radio_set_tx_power(&r, 0);
-	radio_set_frequency(&r, 434200000);
-	radio_set_bit_rate(&r, 100000);
-
-	mac_simple_init(&mac1, &r);
-	mac_simple_set_mcs(&mac1, &mcs_GMSK03_100K);
-
 
 	RadioMac mac;
 	radio_mac_open(&mac, &mac1.iface, 1);
@@ -275,9 +275,9 @@ int32_t system_test(void) {
 		size_t len = 0;
 		// radio_mac_receive(&mac, &source, buf, sizeof(buf), &len);
 		// u_log(system_log, LOG_TYPE_DEBUG, "mac rx packet len=%d", len);
-		radio_mac_send(&mac, 0, "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", 64);
-		vTaskDelay(400);
-		u_log(system_log, LOG_TYPE_DEBUG, "rxp=%d rxm=%d rssi=%d", mac1.nbtable.items[0].rxpackets, mac1.nbtable.items[0].rxmissed, (int32_t)(mac1.nbtable.items[0].rssi_dbm));
+		radio_mac_send(&mac, 0, "abcd", 4);
+		vTaskDelay(1000);
+		u_log(system_log, LOG_TYPE_DEBUG, "rxp=%d rxm=%d rssi=%d err=%d qlen=%u", mac1.nbtable.items[0].rxpackets, mac1.nbtable.items[0].rxmissed, (int32_t)(mac1.nbtable.items[0].rssi_dbm), mac1.slot_start_time_error_ema_us, rmac_slot_queue_len(&mac1.slot_queue));
 	}
 
 	return 0;
@@ -295,7 +295,7 @@ void tim2_isr(void) {
 /* Configure dedicated timer (tim3) for runtime task statistics. It should be later
  * redone to use one of the system monotonic clocks with interface_clock. */
 void port_task_timer_init(void) {
-	timer_reset(TIM11);
+	rcc_periph_reset_pulse(RST_TIM11);
 	/* The timer should run at 1MHz */
 	timer_set_prescaler(TIM11, 1599);
 	timer_continuous_mode(TIM11);
