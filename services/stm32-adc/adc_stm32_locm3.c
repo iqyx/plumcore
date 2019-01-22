@@ -42,7 +42,7 @@
 #define MODULE_NAME "adc-stm32"
 
 
-static adc_stm32_locm3_ret_t sample(void *context, uint32_t input, int32_t *sample) {
+static iadc_ret_t sample(void *context, uint32_t input, int32_t *sample) {
 	if (u_assert(context != NULL) ||
 	    u_assert(sample != NULL)) {
 		return IADC_RET_FAILED;
@@ -54,7 +54,11 @@ static adc_stm32_locm3_ret_t sample(void *context, uint32_t input, int32_t *samp
 	uint8_t channels[16];
 
 	/* Capture voltage of the internal voltage reference. */
-	channels[0] = 17;
+	#if defined(STM32L4)
+		channels[0] = 0;
+	#else
+		channels[0] = 17;
+	#endif
 	adc_set_regular_sequence(ADC1, 1, channels);
 	adc_start_conversion_regular(ADC1);
 	while (!adc_eoc(ADC1)) {
@@ -62,8 +66,13 @@ static adc_stm32_locm3_ret_t sample(void *context, uint32_t input, int32_t *samp
 	}
 
 	/* Read Vref reading at 3.3V Vdda (calibration values, see the datasheet) and compute its voltage. */
-	uint16_t vref_cal = *(uint16_t *)0x1fff7a2a;
-	uint32_t vref_uv = vref_cal * 3300000ull / 4096ull;
+	#if defined(STM32L4)
+		uint16_t vref_cal = ST_VREFINT_CAL;
+		uint32_t vref_uv = vref_cal * 3000000ull / 4096ull;
+	#else
+		uint16_t vref_cal = *(uint16_t *)0x1fff7a2a;
+		uint32_t vref_uv = vref_cal * 3300000ull / 4096ull;
+	#endif
 
 	/* Compute Vdda using computed value of the internal Vref */
 	uint32_t vdda_uv = vref_uv * 4096ull / adc_read_regular(ADC1);
@@ -83,6 +92,7 @@ static adc_stm32_locm3_ret_t sample(void *context, uint32_t input, int32_t *samp
 	return IADC_RET_OK;
 }
 
+
 adc_stm32_locm3_ret_t adc_stm32_locm3_init(AdcStm32Locm3 *self, uint32_t adc) {
 	if (u_assert(self != NULL)) {
 		return ADC_STM32_LOCM3_RET_FAILED;
@@ -100,15 +110,34 @@ adc_stm32_locm3_ret_t adc_stm32_locm3_init(AdcStm32Locm3 *self, uint32_t adc) {
 	if (adc == ADC1) {
 		rcc_periph_clock_enable(RCC_ADC1);
 	}
+	#if !defined(STM32L4)
 	if (adc == ADC2) {
 		rcc_periph_clock_enable(RCC_ADC2);
 	}
+	#endif
 
-	//~ adc_power_off(adc);
-	adc_disable_scan_mode(adc);
-	adc_set_sample_time_on_all_channels(adc, ADC_SMPR_SMP_112CYC);
-	adc_power_on(adc);
-	ADC_CCR |= ADC_CCR_TSVREFE;
+	#if defined(STM32L4)
+		ADC_CR(adc) &= ~ADC_CR_DEEPPWD;
+		RCC_CCIPR |= 3 << 28;
+		adc_enable_regulator(adc);
+		vTaskDelay(1);
+		adc_power_on(adc);
+		adc_set_sample_time_on_all_channels(adc, ADC_SMPR_SMP_6DOT5CYC);
+		adc_set_resolution(adc, ADC_CFGR1_RES_12_BIT);
+		adc_enable_vrefint();
+
+		/* Hardware oversampler is available on L4. Use it to
+		 * oversample the input a bit. */
+		ADC_CFGR2(adc) |= ADC_CFGR2_OVSR_64x;
+		ADC_CFGR2(adc) |= ADC_CFGR2_OVSS_6BITS;
+		ADC_CFGR2(adc) |= ADC_CFGR2_ROVSE;
+	#else
+		adc_power_on(adc);
+		adc_disable_scan_mode(adc);
+		adc_set_sample_time_on_all_channels(adc, ADC_SMPR_SMP_112CYC);
+		ADC_CCR |= ADC_CCR_TSVREFE;
+	#endif
+	adc_set_single_conversion_mode(adc);
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("ADC initialized"));
 
