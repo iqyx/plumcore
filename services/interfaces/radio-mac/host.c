@@ -77,7 +77,7 @@ hradio_mac_ret_t hradio_mac_get_packet_to_send(HRadioMac *self, struct iradio_ma
 		return HRADIO_MAC_RET_BAD_ARG;
 	}
 
-	if (xQueueReceive(self->iradio_mac->txqueue, msg, 0) != pdTRUE) {
+	if (xQueueReceive(self->iradio_mac->txqueue, msg, portMAX_DELAY) != pdTRUE) {
 		return HRADIO_MAC_RET_FAILED;
 	}
 
