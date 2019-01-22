@@ -121,6 +121,26 @@ menu "Target configuration"
 		config PLATFORM_NAME
 			string
 			default "cortex-m4f"
+
+		config NWDAQ_G201_BAT_VOLTAGE
+			bool "Measure battery voltage (create a sensor device)"
+			default y
+			select SERVICE_ADC_SENSOR
+
+		config NWDAQ_G201_ENABLE_FLASH
+			bool "Enable onboard SPI flash memory"
+			default y
+			select SERVICE_SPI_FLASH
+			select SERVICE_FS_SPIFFS
+
+		config NWDAQ_G201_ENABLE_RADIO
+			bool "Enable onboard SX1231 radio transceiver"
+			default y
+			select SERVICE_RADIO_RFM69
+
+		config NWDAQ_G201_ENABLE_LED
+			bool "Enable status LED"
+			default y
 	endif
 endmenu
 
@@ -350,6 +370,11 @@ menu "Enable services"
 		config SERVICE_SPI_FLASH
 			bool "SPI NOR flash memory driver"
 			default y
+
+		config SERVICE_ADC_SENSOR
+			bool "Sensor device using ADC"
+			default y
+			select SERVICE_STM32_ADC
 	endmenu
 
 	menu "Filesystem and memory management services"

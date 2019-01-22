@@ -60,4 +60,5 @@ void port_task_timer_init(void);
 uint32_t port_task_timer_get_value(void);
 
 
+int32_t system_test(void);
 

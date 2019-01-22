@@ -86,12 +86,23 @@ Stm32Rtc rtc;
 
 
 #include "services/radio-rfm69/rfm69.h"
+#include "services/radio-mac-simple/radio-mac-simple.h"
+#include "interfaces/radio-mac/client.h"
 Rfm69 radio1;
+MacSimple mac1;
+Radio r;
 
 #if defined(CONFIG_SERVICE_SPI_FLASH)
 	#include "services/spi-flash/spi-flash.h"
 	#include "interfaces/flash.h"
 	SpiFlash spi_flash1;
+#endif
+
+#if defined(CONFIG_NWDAQ_G201_BAT_VOLTAGE)
+	#include "services/stm32-adc/adc_stm32_locm3.h"
+	#include "services/adc-sensor/adc-sensor.h"
+	AdcStm32Locm3 adc1;
+	AdcSensor sensor_bat_voltage;
 #endif
 
 
@@ -101,22 +112,25 @@ int32_t port_early_init(void) {
 		SCB_VTOR = CONFIG_VECTOR_TABLE_ADDRESS;
 	#endif
 
-	/* Keep MSI as sysclk. */
 	rcc_set_hpre(RCC_CFGR_HPRE_NODIV);
 	rcc_set_ppre1(RCC_CFGR_PPRE1_NODIV);
 	rcc_set_ppre2(RCC_CFGR_PPRE2_NODIV);
 
+	/** @todo configurable */
+	rcc_set_msi_range(RCC_CR_MSIRANGE_4MHZ);
+	SystemCoreClock = 4000000;
+
+
+	rcc_apb1_frequency = SystemCoreClock;
+	rcc_apb2_frequency = SystemCoreClock;
+
 	/* Initialize systick interrupt for FreeRTOS. */
 	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
 	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
-	systick_set_reload(3999);
+	systick_set_reload(SystemCoreClock / 1000 - 1);
 	systick_interrupt_enable();
 	systick_counter_enable();
 
-	/* System clock is now at 16MHz (without PLL). */
-	SystemCoreClock = 4000000;
-	rcc_apb1_frequency = 4000000;
-	rcc_apb2_frequency = 4000000;
 
 	/* Initialize all required clocks for GPIO ports. */
 	rcc_periph_clock_enable(RCC_GPIOA);
@@ -178,27 +192,57 @@ int32_t port_init(void) {
 		"rtc1"
 	);
 
-	/* Status LEDs. */
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
-	module_led_init(&led_stat, "led_stat");
-	module_led_set_port(&led_stat, GPIOA, GPIO8);
-	interface_led_loop(&(led_stat.iface), 0x11f1);
-	hal_interface_set_name(&(led_stat.iface.descriptor), "led_stat");
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_LED,
-		(Interface *)&led_stat.iface.descriptor,
-		"led_stat"
-	);
+	#if defined(CONFIG_NWDAQ_G201_ENABLE_LED)
+		/* Status LEDs. */
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
+		module_led_init(&led_stat, "led_stat");
+		module_led_set_port(&led_stat, GPIOA, GPIO8);
+		interface_led_loop(&(led_stat.iface), 0x11f1);
+		hal_interface_set_name(&(led_stat.iface.descriptor), "led_stat");
+		iservicelocator_add(
+			locator,
+			ISERVICELOCATOR_TYPE_LED,
+			(Interface *)&led_stat.iface.descriptor,
+			"led_stat"
+		);
+	#endif
 
 	#if defined(CONFIG_SERVICE_STM32_WATCHDOG)
 		watchdog_init(&watchdog, 20000, 0);
 	#endif
 
+	#if defined(CONFIG_NWDAQ_G201_BAT_VOLTAGE)
+		/* Battery voltage is measured by a resistor divider connected
+		 * to GPIO port PA1, which is ADC1 analog input channel 6.
+		 * Divider = 470, multiplier = 1470. */
+		gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO1);
+		adc_stm32_locm3_init(&adc1, ADC1);
+
+		adc_sensor_init(
+			&sensor_bat_voltage,
+			&adc1.iface,
+			6,
+			&(ISensorInfo) {
+				.quantity_name = "Voltage",
+				.quantity_symbol = "U",
+				.unit_name = "Volt",
+				.unit_symbol = "V"
+			},
+			1470,
+			470
+		);
+		iservicelocator_add(
+			locator,
+			ISERVICELOCATOR_TYPE_SENSOR,
+			&sensor_bat_voltage.iface.interface,
+			"bat-voltage"
+		);
+	#endif
+
 	rcc_periph_clock_enable(RCC_TIM2);
 	rcc_periph_reset_pulse(RST_TIM2);
 	nvic_enable_irq(NVIC_TIM2_IRQ);
-	system_clock_init(&system_clock, TIM2, 15, UINT32_MAX);
+	system_clock_init(&system_clock, TIM2, SystemCoreClock / 1000000 - 1, UINT32_MAX);
 	iservicelocator_add(
 		locator,
 		ISERVICELOCATOR_TYPE_CLOCK,
@@ -214,6 +258,8 @@ int32_t port_init(void) {
 		"rtc"
 	);
 
+	/* The SPI bus contains two devices - SX1231 radio transceiver and a
+	 * SPI NOR flash memory. The bus is always configured and enabled. */
 	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO5 | GPIO6 | GPIO7);
 	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO5 | GPIO6 | GPIO7);
 	gpio_set_af(GPIOA, GPIO_AF5, GPIO5 | GPIO6 | GPIO7);
@@ -223,20 +269,35 @@ int32_t port_init(void) {
 	hal_interface_set_name(&(spi1.iface.descriptor), "spi1");
 
 	/* SX1231 radio. */
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO4);
-	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO4);
-	gpio_set(GPIOA, GPIO4);
-	module_spidev_locm3_init(&spi1_radio1, "spi1_radio1", &(spi1.iface), GPIOA, GPIO4);
-	hal_interface_set_name(&(spi1_radio1.iface.descriptor), "spi1_radio1");
+	#if defined(CONFIG_NWDAQ_G201_ENABLE_RADIO)
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO4);
+		gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO4);
+		gpio_set(GPIOA, GPIO4);
+		module_spidev_locm3_init(&spi1_radio1, "spi1_radio1", &(spi1.iface), GPIOA, GPIO4);
+		hal_interface_set_name(&(spi1_radio1.iface.descriptor), "spi1_radio1");
+
+		rfm69_init(&radio1, &spi1_radio1.iface);
+		rfm69_start(&radio1);
+
+		radio_open(&r, &radio1.radio);
+		radio_set_tx_power(&r, 0);
+		radio_set_frequency(&r, 434200000);
+		radio_set_bit_rate(&r, 25000);
+
+		mac_simple_init(&mac1, &r);
+		mac1.low_power = true;
+		mac_simple_set_mcs(&mac1, &mcs_GMSK03_100K);
+		mac_simple_set_clock(&mac1, &system_clock.iface);
+		/** @todo configure MAC elsewhere. */
+	#endif
 
 	/* SPI flash. */
+	#if defined(CONFIG_NWDAQ_G201_ENABLE_FLASH)
+		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
+		gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO0);
+		module_spidev_locm3_init(&spi1_flash1, "spi1_flash1", &(spi1.iface), GPIOB, GPIO0);
+		hal_interface_set_name(&(spi1_flash1.iface.descriptor), "spi1_flash1");
 
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO0);
-	module_spidev_locm3_init(&spi1_flash1, "spi1_flash1", &(spi1.iface), GPIOB, GPIO0);
-	hal_interface_set_name(&(spi1_flash1.iface.descriptor), "spi1_flash1");
-
-	#if defined(CONFIG_SERVICE_SPI_FLASH)
 		if (spi_flash_init(&spi_flash1, &(spi1_flash1.iface)) == SPI_FLASH_RET_OK) {
 			iservicelocator_add(
 				locator,
@@ -247,26 +308,23 @@ int32_t port_init(void) {
 		}
 	#endif
 
-
-	rfm69_init(&radio1, &spi1_radio1.iface);
-	rfm69_start(&radio1);
-
-	Radio r;
-	radio_open(&r, &radio1.radio);
-	radio_set_tx_power(&r, 0);
-	radio_set_frequency(&r, 434200000);
-	radio_set_bit_rate(&r, 100000);
-
-/*
-	while (1) {
-		struct iradio_send_params params = {0};
-		u_log(system_log, LOG_TYPE_DEBUG, "send");
-		radio_send(&r, "abcd", 4, &params);
-		vTaskDelay(100);
-	}
-*/
-
 	return PORT_INIT_OK;
+}
+
+
+/** @todo remove */
+int32_t system_test(void) {
+
+	RadioMac mac;
+	radio_mac_open(&mac, &mac1.iface, 1);
+
+	while (true) {
+		radio_mac_send(&mac, 0, "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", 8);
+		vTaskDelay(400);
+		u_log(system_log, LOG_TYPE_DEBUG, "rxp=%d rxm=%d rssi=%d err=%d qlen=%u", mac1.nbtable.items[0].rxpackets, mac1.nbtable.items[0].rxmissed, (int32_t)(mac1.nbtable.items[0].rssi_dbm), mac1.slot_start_time_error_ema_us, rmac_slot_queue_len(&mac1.slot_queue));
+	}
+
+	return 0;
 }
 
 
@@ -282,8 +340,7 @@ void tim2_isr(void) {
  * redone to use one of the system monotonic clocks with interface_clock. */
 void port_task_timer_init(void) {
 	rcc_periph_reset_pulse(RST_TIM6);
-	/* The timer should run at 1MHz */
-	timer_set_prescaler(TIM6, 399);
+	timer_set_prescaler(TIM6, SystemCoreClock / 10000 - 1);
 	timer_continuous_mode(TIM6);
 	timer_set_period(TIM6, UINT16_MAX);
 	timer_enable_counter(TIM6);
