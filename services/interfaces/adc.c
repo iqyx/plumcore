@@ -55,7 +55,7 @@ iadc_ret_t iadc_free(IAdc *self) {
 
 iadc_ret_t iadc_sample(IAdc *self, uint32_t input, int32_t *sample) {
 	if (self->vmt.sample != NULL) {
-		return self->vmt.sample(self->vmt.context, input, *sample);
+		return self->vmt.sample(self->vmt.context, input, sample);
 	}
 
 	return IADC_RET_FAILED;
