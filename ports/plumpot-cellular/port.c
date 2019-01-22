@@ -178,20 +178,19 @@ int32_t port_early_init(void) {
 		rcc_set_ppre2(RCC_CFGR_PPRE_DIV_NONE);
 
 		/* System clock is now at 16MHz (without PLL). */
-		SystemCoreClock = 84000000;
-		rcc_apb1_frequency = 84000000;
-		rcc_apb2_frequency = 84000000;
+		SystemCoreClock = 16000000;
 
 	#elif defined(CONFIG_PLUMPOT_CELLULAR_CLOCK_HSE_84MHZ)
 		rcc_clock_setup_hse_3v3(&rcc_hse_16mhz_3v3[RCC_CLOCK_3V3_84MHZ]);
 
-		SystemCoreClock = 16000000;
-		rcc_apb1_frequency = 16000000;
-		rcc_apb2_frequency = 16000000;
+		SystemCoreClock = 84000000;
 
 	#else
 		#error "no clock speed defined"
 	#endif
+
+	rcc_apb1_frequency = SystemCoreClock;
+	rcc_apb2_frequency = SystemCoreClock;
 
 	/* Initialize systick interrupt for FreeRTOS. */
 	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
@@ -369,6 +368,11 @@ int32_t port_init(void) {
 	// umesh_l2_status_add_power_device(&(ubx_voltage.iface), "plumpot1_ubx");
 
 	#if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_GSM)
+		/* Enable GPRS module buck converter. */
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
+		gpio_set(GPIOA, GPIO8);
+		vTaskDelay(200);
+
 		/* Initialize the Quectel GSM/GPRS module. It requires some GPIO to turn on/off. */
 		gsm_quectel_init(&gsm1);
 		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO9);
