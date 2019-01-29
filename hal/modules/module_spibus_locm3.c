@@ -41,6 +41,7 @@ static int32_t module_spibus_locm3_send(void *context, const uint8_t *txbuf, siz
 	for (uint32_t i = 0; i < txlen; i++) {
 		#if defined(STM32L4)
 			spi_send8(spibus->port, txbuf[i]);
+			spi_read8(spibus->port);
 		#else
 			spi_xfer(spibus->port, txbuf[i]);
 		#endif
@@ -117,6 +118,7 @@ int32_t module_spibus_locm3_init(struct module_spibus_locm3 *spibus, const char 
 	spi_send_msb_first(spibus->port);
 	spi_set_nss_high(spibus->port);
 	#if defined(STM32L4)
+		spi_fifo_reception_threshold_8bit(spibus->port);
 		spi_set_data_size(spibus->port, SPI_CR2_DS_8BIT);
 	#endif
 	spi_enable(spibus->port);

@@ -8,6 +8,8 @@ objs.append(env.Object(source = [
 	# File(Glob("umesh/proto/*.c")),
 ]))
 
+env.Proto(source = File(Glob("uxb/*.proto")))
+
 env.AddSourceIf("SERVICE_UXB_SOLAR_CHARGER", File("uxb/solar_charger_iface.pb.c"), None)
 env.AddSourceIf("SERVICE_UXB_LDET", File("uxb/ldet.pb.c"), None)
 env.AddSourceIf("SERVICE_UXB_WAVEFORM_SOURCE", File("uxb/waveform.pb.c"), None)

@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include <math.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -79,10 +80,14 @@ static plog_ret_t service_plog_router_sniff_recv_handler(void *context, const IP
 	module_cli_output(":", cli);
 
 	switch (msg->type) {
-		case IPLOG_MESSAGE_TYPE_FLOAT:
-			snprintf(num, sizeof(num), "%d.%03d", (int)msg->content.cfloat, (unsigned int)(msg->content.cfloat / 1000));
+		case IPLOG_MESSAGE_TYPE_FLOAT: {
+			float cfloat_int = 0.0;
+			float cfloat_frac = modff(msg->content.cfloat, &cfloat_int);
+
+			snprintf(num, sizeof(num), "%d.%03d", (int)cfloat_int, (int)(cfloat_frac * 1000.0));
 			module_cli_output(num, cli);
 			break;
+		}
 
 		case IPLOG_MESSAGE_TYPE_DATA:
 			for (size_t i = 0; i < msg->content.data.len; i++) {

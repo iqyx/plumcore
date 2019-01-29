@@ -13,7 +13,6 @@ script:
   - cd lib/libopencm3 && make && cd ../..
   - cp config/plumpot_cellular_defconfig .config
   - olddefconfig
-  - python /usr/bin/scons proto
   - python /usr/bin/scons
 
 cache:

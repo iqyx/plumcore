@@ -41,3 +41,5 @@ env.Append(LIBPATH = [
 	Dir("libopencm3/lib"),
 ])
 
+# nanopb requirement for large fields
+env.Append(CFLAGS = ["-DPB_FIELD_16BIT"])

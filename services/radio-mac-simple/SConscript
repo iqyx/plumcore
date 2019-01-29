@@ -2,5 +2,7 @@ Import("env")
 Import("objs")
 Import("conf")
 
+
 if conf["SERVICE_RADIO_MAC_SIMPLE"] == "y":
+	env.Proto(source = File("rmac_pbuf.proto"))
 	objs.append(env.Object(File(Glob("*.c"))))

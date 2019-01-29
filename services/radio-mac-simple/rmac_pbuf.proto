@@ -1,0 +1,29 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+
+message RmacPacket {
+	/* Destination identifier may be omitted. In this case it defaults to 0 (broadcast). */
+	optional uint32 destination = 1 [default = 0];
+
+	required uint32 source = 2;
+
+	/* Context is an information for the recipient to determine the task/process responsible
+	 * for processing the received data. It may define which transfer protocol is used.
+	 * If the packet contains no data the context field can be omitted. */
+	optional uint32 context = 3;
+
+	/* The counter is incremented on every packet sent. It is required for multiple reasons
+	 * (reception statistics, encryption). */
+	optional uint32 counter = 4;
+
+	optional bytes data = 5 [(nanopb).max_size = 256];
+
+	/* A padding is used to make the final serialized packet length less dependent on the
+	 * size of the contained data. It also adds some entropy to the packet which is required
+	 * for the SIV mode encryption. */
+	optional bytes pad = 6;
+
+	optional uint64 time = 7;
+
+}

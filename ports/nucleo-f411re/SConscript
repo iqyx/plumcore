@@ -1,28 +1,20 @@
 Import("env")
+Import("conf")
+Import("objs")
 
-objs = env.Object(source = [
+objs.append(env.Object(source = [
 	File("port.c"),
-])
-
-env.Replace(FREERTOS_PORT = "GCC/ARM_CM4F")
+]))
 
 # target and architecture specific configuration
 env.Replace(LDSCRIPT = File("f411re.ld"))
 env.Replace(LIBOCM3 = "opencm3_stm32f4")
-env.Replace(TOOLCHAIN = "arm-none-eabi")
 env.Replace(OOCD_INTERFACE = "stlink-v2-1")
 env.Replace(OOCD_TARGET = "stm32f4x_stlink")
 
 env.Append(CFLAGS = [
 	"-DSTM32F4",
-	"-mthumb",
-	"-mcpu=cortex-m4",
-	"-mfloat-abi=hard",
-	"-mfpu=fpv4-sp-d16"
 ])
 
-# Including this directory is required because FreeRTOS includes the
-# FreeRTOSConfig.h directly
 env.Append(CPPPATH = [Dir(".")])
 
-Return("objs")
