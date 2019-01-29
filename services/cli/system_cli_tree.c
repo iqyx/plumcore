@@ -67,6 +67,9 @@
 #if defined(CONFIG_SERVICE_CLI_SERVICE_PLOG_ROUTER)
 	#include "service_plog_router.h"
 #endif
+#if defined(CONFIG_SERVICE_CLI_SERVICE_PLOG_RELAY)
+	#include "service_plog_relay.h"
+#endif
 #if defined(CONFIG_SERVICE_CLI_DEVICE_UXB)
 	#include "device_uxb.h"
 #endif
@@ -308,6 +311,29 @@ const struct treecli_node *system_cli_tree = Node {
 						},
 						End
 					}
+				},
+				#endif
+				#if defined(CONFIG_SERVICE_CLI_SERVICE_PLOG_RELAY)
+				Node {
+					Name "plog-relay",
+					Commands {
+						Command {
+							Name "print",
+							Exec service_plog_relay_print,
+						},
+						Command {
+							Name "add",
+							Exec service_plog_relay_add,
+						},
+						End
+					},
+					DSubnodes {
+						DNode {
+							Name "relayN",
+							.create = service_plog_relay_instanceN_create,
+						},
+						End
+					},
 				},
 				#endif
 				#if defined(CONFIG_SERVICE_CLI_SERVICE_DATA_PROCESS)
