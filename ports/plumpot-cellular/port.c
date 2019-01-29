@@ -102,6 +102,15 @@ struct module_usart gsm1_usart;
 	Ax5243 radio1;
 #endif
 
+#if defined(CONFIG_SERVICE_RADIO_RFM69)
+	#include "interfaces/radio-mac/client.h"
+	#include "services/radio-mac-simple/rmac.h"
+	#include "services/radio-rfm69/rfm69.h"
+	Rfm69 radio1;
+	Rmac mac1;
+	Radio r;
+#endif
+
 #if defined(CONFIG_PLUMPOT_CELLULAR_ENABLE_GSM)
 	#include "services/gsm-quectel/gsm_quectel.h"
 	GsmQuectel gsm1;
@@ -299,10 +308,12 @@ int32_t port_init(void) {
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
 	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
 	rcc_periph_clock_enable(RCC_SPI2);
+	rcc_periph_reset_pulse(RST_SPI2);
 	module_spibus_locm3_init(&spi2, "spi2", SPI2);
 	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
 
 	/* Initialize SPI device on the SPI2 bus. */
+	gpio_set(GPIOB, GPIO12);
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
 	module_spidev_locm3_init(&spi2_flash1, "spi2_flash1", &(spi2.iface), GPIOB, GPIO12);
@@ -342,16 +353,35 @@ int32_t port_init(void) {
 	// module_power_adc_init(&vin1, "vin1", &(adc1.iface), &vin1_config);
 	// module_power_adc_init(&ubx_voltage, "ubx1", &(adc1.iface), &ubx_voltage_config);
 
-	#if defined(CONFIG_SERVICE_RADIO_AX5243)
-		/* Initialize the radio interface. */
+	#if defined(CONFIG_SERVICE_RADIO_AX5243) || defined(CONFIG_SERVICE_RADIO_RFM69)
+		gpio_set(GPIOB, GPIO2);
 		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
 		gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO2);
 		module_spidev_locm3_init(&spi2_radio1, "spi2_radio1", &(spi2.iface), GPIOB, GPIO2);
 		hal_interface_set_name(&(spi2_radio1.iface.descriptor), "spi2_radio1");
 
+	#endif
+
+	#if defined(CONFIG_SERVICE_RADIO_AX5243)
 		ax5243_init(&radio1, &(spi2_radio1.iface), 16000000);
 		hal_interface_set_name(&(radio1.iface.descriptor), "radio1");
 		/** @todo advertise the radio interface */
+	#endif
+
+	#if defined(CONFIG_SERVICE_RADIO_RFM69)
+		rfm69_init(&radio1, &spi2_radio1.iface);
+		rfm69_start(&radio1);
+
+		radio_open(&r, &radio1.radio);
+		radio_set_tx_power(&r, 0);
+		radio_set_frequency(&r, 434211000);
+		radio_set_bit_rate(&r, 100000);
+
+		rmac_init(&mac1, &r);
+		rmac_set_clock(&mac1, &system_clock.iface);
+		rmac_set_tdma_algo(&mac1, RMAC_TDMA_ALGO_CSMA);
+		rmac_set_fhss_algo(&mac1, RMAC_FHSS_ALGO_SINGLE);
+
 	#endif
 
 	/** @todo MAC and L3/L4 protocols are generic services, move them */
@@ -530,8 +560,6 @@ int32_t port_init(void) {
 		"main"
 	);
 
-
-
 	stm32_rtc_init(&rtc);
 	iservicelocator_add(
 		locator,
@@ -541,6 +569,21 @@ int32_t port_init(void) {
 	);
 
 	return PORT_INIT_OK;
+}
+
+
+int32_t system_test(void) {
+
+	RadioMac mac;
+	radio_mac_open(&mac, &mac1.iface, 1);
+
+	while (true) {
+		radio_mac_send(&mac, 0, (uint8_t *)"abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", 64);
+		vTaskDelay(1000);
+		u_log(system_log, LOG_TYPE_DEBUG, "rxp=%d rxm=%d rssi=%d err=%d qlen=%u", mac1.nbtable.items[0].rxpackets, mac1.nbtable.items[0].rxmissed, (int32_t)(mac1.nbtable.items[0].rssi_dbm), mac1.slot_start_time_error_ema_us, rmac_slot_queue_len(&mac1.slot_queue));
+	}
+
+	return 0;
 }
 
 

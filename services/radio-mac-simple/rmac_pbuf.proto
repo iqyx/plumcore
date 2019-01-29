@@ -17,20 +17,13 @@ message RmacPacket {
 	 * (reception statistics, encryption). */
 	optional uint32 counter = 4;
 
-	optional bytes data = 5;
+	optional bytes data = 5 [(nanopb).max_size = 256];
 
-	/* The transmitter advertises its radio is always in the RX mode whenever possible.
-	 * This is usually the case on gateways and routers with heavier traffic. If a peer
-	 * has such node in the neighborhood it may use it as a gateway and put itself in
-	 * a low power mode. */
-	optional bool full_rx_mode = 6;
+	/* A padding is used to make the final serialized packet length less dependent on the
+	 * size of the contained data. It also adds some entropy to the packet which is required
+	 * for the SIV mode encryption. */
+	optional bytes pad = 6;
 
-	/* The transmitter is probably in the low power mode which means its radio is turned
-	 * off most of the time. It listens for traffic from its neighbors only a limited time
-	 * after a packet has been transmitted. If not packet is received the radio is turn
-	 * off. */
-	optional uint32 immediate_rx_ms = 7;
-
-
+	optional uint64 time = 7;
 
 }

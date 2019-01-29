@@ -254,7 +254,6 @@ int32_t port_init(void) {
 
 	mac_simple_init(&mac1, &r);
 	mac1.low_power = false;
-	mac_simple_set_mcs(&mac1, &mcs_GMSK03_100K);
 	mac_simple_set_clock(&mac1, &system_clock.iface);
 
 	sffs_init(&fs);

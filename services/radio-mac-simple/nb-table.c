@@ -31,11 +31,11 @@
 #include <string.h>
 
 #include "main.h"
+#include "rmac.h"
 
-#include "radio-mac-simple.h"
-#include "nb-table.h"
 
-#define MODULE_NAME "mac-simple"
+#define MODULE_NAME "rmac-nbtable"
+#define ASSERT(c, r) if (u_assert(c)) return r
 
 
 nbtable_ret_t nbtable_init(NbTable *self, size_t items) {

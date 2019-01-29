@@ -30,19 +30,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "radio-mac-simple.h"
-#include "mcs.h"
+#include "rmac.h"
 
-#define MODULE_NAME "mac-simple"
+#define MODULE_NAME "rmac-mcs"
 
 
-const struct mac_simple_band band_433M_100K = {
-	.name = "433M/100K",
-	.freq_first_hz = 433100000,
-	.channel_count = 16,
-	.channel_width_hz = 100000,
+
+const struct rmac_sas sas_15x100K_64x16ms = {
+	.channel_count = 15,
+	.channel_size_hz = 100000,
+	.epoch_length_slots = 64,
+	.slot_length_us = 16000
 };
 
+
+const struct rmac_sas sas_15x100K_256x16ms = {
+	.channel_count = 15,
+	.channel_size_hz = 100000,
+	.epoch_length_slots = 64,
+	.slot_length_us = 16000
+};
+
+
+/*
 const struct mac_simple_mcs mcs_GMSK03_100K = {
 	.name = "GMSK-03/100K",
 	.bit_rate_bps = 100000,
@@ -59,3 +69,4 @@ const struct mac_simple_mcs mcs_GMSK03_100K = {
 		NULL
 	},
 };
+*/

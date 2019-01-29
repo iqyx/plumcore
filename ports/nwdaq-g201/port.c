@@ -86,10 +86,10 @@ Stm32Rtc rtc;
 
 
 #include "services/radio-rfm69/rfm69.h"
-#include "services/radio-mac-simple/radio-mac-simple.h"
+#include "services/radio-mac-simple/rmac.h"
 #include "interfaces/radio-mac/client.h"
 Rfm69 radio1;
-MacSimple mac1;
+Rmac mac1;
 Radio r;
 
 #if defined(CONFIG_SERVICE_SPI_FLASH)
@@ -282,13 +282,13 @@ int32_t port_init(void) {
 		radio_open(&r, &radio1.radio);
 		radio_set_tx_power(&r, 0);
 		radio_set_frequency(&r, 434200000);
-		radio_set_bit_rate(&r, 25000);
+		radio_set_bit_rate(&r, 100000);
 
-		mac_simple_init(&mac1, &r);
-		mac1.low_power = true;
-		mac_simple_set_mcs(&mac1, &mcs_GMSK03_100K);
-		mac_simple_set_clock(&mac1, &system_clock.iface);
-		/** @todo configure MAC elsewhere. */
+		rmac_init(&mac1, &r);
+		rmac_set_clock(&mac1, &system_clock.iface);
+		rmac_set_tdma_algo(&mac1, RMAC_TDMA_ALGO_IMMEDIATE_RX);
+		rmac_set_fhss_algo(&mac1, RMAC_FHSS_ALGO_SINGLE);
+		// rmac_set_universe_key(&mac1, (uint8_t *)"oplan", 5);
 	#endif
 
 	/* SPI flash. */
@@ -319,7 +319,7 @@ int32_t system_test(void) {
 	radio_mac_open(&mac, &mac1.iface, 1);
 
 	while (true) {
-		radio_mac_send(&mac, 0, "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", 8);
+		radio_mac_send(&mac, 0, "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", 64);
 		vTaskDelay(400);
 		u_log(system_log, LOG_TYPE_DEBUG, "rxp=%d rxm=%d rssi=%d err=%d qlen=%u", mac1.nbtable.items[0].rxpackets, mac1.nbtable.items[0].rxmissed, (int32_t)(mac1.nbtable.items[0].rssi_dbm), mac1.slot_start_time_error_ema_us, rmac_slot_queue_len(&mac1.slot_queue));
 	}
