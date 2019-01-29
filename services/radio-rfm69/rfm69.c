@@ -619,8 +619,8 @@ static iradio_ret_t iradio_set_sync(void *context, const uint8_t *bytes, size_t 
 
 	uint8_t sync_config = 0;
 
-	/* Set sync tolerance to 0. */
-	sync_config |= 0;
+	/* Set sync tolerance to 1 bit. */
+	sync_config |= 1;
 
 	/* Set sync size. */
 	sync_config |= ((sync_length - 1) << 3);
@@ -707,7 +707,7 @@ rfm69_ret_t rfm69_init(Rfm69 *self, struct interface_spidev *spidev) {
 	register_write(self, RFM69_REG_FDEVMSB, 0x01); //0x00
 	register_write(self, RFM69_REG_FDEVLSB, 0x9a); //0xcd
 	/* set receiver bandwidth to 100kHz single sideband */
-	register_write(self, RFM69_REG_RXBW, 0xeb); //2c
+	register_write(self, RFM69_REG_RXBW, 0xea); //2c
 	register_write(self, RFM69_REG_AFCBW, 0xeb);
 
 	/* Set RSSI timeout to 0 (disable). We do not use it.
@@ -717,11 +717,11 @@ rfm69_ret_t rfm69_init(Rfm69 *self, struct interface_spidev *spidev) {
 
 	/** @todo keep here */
 	/* set lna input impedance and AGC */
-	register_write(self, 0x18, 0x80); //80
+	register_write(self, 0x18, 0x00); //80
 
 	/* DIO mapping */
-	register_write(self, 0x25, 0x40);
-	register_write(self, 0x26, 0x30);
+	// register_write(self, 0x25, 0x40);
+	// register_write(self, 0x26, 0x30);
 
 	/* set rssi threshold to -110dBm */
 	register_write(self, 0x29, 220);
