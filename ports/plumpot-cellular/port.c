@@ -573,17 +573,18 @@ int32_t port_init(void) {
 
 
 int32_t system_test(void) {
+	#if defined(CONFIG_SERVICE_RADIO_RFM69)
+		RadioMac mac;
+		radio_mac_open(&mac, &mac1.iface, 1);
 
-	RadioMac mac;
-	radio_mac_open(&mac, &mac1.iface, 1);
+		while (true) {
+			radio_mac_send(&mac, 0, (uint8_t *)"abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", 64);
+			vTaskDelay(1000);
+			u_log(system_log, LOG_TYPE_DEBUG, "rxp=%d rxm=%d rssi=%d err=%d qlen=%u", mac1.nbtable.items[0].rxpackets, mac1.nbtable.items[0].rxmissed, (int32_t)(mac1.nbtable.items[0].rssi_dbm), mac1.slot_start_time_error_ema_us, rmac_slot_queue_len(&mac1.slot_queue));
+		}
 
-	while (true) {
-		radio_mac_send(&mac, 0, (uint8_t *)"abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", 64);
-		vTaskDelay(1000);
-		u_log(system_log, LOG_TYPE_DEBUG, "rxp=%d rxm=%d rssi=%d err=%d qlen=%u", mac1.nbtable.items[0].rxpackets, mac1.nbtable.items[0].rxmissed, (int32_t)(mac1.nbtable.items[0].rssi_dbm), mac1.slot_start_time_error_ema_us, rmac_slot_queue_len(&mac1.slot_queue));
-	}
-
-	return 0;
+		return 0;
+	#endif
 }
 
 
