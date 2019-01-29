@@ -69,9 +69,23 @@ SConscript("version.SConscript")
 ##       if it is not properly initialized.
 def build_proto(target, source, env):
 	for s in source:
-		print "Building proto %s" % s
 		d = os.path.dirname(str(s))
 		os.system("protoc --plugin=lib/other/nanopb/generator/protoc-gen-nanopb --proto_path=%s --nanopb_out=%s --proto_path=lib/other/nanopb/generator/proto %s" % (d, d, s))
+
+def modify_proto_targets(target, source, env):
+	target = []
+	for s in source:
+		b = os.path.splitext(str(s))[0]
+		target.append(File(b + ".pb.h"))
+		target.append(File(b + ".pb.c"))
+	return target, source
+
+proto_builder = Builder(
+	action = Action(build_proto, env["PROTOCCOMSTR"]),
+	emitter = modify_proto_targets,
+)
+env.Append(BUILDERS = {'Proto' : proto_builder})
+
 
 env["PORTFILE"] = "bin/%s" % conf["OUTPUT_FILE_PREFIX"];
 if conf["OUTPUT_FILE_PORT_PREFIX"] == "y":
@@ -190,14 +204,14 @@ env.Append(LIBS = [
 
 SConscript("firmware.SConscript")
 
-proto = env.Command(
-	source = [
-		File(Glob("protocols/umesh/proto/*.proto")),
-		File(Glob("protocols/uxb/*.proto")),
-	],
-	target = "protoc",
-	action = build_proto
-)
+# proto = env.Command(
+	# source = [
+		# File(Glob("protocols/umesh/proto/*.proto")),
+		# File(Glob("protocols/uxb/*.proto")),
+	# ],
+	# target = "protoc",
+	# action = build_proto
+# )
 
-env.Alias("proto", proto);
+# env.Alias("proto", proto);
 Default("firmware")
