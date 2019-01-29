@@ -447,6 +447,11 @@ menu "Enable services"
 				default y
 				depends on SERVICE_PLOG_ROUTER
 
+			config SERVICE_CLI_SERVICE_PLOG_RELAY
+				bool "PLOG-relay service configuration"
+				default y
+				depends on SERVICE_PLOG_RELAY
+
 			config SERVICE_CLI_DEVICE_CLOCK
 				bool "/device/clock submenu"
 				default y
@@ -484,6 +489,10 @@ menu "Enable services"
 		menu "PLOG message queue publish/subscribe services"
 			config SERVICE_PLOG_SENSOR_UPLOAD
 				bool "Service for uploading sensor data over the PLOG message router"
+				default y
+
+			config SERVICE_PLOG_RELAY
+				bool "Relay data from/to PLOG message router to/from various interfaces"
 				default y
 		endmenu
 
