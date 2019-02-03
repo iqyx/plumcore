@@ -165,6 +165,10 @@ IServiceLocator *locator;
 	FsSpiffs spiffs1;
 #endif
 
+#if defined(CONFIG_PLUMPOT_CELLULAR_UXB_VOLTAGE)
+	#include "services/adc-sensor/adc-sensor.h"
+	AdcSensor sensor_uxb_voltage;
+#endif
 
 SystemClock system_clock;
 Stm32Rtc rtc;
@@ -348,10 +352,29 @@ int32_t port_init(void) {
 		adc_stm32_locm3_init(&adc1, ADC1);
 	#endif
 
-	/* Battery power device (using ADC). */
-	/** @todo resolve incompatible interfaces */
-	// module_power_adc_init(&vin1, "vin1", &(adc1.iface), &vin1_config);
-	// module_power_adc_init(&ubx_voltage, "ubx1", &(adc1.iface), &ubx_voltage_config);
+	#if defined(CONFIG_PLUMPOT_CELLULAR_UXB_VOLTAGE)
+		gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO6);
+
+		adc_sensor_init(
+			&sensor_uxb_voltage,
+			&adc1.iface,
+			6,
+			&(ISensorInfo) {
+				.quantity_name = "Voltage",
+				.quantity_symbol = "U",
+				.unit_name = "Volt",
+				.unit_symbol = "V"
+			},
+			540,
+			270
+		);
+		iservicelocator_add(
+			locator,
+			ISERVICELOCATOR_TYPE_SENSOR,
+			&sensor_uxb_voltage.iface.interface,
+			"uxb-voltage"
+		);
+	#endif
 
 	#if defined(CONFIG_SERVICE_RADIO_AX5243) || defined(CONFIG_SERVICE_RADIO_RFM69)
 		gpio_set(GPIOB, GPIO2);

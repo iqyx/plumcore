@@ -65,6 +65,11 @@ menu "Target configuration"
 			select SERVICE_UXB_MASTER
 			default y
 
+		config PLUMPOT_CELLULAR_UXB_VOLTAGE
+			bool "Measure UXB Vbus voltage"
+			select SERVICE_STM32_ADC
+			default y
+
 		choice
 			prompt "Clock speed"
 
