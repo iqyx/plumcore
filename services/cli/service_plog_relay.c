@@ -44,6 +44,7 @@
 #include "service_plog_relay.h"
 
 #define DNODE_INDEX(p, i) p->pos.levels[p->pos.depth + i].dnode_index
+#define NODE_NAME(p, i) p->pos.levels[p->pos.depth + i].node->name
 
 const char *service_plog_relay_states[] = {
 	"uninitialized",
@@ -52,9 +53,17 @@ const char *service_plog_relay_states[] = {
 	"stop-request",
 };
 
+const char *service_plog_relay_spec_types[] = {
+	"none",
+	"plog",
+	"rmac",
+};
+
 const struct cli_table_cell service_plog_relay_table[] = {
 	{.type = TYPE_STRING, .size = 24, .alignment = ALIGN_RIGHT}, /* service instance */
 	{.type = TYPE_STRING, .size = 16, .alignment = ALIGN_RIGHT}, /* current state */
+	{.type = TYPE_STRING, .size = 20, .alignment = ALIGN_RIGHT}, /* source */
+	{.type = TYPE_STRING, .size = 20, .alignment = ALIGN_RIGHT}, /* destination */
 	{.type = TYPE_END}
 };
 
@@ -62,9 +71,44 @@ const struct cli_table_cell service_plog_relay_table[] = {
 const struct treecli_node *service_plog_relay_instanceN = Node {
 	Name "N",
 	Commands {
-		Command {
-			Name "export",
+		// Command {
+			// Name "export",
 			// Exec device_can_sensor_can_sensorN_sniff,
+		// },
+		End
+	},
+	Subnodes {
+		Node {
+			Name "source",
+			Values {
+				Value {
+					Name "type",
+					Type TREECLI_VALUE_STR,
+					.set = service_plog_relay_instanceN_source_destination_type_set,
+				},
+				Value {
+					Name "plog-filter",
+					Type TREECLI_VALUE_STR,
+					.set = service_plog_relay_instanceN_source_destination_topic_set,
+				},
+				End
+			},
+		},
+		Node {
+			Name "destination",
+			Values {
+				Value {
+					Name "type",
+					Type TREECLI_VALUE_STR,
+					.set = service_plog_relay_instanceN_source_destination_type_set,
+				},
+				Value {
+					Name "plog-topic",
+					Type TREECLI_VALUE_STR,
+					.set = service_plog_relay_instanceN_source_destination_topic_set,
+				},
+				End
+			},
 		},
 		End
 	},
@@ -121,6 +165,8 @@ int32_t service_plog_relay_print(struct treecli_parser *parser, void *exec_conte
 	table_print_header(cli->stream, service_plog_relay_table, (const char *[]){
 		"Service instance",
 		"State",
+		"Source",
+		"Destination",
 	});
 	table_print_row_separator(cli->stream, service_plog_relay_table);
 
@@ -132,9 +178,24 @@ int32_t service_plog_relay_print(struct treecli_parser *parser, void *exec_conte
 
 		const char *state_str = service_plog_relay_states[service->state];
 
+		enum plog_relay_spec_type source_type = PLOG_RELAY_SPEC_TYPE_NONE;
+		union plog_relay_spec source = {0};
+		enum plog_relay_spec_type destination_type = PLOG_RELAY_SPEC_TYPE_NONE;
+		union plog_relay_spec destination = {0};
+
+		plog_relay_get_source(service, &source, &source_type);
+		plog_relay_get_destination(service, &destination, &destination_type);
+
+		const char *source_type_str = service_plog_relay_spec_types[source_type];
+		const char *destination_type_str = service_plog_relay_spec_types[destination_type];
+
+
 		table_print_row(cli->stream, service_plog_relay_table, (const union cli_table_cell_content []) {
 			{.string = name},
 			{.string = state_str},
+			/** @todo proper source & destination printing */
+			{.string = source_type_str},
+			{.string = destination_type_str},
 		});
 	}
 	return 0;
@@ -221,6 +282,46 @@ int32_t service_plog_relay_instanceN_enabled_set(struct treecli_parser *parser, 
 }
 
 
+int32_t service_plog_relay_export(struct treecli_parser *parser, void *exec_context) {
+	(void)exec_context;
+	ServiceCli *cli = (ServiceCli *)parser->context;
+
+	Interface *interface;
+	for (size_t i = 0; (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_PLOG_RELAY, i, &interface)) != ISERVICELOCATOR_RET_FAILED; i++) {
+		PlogRelay *service = (PlogRelay *)interface;
+
+		module_cli_output("add new-relay\r\n", cli);
+
+		char line[50];
+
+		const char *name = "";
+		iservicelocator_get_name(locator, interface, &name);
+		snprintf(line, sizeof(line), "name = %s ", name);
+		module_cli_output(line, cli);
+
+
+/*		snprintf(line, sizeof(line), "id = %lu ", sensor->can_id);
+		module_cli_output(line, cli);
+
+		name = NULL;
+		iservicelocator_get_name(locator, &sensor->can->interface, &name);
+		if (name != NULL) {
+			snprintf(line, sizeof(line), "can = %s ", name);
+			module_cli_output(line, cli);
+		}
+
+		module_cli_output("\r\n", cli);
+*/
+
+		snprintf(line, sizeof(line), "enabled = %s ", service->state == PLOG_RELAY_STATE_RUNNING ? "1" : "0");
+		module_cli_output(line, cli);
+
+		module_cli_output("\r\n..\r\n", cli);
+	}
+	return 0;
+}
+
+
 int32_t service_plog_relay_instanceN_name_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
 	(void)ctx;
 	(void)value;
@@ -248,5 +349,93 @@ int32_t service_plog_relay_instanceN_name_set(struct treecli_parser *parser, voi
 	}
 
 	free(name);
+	return 0;
+}
+
+
+int32_t service_plog_relay_instanceN_source_destination_type_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
+	(void)value;
+	(void)len;
+	(void)ctx;
+	ServiceCli *cli = (ServiceCli *)parser->context;
+
+	Interface *interface;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_PLOG_RELAY, DNODE_INDEX(parser, -2), &interface) != ISERVICELOCATOR_RET_OK) {
+		return 1;
+	}
+	PlogRelay *instance = (PlogRelay *)interface;
+
+	enum plog_relay_spec_type stype = PLOG_RELAY_SPEC_TYPE_NONE;
+	union plog_relay_spec spec = {0};
+	if (len == 4 && !memcmp(buf, "plog", 4)) {
+		stype = PLOG_RELAY_SPEC_TYPE_PLOG;
+	} else if (len == 4 && !memcmp(buf, "rmac", 4)) {
+		stype = PLOG_RELAY_SPEC_TYPE_RMAC;
+	}
+
+	if (stype == PLOG_RELAY_SPEC_TYPE_NONE) {
+		module_cli_output("error: unknown source/destination type (available options: rmac, plog)\r\n", cli);
+		return 1;
+	}
+
+	if (!strcmp(NODE_NAME(parser, -1), "source")) {
+		plog_relay_set_source(instance, &spec, stype);
+		return 0;
+	} else if (!strcmp(NODE_NAME(parser, -1), "destination")) {
+		plog_relay_set_destination(instance, &spec, stype);
+		return 0;
+	} else {
+		u_assert(false);
+	}
+
+	return 1;
+}
+
+
+int32_t service_plog_relay_instanceN_source_destination_topic_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len) {
+	(void)value;
+	(void)len;
+	(void)ctx;
+	ServiceCli *cli = (ServiceCli *)parser->context;
+
+	Interface *interface;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_PLOG_RELAY, DNODE_INDEX(parser, -2), &interface) != ISERVICELOCATOR_RET_OK) {
+		return 1;
+	}
+	PlogRelay *instance = (PlogRelay *)interface;
+
+	/* Get the current setting. */
+	enum plog_relay_spec_type spec_type = PLOG_RELAY_SPEC_TYPE_NONE;
+	union plog_relay_spec spec = {0};
+
+	if (!strcmp(NODE_NAME(parser, -1), "source")) {
+		plog_relay_get_source(instance, &spec, &spec_type);
+	} else if (!strcmp(NODE_NAME(parser, -1), "destination")) {
+		plog_relay_get_destination(instance, &spec, &spec_type);
+	} else {
+		u_assert(false);
+		return 1;
+	}
+
+	if (spec_type != PLOG_RELAY_SPEC_TYPE_PLOG) {
+		module_cli_output("error: topic is not valid for this source/destination type. Set the type first.\r\n", cli);
+		return 1;
+	}
+
+	if (len >= PLOG_RELAY_PLOG_TOPIC_LEN) {
+		module_cli_output("error: topic too long\r\n", cli);
+		return 1;
+	}
+	memcpy(spec.plog.topic, buf, len);
+
+	if (!strcmp(NODE_NAME(parser, -1), "source")) {
+		plog_relay_set_source(instance, &spec, spec_type);
+	} else if (!strcmp(NODE_NAME(parser, -1), "destination")) {
+		plog_relay_set_destination(instance, &spec, spec_type);
+	} else {
+		u_assert(false);
+		return 1;
+	}
+
 	return 0;
 }

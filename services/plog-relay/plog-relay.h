@@ -34,11 +34,15 @@
 
 #include "main.h"
 #include "interface.h"
+#include "interfaces/plog/descriptor.h"
 #include "interfaces/plog/client.h"
 #include "interfaces/radio-mac/client.h"
+#include "relay_msg.pb.h"
+
 
 
 #define PLOG_RELAY_INSTANCE_NAME_LEN 32
+#define PLOG_RELAY_PLOG_TOPIC_LEN 32
 
 typedef enum {
 	PLOG_RELAY_RET_OK = 0,
@@ -56,8 +60,12 @@ enum plog_relay_state {
 };
 
 struct plog_relay_spec_plog {
-	char *topic;
-	Plog *plog;
+	char topic[PLOG_RELAY_PLOG_TOPIC_LEN];
+	IPlog *iplog;
+
+	/* Currently opened Plog client instance. Valid only in the
+	 * RUNNING state. Do not touch. */
+	Plog plog;
 };
 
 struct plog_relay_spec_rmac {
@@ -93,13 +101,19 @@ typedef struct {
 	Interface interface;
 
 	volatile enum plog_relay_state state;
-	union plog_relay_spec *source;
-	union plog_relay_spec *destination;
+	union plog_relay_spec source;
+	enum plog_relay_spec_type source_type;
+	union plog_relay_spec destination;
+	enum plog_relay_spec_type destination_type;
 
 	struct plog_relay_rule *rules;
 
 	TaskHandle_t task;
 	char name[PLOG_RELAY_INSTANCE_NAME_LEN];
+
+	PlogRelayMsg msg;
+	bool msg_received;
+
 
 } PlogRelay;
 
@@ -113,9 +127,9 @@ plog_relay_ret_t plog_relay_set_name(PlogRelay *self, const char *name);
 
 /* Set/get source/destination. */
 plog_relay_ret_t plog_relay_set_source(PlogRelay *self, union plog_relay_spec *source, enum plog_relay_spec_type type);
-plog_relay_ret_t plog_relay_get_source(PlogRelay *self, union plog_relay_spec **source, enum plog_relay_spec_type *type);
+plog_relay_ret_t plog_relay_get_source(PlogRelay *self, union plog_relay_spec *source, enum plog_relay_spec_type *type);
 plog_relay_ret_t plog_relay_set_destination(PlogRelay *self, union plog_relay_spec *destination, enum plog_relay_spec_type type);
-plog_relay_ret_t plog_relay_get_destination(PlogRelay *self, union plog_relay_spec **destination, enum plog_relay_spec_type *type);
+plog_relay_ret_t plog_relay_get_destination(PlogRelay *self, union plog_relay_spec *destination, enum plog_relay_spec_type *type);
 
 /* Add, remove and reorder rules. */
 plog_relay_ret_t plog_relay_rule_add(PlogRelay *self, struct plog_relay_rule *rule);

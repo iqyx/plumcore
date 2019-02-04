@@ -299,8 +299,14 @@ const struct treecli_node *system_cli_tree = Node {
 		},
 		Node {
 			Name "service",
+			Commands {
+				Command {
+					Name "export",
+					Exec default_export,
+				},
+				End
+			},
 			Subnodes {
-
 				#if defined(CONFIG_SERVICE_CLI_SERVICE_PLOG_ROUTER)
 				Node {
 					Name "plog-router",
@@ -324,6 +330,10 @@ const struct treecli_node *system_cli_tree = Node {
 						Command {
 							Name "add",
 							Exec service_plog_relay_add,
+						},
+						Command {
+							Name "export",
+							Exec service_plog_relay_export,
 						},
 						End
 					},

@@ -33,3 +33,6 @@ int32_t service_plog_relay_add(struct treecli_parser *parser, void *exec_context
 int32_t service_plog_relay_instanceN_create(struct treecli_parser *parser, uint32_t index, struct treecli_node *node, void *ctx);
 int32_t service_plog_relay_instanceN_name_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
 int32_t service_plog_relay_instanceN_enabled_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
+int32_t service_plog_relay_export(struct treecli_parser *parser, void *exec_context);
+int32_t service_plog_relay_instanceN_source_destination_type_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
+int32_t service_plog_relay_instanceN_source_destination_topic_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
