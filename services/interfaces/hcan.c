@@ -30,9 +30,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "FreeRTOS.h"
-#include "task.h"
-#include "queue.h"
+#include "main.h"
 
 #include "can.h"
 #include "hcan.h"
@@ -135,6 +133,7 @@ hcan_ret_t hcan_received(HCan *self, const uint8_t *buf, size_t len, uint32_t id
 		return HCAN_RET_NOT_CONNECTED;
 	}
 
+	xSemaphoreTake(self->ican->client_list_lock, portMAX_DELAY);
 	CCan *i = self->ican->first_client;
 	while (i != NULL) {
 		ICanMessage msg = {0};
@@ -148,6 +147,7 @@ hcan_ret_t hcan_received(HCan *self, const uint8_t *buf, size_t len, uint32_t id
 
 		i = i->next;
 	}
+	xSemaphoreGive(self->ican->client_list_lock);
 
 	return HCAN_RET_OK;
 }

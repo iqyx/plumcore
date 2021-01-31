@@ -59,6 +59,7 @@ typedef struct ican {
 
 	/* Multiple connected clients in a linked list. */
 	struct ccan *first_client;
+	SemaphoreHandle_t client_list_lock;
 
 	/* Only a single host. */
 	struct hcan *host;
