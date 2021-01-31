@@ -50,7 +50,7 @@ menu "Target configuration"
 				bool "80 MHz (MSI, PLL)"
 
 			config INCL_G104MF_CLOCK_DEFAULT
-				bool "16 MHz (MSI)"
+				bool "4 MHz (MSI)"
 		endchoice
 
 		config INCL_G104MF_ENABLE_LEDS

@@ -1,0 +1,19 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+objs.append(env.Object(source = [
+	File("port.c"),
+]))
+
+# target and architecture specific configuration
+env.Replace(LDSCRIPT = File("plumpot_cellular.ld"))
+env.Replace(LIBOCM3 = "opencm3_stm32l4")
+env.Replace(OOCD_INTERFACE = "stlink-v2-1")
+env.Replace(OOCD_TARGET = "stm32l4x")
+
+env.Append(CFLAGS = [
+	"-DSTM32L4",
+])
+
+env.Append(CPPPATH = [Dir(".")])
