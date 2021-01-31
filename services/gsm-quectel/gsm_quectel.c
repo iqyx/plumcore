@@ -1054,13 +1054,13 @@ gsm_quectel_ret_t gsm_quectel_start(GsmQuectel *self) {
 
 	self->can_run = true;
 
-	xTaskCreate(gsm_quectel_process_task, "gsm_quectel_p", configMINIMAL_STACK_SIZE + 384, (void *)self, 2, &(self->process_task));
+	xTaskCreate(gsm_quectel_process_task, "gsm_quectel_p", configMINIMAL_STACK_SIZE + 512, (void *)self, 1, &(self->process_task));
 	if (self->process_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create module task (command processing)"));
 		return GSM_QUECTEL_RET_FAILED;
 	}
 
-	xTaskCreate(gsm_quectel_main_task, "gsm_quectel_m", configMINIMAL_STACK_SIZE + 256, (void *)self, 2, &(self->main_task));
+	xTaskCreate(gsm_quectel_main_task, "gsm_quectel_m", configMINIMAL_STACK_SIZE + 384, (void *)self, 1, &(self->main_task));
 	if (self->main_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create module task (main)"));
 		return GSM_QUECTEL_RET_FAILED;
