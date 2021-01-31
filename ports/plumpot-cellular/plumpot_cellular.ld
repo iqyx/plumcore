@@ -4,7 +4,7 @@
 MEMORY
 {
 	rom (rx) : ORIGIN = LOAD_ADDRESS, LENGTH = 256K
-	ram (rwx) : ORIGIN = 0x20000000 + 2K, LENGTH = 64K - 2K
+	ram (rwx) : ORIGIN = 0x20000000 + 2K, LENGTH = 128K - 2K
 }
 
 INCLUDE cortex-m-generic.ld
