@@ -45,10 +45,25 @@ void module_usart_interrupt_handler(struct module_usart *usart) {
 		uint8_t byte = usart_recv(usart->port);
 
 		if (usart->rxqueue != NULL) {
+			BaseType_t woken;
+
 			/* Do not check the return value. If the queue is full, the received
 			 * byte will be lost. */
-			xQueueSendToBackFromISR(usart->rxqueue, &byte, 0);
+			xQueueSendToBackFromISR(usart->rxqueue, &byte, &woken);
+			if (woken) {
+				portYIELD_FROM_ISR(woken);
+			}
 		}
+	}
+
+	#if defined(STM32L4)
+	if ((USART_ISR(usart->port) & USART_ISR_ORE)) {
+	#else
+	if ((USART_SR(usart->port) & USART_SR_ORE)) {
+	#endif
+		/* Clear the flag by reading USART_SR and USART_DR.
+		 * Ignore the received byte. */
+		usart_recv(usart->port);
 	}
 }
 
