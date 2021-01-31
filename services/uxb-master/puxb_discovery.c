@@ -268,7 +268,7 @@ puxb_discovery_ret_t puxb_discovery_init(PUxbDiscovery *self, IUxbBus *bus) {
 	vTaskDelay(100);
 
 	self->discovery_can_run = true;
-	xTaskCreate(discovery_task, "puxb-discovery", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->discovery_task));
+	xTaskCreate(discovery_task, "puxb-discovery", configMINIMAL_STACK_SIZE + 384, (void *)self, 1, &(self->discovery_task));
 	if (self->discovery_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		return PUXB_DISCOVERY_RET_FAILED;
