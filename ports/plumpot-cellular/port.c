@@ -165,6 +165,10 @@ IServiceLocator *locator;
 	FsSpiffs spiffs1;
 #endif
 
+#if defined(CONFIG_PLUMPOT_CELLULAR_UXB_VOLTAGE)
+	#include "services/adc-sensor/adc-sensor.h"
+	AdcSensor sensor_uxb_voltage;
+#endif
 
 SystemClock system_clock;
 Stm32Rtc rtc;
@@ -302,20 +306,25 @@ int32_t port_init(void) {
 		"profiler1"
 	);
 
+	/* Configure and release all CS lines. */
+	gpio_set(GPIOB, GPIO2 | GPIO12);
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2 | GPIO12);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO12);
+
 	/* Configure GPIO for radio & flash SPI bus (SPI2), enable SPI2 clock and
 	 * run spibus driver using libopencm3 to access it. */
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14 | GPIO15);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO13 | GPIO14 | GPIO15);
 	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
 	rcc_periph_clock_enable(RCC_SPI2);
-	rcc_periph_reset_pulse(RST_SPI2);
+	// rcc_periph_reset_pulse(RST_SPI2);
 	module_spibus_locm3_init(&spi2, "spi2", SPI2);
 	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
 
 	/* Initialize SPI device on the SPI2 bus. */
 	gpio_set(GPIOB, GPIO12);
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO12);
 	module_spidev_locm3_init(&spi2_flash1, "spi2_flash1", &(spi2.iface), GPIOB, GPIO12);
 	hal_interface_set_name(&(spi2_flash1.iface.descriptor), "spi2_flash1");
 
@@ -327,20 +336,19 @@ int32_t port_init(void) {
 				&(spi_flash_interface(&spi_flash1)->interface),
 				"spi-flash1"
 			);
+			#if defined(CONFIG_SERVICE_FS_SPIFFS)
+				fs_spiffs_init(&spiffs1);
+				// fs_spiffs_format(&spiffs1, spi_flash_interface(&spi_flash1));
+				if (fs_spiffs_mount(&spiffs1, spi_flash_interface(&spi_flash1)) == FS_SPIFFS_RET_OK) {
+					iservicelocator_add(
+						locator,
+						ISERVICELOCATOR_TYPE_FS,
+						&(fs_spiffs_interface(&spiffs1)->interface),
+						"system"
+					);
+				}
+			#endif
 		}
-
-		#if defined(CONFIG_SERVICE_FS_SPIFFS)
-			fs_spiffs_init(&spiffs1);
-			// fs_spiffs_format(&spiffs1, spi_flash_interface(&spi_flash1));
-			if (fs_spiffs_mount(&spiffs1, spi_flash_interface(&spi_flash1)) == FS_SPIFFS_RET_OK) {
-				iservicelocator_add(
-					locator,
-					ISERVICELOCATOR_TYPE_FS,
-					&(fs_spiffs_interface(&spiffs1)->interface),
-					"system"
-				);
-			}
-		#endif
 	#endif
 
 	/* ADC initialization (power metering, prng seeding) */
@@ -348,10 +356,29 @@ int32_t port_init(void) {
 		adc_stm32_locm3_init(&adc1, ADC1);
 	#endif
 
-	/* Battery power device (using ADC). */
-	/** @todo resolve incompatible interfaces */
-	// module_power_adc_init(&vin1, "vin1", &(adc1.iface), &vin1_config);
-	// module_power_adc_init(&ubx_voltage, "ubx1", &(adc1.iface), &ubx_voltage_config);
+	#if defined(CONFIG_PLUMPOT_CELLULAR_UXB_VOLTAGE)
+		gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO6);
+
+		adc_sensor_init(
+			&sensor_uxb_voltage,
+			&adc1.iface,
+			6,
+			&(ISensorInfo) {
+				.quantity_name = "Voltage",
+				.quantity_symbol = "U",
+				.unit_name = "Volt",
+				.unit_symbol = "V"
+			},
+			540,
+			270
+		);
+		iservicelocator_add(
+			locator,
+			ISERVICELOCATOR_TYPE_SENSOR,
+			&sensor_uxb_voltage.iface.interface,
+			"uxb-voltage"
+		);
+	#endif
 
 	#if defined(CONFIG_SERVICE_RADIO_AX5243) || defined(CONFIG_SERVICE_RADIO_RFM69)
 		gpio_set(GPIOB, GPIO2);
@@ -539,9 +566,9 @@ int32_t port_init(void) {
 	#if defined(CONFIG_PLUMPOT_CELLULAR_MQTT_OVER_GSM)
 
 		/** @todo generic service move to the system init */
-		mqtt_sensor_upload_init(&mqtt_sensor, &mqtt, "plumpot1/s", 120000);
+		mqtt_sensor_upload_init(&mqtt_sensor, &mqtt, CONFIG_HOSTNAME "/s", 120000);
 
-		stream_over_mqtt_init(&mqtt_cli_stream, &mqtt, "plumpot1/cli", 0);
+		stream_over_mqtt_init(&mqtt_cli_stream, &mqtt, CONFIG_HOSTNAME "/cli", 0);
 		stream_over_mqtt_start(&mqtt_cli_stream);
 		service_cli_init(&mqtt_cli, &(mqtt_cli_stream.stream), system_cli_tree);
 		service_cli_start(&mqtt_cli);

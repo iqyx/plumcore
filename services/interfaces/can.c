@@ -30,6 +30,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#include "main.h"
+
 #include "interface.h"
 #include "can.h"
 
@@ -41,6 +43,11 @@ ican_ret_t ican_init(ICan *self) {
 
 	memset(self, 0, sizeof(ICan));
 	uhal_interface_init(&self->interface);
+
+	self->client_list_lock = xSemaphoreCreateMutex();
+	if (self->client_list_lock == NULL) {
+		return ICAN_RET_FAILED;
+	}
 
 	return ICAN_RET_OK;
 }
@@ -54,6 +61,7 @@ ican_ret_t ican_free(ICan *self) {
 		return ICAN_RET_FAILED;
 	}
 
+	vSemaphoreDelete(self->client_list_lock);
 	memset(self, 0, sizeof(ICan));
 
 	return ICAN_RET_OK;

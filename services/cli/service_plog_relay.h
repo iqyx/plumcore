@@ -1,5 +1,5 @@
 /*
- * CAN interface descriptor
+ * plog_relay service CLI configuration
  *
  * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
  * All rights reserved.
@@ -27,49 +27,12 @@
 
 #pragma once
 
-#include <stdint.h>
-#include <stdbool.h>
 
-#include "interface.h"
-
-
-typedef enum {
-	ICAN_RET_OK = 0,
-	ICAN_RET_FAILED,
-} ican_ret_t;
-
-
-typedef struct ican_filter {
-	uint32_t placeholder;
-
-} ICanFilter;
-
-typedef struct ican_message {
-	uint32_t id;
-	size_t len;
-	uint8_t buf[8];
-} ICanMessage;
-
-
-struct ccan;
-struct hcan;
-
-typedef struct ican {
-	Interface interface;
-
-	/* Multiple connected clients in a linked list. */
-	struct ccan *first_client;
-	SemaphoreHandle_t client_list_lock;
-
-	/* Only a single host. */
-	struct hcan *host;
-
-
-} ICan;
-
-
-ican_ret_t ican_init(ICan *self);
-ican_ret_t ican_free(ICan *self);
-
-
-
+int32_t service_plog_relay_print(struct treecli_parser *parser, void *exec_context);
+int32_t service_plog_relay_add(struct treecli_parser *parser, void *exec_context);
+int32_t service_plog_relay_instanceN_create(struct treecli_parser *parser, uint32_t index, struct treecli_node *node, void *ctx);
+int32_t service_plog_relay_instanceN_name_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
+int32_t service_plog_relay_instanceN_enabled_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
+int32_t service_plog_relay_export(struct treecli_parser *parser, void *exec_context);
+int32_t service_plog_relay_instanceN_source_destination_type_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
+int32_t service_plog_relay_instanceN_source_destination_topic_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);

@@ -30,9 +30,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "FreeRTOS.h"
-#include "task.h"
-#include "queue.h"
+#include "main.h"
 
 #include "can.h"
 #include "ccan.h"
@@ -59,8 +57,11 @@ ccan_ret_t ccan_open(CCan *self, ICan *ican) {
 	self->ican = ican;
 
 	/* Add the newly connected client to the client list in the descriptor. */
+
+	xSemaphoreTake(ican->client_list_lock, portMAX_DELAY);
 	self->next = ican->first_client;
 	ican->first_client = self;
+	xSemaphoreGive(ican->client_list_lock);
 
 	return CCAN_RET_OK;
 }
@@ -131,6 +132,7 @@ ccan_ret_t ccan_close(CCan *self) {
 	}
 
 	/* Remove this client from the linked list. */
+	xSemaphoreTake(self->ican->client_list_lock, portMAX_DELAY);
 	CCan *i = self->ican->first_client;
 	if (i == self) {
 		self->ican->first_client = NULL;
@@ -143,6 +145,7 @@ ccan_ret_t ccan_close(CCan *self) {
 		}
 		i = i->next;
 	}
+	xSemaphoreGive(self->ican->client_list_lock);
 
 	/* Clear reference to the interface descriptor. */
 	self->ican = NULL;

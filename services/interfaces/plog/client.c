@@ -182,18 +182,28 @@ plog_ret_t plog_publish_log(Plog *self, enum iplog_message_severity severity, co
 
 plog_ret_t plog_publish_printf(Plog *self, enum iplog_message_severity severity,
                                const char *topic, const char *msg, ...) {
+	(void)self;
+	(void)severity;
+	(void)topic;
+	(void)msg;
 
 	return PLOG_RET_FAILED;
 }
 
 
 plog_ret_t plog_publish_int32(Plog *self, const char *topic, const int32_t v) {
+	(void)self;
+	(void)topic;
+	(void)v;
 
 	return PLOG_RET_FAILED;
 }
 
 
 plog_ret_t plog_publish_uint32(Plog *self, const char *topic, const uint32_t v) {
+	(void)self;
+	(void)topic;
+	(void)v;
 
 	return PLOG_RET_FAILED;
 }
