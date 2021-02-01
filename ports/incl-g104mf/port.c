@@ -8,19 +8,20 @@
 #include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/spi.h>
 #include <libopencm3/cm3/scb.h>
-#include <libopencm3/cm3/systick.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/adc.h>
 #include <libopencm3/stm32/i2c.h>
 #include <libopencm3/stm32/exti.h>
+#include <libopencm3/stm32/pwr.h>
+#include <libopencm3/stm32/lptimer.h>
 
 #include "config.h"
 #include "FreeRTOS.h"
 #include "timers.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "port.h"
 
+#include "port.h"
 #include "module_led.h"
 #include "interface_led.h"
 #include "module_usart.h"
@@ -73,6 +74,53 @@ IServiceLocator *locator;
 SystemClock system_clock;
 Stm32Rtc rtc;
 
+#define RCC_CCIPR_LPTIM1SEL_LSE (3 << 18)
+volatile uint16_t last_tick;
+volatile uint16_t lptim1_ext;
+
+
+typedef struct {
+	uint8_t cs_port;
+	uint8_t cs_pin;
+	uint8_t spi;
+} Icm52688p;
+
+static void write_8(Icm52688p *self, uint8_t addr, uint8_t data) {
+	gpio_clear(self->cs_port, self->cs_pin);
+	spi_send8(self->spi, addr & 0x7f);
+	spi_read8(self->spi);
+	spi_send8(self->spi, data);
+	spi_read8(self->spi);
+	gpio_set(self->cs_port, self->cs_pin);
+}
+
+
+static uint8_t read_8(Icm52688p *self, uint8_t addr) {
+	gpio_clear(self->cs_port, self->cs_pin);
+	spi_send8(self->spi, addr | 0x80);
+	spi_read8(self->spi);
+	spi_send8(self->spi, 0x00);
+	uint8_t ret = spi_read8(self->spi);
+	gpio_set(self->cs_port, self->cs_pin);
+	return ret;
+}
+
+
+static void spi_init(void) {
+	spi_set_master_mode(SPI1);
+	spi_set_baudrate_prescaler(SPI1, SPI_CR1_BR_FPCLK_DIV_2);
+	spi_set_clock_polarity_0(SPI1);
+	spi_set_clock_phase_0(SPI1);
+	spi_set_full_duplex_mode(SPI1);
+	spi_set_unidirectional_mode(SPI1);
+	spi_enable_software_slave_management(SPI1);
+	spi_send_msb_first(SPI1);
+	spi_set_nss_high(SPI1);
+	spi_fifo_reception_threshold_8bit(SPI1);
+	spi_set_data_size(SPI1, SPI_CR2_DS_8BIT);
+	spi_enable(SPI1);
+}
+
 
 int32_t port_early_init(void) {
 	/* Relocate the vector table first if required. */
@@ -84,6 +132,7 @@ int32_t port_early_init(void) {
 		/* placeholder */
 	#elif defined(CONFIG_INCL_G104MF_CLOCK_DEFAULT)
 		/* Do not intiialize anything, keep MSI clock running. */
+		rcc_set_msi_range(RCC_CR_MSIRANGE_4MHZ);
 		SystemCoreClock = 4e6;
 	#else
 		#error "no clock speed defined"
@@ -92,27 +141,92 @@ int32_t port_early_init(void) {
 	rcc_apb1_frequency = SystemCoreClock;
 	rcc_apb2_frequency = SystemCoreClock;
 
-	/* Initialize systick interrupt for FreeRTOS. */
-	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
-	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
-	systick_set_reload(SystemCoreClock / 1000 - 1);
-	systick_interrupt_enable();
-	systick_counter_enable();
+	rcc_periph_clock_enable(RCC_SYSCFG);
+
+	/* PWR peripheral for setting sleep/stop modes. */
+	rcc_periph_clock_enable(RCC_PWR);
+	PWR_CR1 |= PWR_CR1_DBP;
+	RCC_BDCR |= RCC_BDCR_LSEBYP;
+	rcc_osc_on(RCC_LSE);
+	rcc_wait_for_osc_ready(RCC_LSE);
+
+	/* Adjust MSI freq using LSE. */
+	RCC_CR |= RCC_CR_MSIPLLEN;
+
+	/* Enable low power timer for systick and configure it to use LSE (TCXO). */
+	RCC_CCIPR |= RCC_CCIPR_LPTIM1SEL_LSE;
+	rcc_periph_clock_enable(RCC_LPTIM1);
 
 	/* Initialize all required clocks for GPIO ports. */
 	rcc_periph_clock_enable(RCC_GPIOA);
 	rcc_periph_clock_enable(RCC_GPIOB);
 	rcc_periph_clock_enable(RCC_GPIOC);
+	rcc_periph_clock_enable(RCC_GPIOH);
 
-	/* Timer 11 needs to be initialized prior to starting the scheduler. It is
-	 * used as a reference clock for getting task statistics. */
-	rcc_periph_clock_enable(RCC_TIM16);
+	/* Configure clocks in stop modes. */
+	RCC_AHB1SMENR = 0;
+	RCC_AHB2SMENR = 0;
+	RCC_AHB3SMENR = 0;
+	RCC_APB1SMENR1 = RCC_APB1SMENR1_LPTIM1SMEN;
+	RCC_APB1SMENR2 = 0;
+	RCC_APB2SMENR = RCC_APB2SMENR_USART1SMEN;
 
 	return PORT_EARLY_INIT_OK;
 }
 
 
 int32_t port_init(void) {
+	/* ADXL power off, GPS power off. */
+	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0 | GPIO1);
+	gpio_clear(GPIOH, GPIO0 | GPIO1);
+
+	/* ACCEL1_CS */
+	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13);
+	gpio_set(GPIOC, GPIO13);
+
+	/* RFM_CS */
+	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
+	gpio_set(GPIOC, GPIO15);
+
+	/* SD_PWR_EN */
+	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO3);
+	gpio_clear(GPIOH, GPIO3);
+
+	/* LORA_PWR_EN */
+	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
+	gpio_clear(GPIOA, GPIO0);
+
+	/* SD_SEL */
+	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO5);
+	gpio_set(GPIOA, GPIO5);
+
+	/* MCU_USB_VBUS_DET */
+	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO4);
+
+	/* QSPI_BK1_NCS */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
+	gpio_set(GPIOB, GPIO11);
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
+	gpio_set_af(GPIOB, GPIO_AF5, GPIO3 | GPIO4 | GPIO5);
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
+	gpio_set(GPIOB, GPIO8);
+
+	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO11 | GPIO12);
+
+	/* I2C */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO6 | GPIO9);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO6 | GPIO9);
+	gpio_set(GPIOB, GPIO6 | GPIO9);
+
+	/* microSD CS + SPI2 */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12 | GPIO13 | GPIO14 | GPIO15);
+	gpio_set(GPIOB, GPIO12 | GPIO13 | GPIO14 | GPIO15);
+
+	/* ACCEL_INT */	
+	gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO7);
+
+
+
 
 	/* Serial console. */
 	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO9 | GPIO10);
@@ -129,9 +243,6 @@ int32_t port_init(void) {
 
 	/* Console is now initialized, set its stream to be used as u_log output. */
 	u_log_set_stream(&(console.iface));
-
-	/* Analog inputs (temperature measurement) */
-	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO5 | GPIO6);
 
 	/* First, initialize the service locator service. It is required to
 	 * advertise any port-specific devices and interfaces. */
@@ -185,6 +296,7 @@ int32_t port_init(void) {
 	rcc_periph_clock_enable(RCC_TIM2);
 	rcc_periph_reset_pulse(RST_TIM2);
 	nvic_enable_irq(NVIC_TIM2_IRQ);
+
 	system_clock_init(&system_clock, TIM2, SystemCoreClock / 1000000 - 1, UINT32_MAX);
 	iservicelocator_add(
 		locator,
@@ -201,6 +313,8 @@ int32_t port_init(void) {
 		"rtc"
 	);
 
+
+
 	return PORT_INIT_OK;
 }
 
@@ -213,24 +327,71 @@ void tim2_isr(void) {
 }
 
 
-/* Configure dedicated timer (tim3) for runtime task statistics. It should be later
- * redone to use one of the system monotonic clocks with interface_clock. */
+void vPortSetupTimerInterrupt(void) {
+	lptimer_set_internal_clock_source(LPTIM1);
+	lptimer_enable_trigger(LPTIM1, LPTIM_CFGR_TRIGEN_SW);
+	lptimer_set_prescaler(LPTIM1, LPTIM_CFGR_PRESC_1);
+	lptimer_enable(LPTIM1);
+	lptimer_set_period(LPTIM1, 0xffff);
+	lptimer_set_compare(LPTIM1, 0 + 31);
+	lptimer_enable_irq(LPTIM1, LPTIM_IER_CMPMIE);
+	nvic_enable_irq(NVIC_LPTIM1_IRQ);
+	lptimer_start_counter(LPTIM1, LPTIM_CR_CNTSTRT);
+}
+
 void port_task_timer_init(void) {
-	rcc_periph_reset_pulse(RST_TIM16);
-	/* The timer should run at 10kHz */
-	timer_set_prescaler(TIM16, SystemCoreClock / 10000 - 1);
-	timer_continuous_mode(TIM16);
-	timer_set_period(TIM16, UINT16_MAX);
-	timer_enable_counter(TIM16);
+	/* LPTIM1 us used for task statistics. It is already initialized. */
 }
 
 
 uint32_t port_task_timer_get_value(void) {
-	return timer_get_counter(TIM16);
+	return lptim_get_extended();
 }
 
 
 void usart1_isr(void) {
 	module_usart_interrupt_handler(&console);
+}
+
+
+void vApplicationIdleHook(void);
+void vApplicationIdleHook(void) {
+
+
+
+	/* Enter STOP 1 mode. Set LPMS to 001, SLEEPDEEP bit and do a WFI. */
+	SCB_SCR |= SCB_SCR_SLEEPDEEP;
+	PWR_CR1 &= ~PWR_CR1_LPMS_MASK;
+	PWR_CR1 |= PWR_CR1_LPMS_STOP_1;
+	__asm("wfi");
+
+}
+
+
+void lptim1_isr(void) {
+	if (lptimer_get_flag(LPTIM1, LPTIM_ISR_CMPM)) {
+		lptimer_clear_flag(LPTIM1, LPTIM_ICR_CMPMCF);
+			xPortSysTickHandler();
+			last_tick = lptimer_get_counter(LPTIM1);
+			lptimer_set_compare(LPTIM1, last_tick + 32);
+	}
+	if (lptimer_get_flag(LPTIM1, LPTIM_ISR_ARRM)) {
+		lptimer_clear_flag(LPTIM1, LPTIM_ICR_ARRMCF);
+			lptim1_ext++;
+	}
+}
+
+uint32_t lptim_get_extended(void) {
+	uint16_t e = lptim1_ext;
+	uint16_t b = lptimer_get_counter(LPTIM1);
+	uint16_t e2 = lptim1_ext;
+	if (e != e2) {
+		if (b > 32768) {
+			return (e << 16) | b;
+		} else {
+			return (e2 << 16) | b;
+		}
+	}
+	return (e << 16) | b;
 }
 

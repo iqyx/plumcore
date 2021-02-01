@@ -62,6 +62,7 @@ int32_t port_init(void);
 
 void port_task_timer_init(void);
 uint32_t port_task_timer_get_value(void);
+uint32_t lptim_get_extended(void);
 
 
 

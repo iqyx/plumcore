@@ -62,12 +62,6 @@ void vApplicationStackOverflowHook(TaskHandle_t pxTask, char *pcTaskName) {
 }
 
 
-void vApplicationIdleHook(void);
-void vApplicationIdleHook(void) {
-	__asm("wfi");
-}
-
-
 void hard_fault_hook(uint32_t *stack) __attribute__((used));
 void hard_fault_hook(uint32_t *stack) {
 	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("processor hard fault at 0x%08x"), stack[6]);
