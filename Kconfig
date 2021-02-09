@@ -421,6 +421,16 @@ menu "Enable services"
 			bool "Sensor device using ADC"
 			default y
 			select SERVICE_STM32_ADC
+
+		config SERVICE_INERTIAL_ICM42688P
+			bool "TDK InvenSense ICM-42688-P inertial 6-DOF sensor"
+			default n
+
+		config ICM42688P_DETECT_REPEAT
+			depends on SERVICE_INERTIAL_ICM42688P
+			bool "Try to repeat detection if it fails"
+			default y
+
 	endmenu
 
 	menu "Filesystem and memory management services"
