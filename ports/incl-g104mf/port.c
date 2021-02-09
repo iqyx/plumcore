@@ -14,6 +14,7 @@
 #include <libopencm3/stm32/exti.h>
 #include <libopencm3/stm32/pwr.h>
 #include <libopencm3/stm32/lptimer.h>
+#include <libopencm3/stm32/dbgmcu.h>
 
 #include "config.h"
 #include "FreeRTOS.h"
@@ -49,6 +50,8 @@
 #include "services/cli/system_cli_tree.h"
 #include "services/stm32-system-clock/clock.h"
 #include "services/stm32-rtc/rtc.h"
+#include "interfaces/inertial.h"
+#include "services/icm42688p/icm42688p.h"
 
 
 /**
@@ -62,6 +65,11 @@ struct module_usart console;
 struct module_rtc_locm3 rtc1;
 struct module_prng_simple prng;
 struct module_fifo_profiler profiler;
+struct module_spibus_locm3 spi1;
+struct module_spidev_locm3 spi1_accel2;
+
+#define USART_CR3_UCESM (1 << 23)
+#define USART_CR3_WUS_START (2 << 20)
 
 
 #if defined(CONFIG_SERVICE_STM32_WATCHDOG)
@@ -73,54 +81,13 @@ PLocator plocator;
 IServiceLocator *locator;
 SystemClock system_clock;
 Stm32Rtc rtc;
+Icm42688p accel2;
 
 #define RCC_CCIPR_LPTIM1SEL_LSE (3 << 18)
 volatile uint16_t last_tick;
 volatile uint16_t lptim1_ext;
 
-
-typedef struct {
-	uint8_t cs_port;
-	uint8_t cs_pin;
-	uint8_t spi;
-} Icm52688p;
-
-static void write_8(Icm52688p *self, uint8_t addr, uint8_t data) {
-	gpio_clear(self->cs_port, self->cs_pin);
-	spi_send8(self->spi, addr & 0x7f);
-	spi_read8(self->spi);
-	spi_send8(self->spi, data);
-	spi_read8(self->spi);
-	gpio_set(self->cs_port, self->cs_pin);
-}
-
-
-static uint8_t read_8(Icm52688p *self, uint8_t addr) {
-	gpio_clear(self->cs_port, self->cs_pin);
-	spi_send8(self->spi, addr | 0x80);
-	spi_read8(self->spi);
-	spi_send8(self->spi, 0x00);
-	uint8_t ret = spi_read8(self->spi);
-	gpio_set(self->cs_port, self->cs_pin);
-	return ret;
-}
-
-
-static void spi_init(void) {
-	spi_set_master_mode(SPI1);
-	spi_set_baudrate_prescaler(SPI1, SPI_CR1_BR_FPCLK_DIV_2);
-	spi_set_clock_polarity_0(SPI1);
-	spi_set_clock_phase_0(SPI1);
-	spi_set_full_duplex_mode(SPI1);
-	spi_set_unidirectional_mode(SPI1);
-	spi_enable_software_slave_management(SPI1);
-	spi_send_msb_first(SPI1);
-	spi_set_nss_high(SPI1);
-	spi_fifo_reception_threshold_8bit(SPI1);
-	spi_set_data_size(SPI1, SPI_CR2_DS_8BIT);
-	spi_enable(SPI1);
-}
-
+int16_t accel2_data[8 * 32];
 
 int32_t port_early_init(void) {
 	/* Relocate the vector table first if required. */
@@ -128,15 +95,24 @@ int32_t port_early_init(void) {
 		SCB_VTOR = CONFIG_VECTOR_TABLE_ADDRESS;
 	#endif
 
+	rcc_osc_on(RCC_HSI16);
+	rcc_wait_for_osc_ready(RCC_HSI16);
+
 	#if defined(CONFIG_INCL_G104MF_CLOCK_80MHZ)
 		/* placeholder */
 	#elif defined(CONFIG_INCL_G104MF_CLOCK_DEFAULT)
 		/* Do not intiialize anything, keep MSI clock running. */
-		rcc_set_msi_range(RCC_CR_MSIRANGE_4MHZ);
-		SystemCoreClock = 4e6;
+		//rcc_set_msi_range(RCC_CR_MSIRANGE_4MHZ);
+		RCC_CFGR |= RCC_CFGR_STOPWUCK_HSI16;
+		rcc_set_sysclk_source(RCC_HSI16);
+		SystemCoreClock = 16e6;
 	#else
 		#error "no clock speed defined"
 	#endif
+
+	rcc_osc_off(RCC_MSI);
+
+	DBGMCU_CR |= DBGMCU_CR_STOP;
 
 	rcc_apb1_frequency = SystemCoreClock;
 	rcc_apb2_frequency = SystemCoreClock;
@@ -156,6 +132,8 @@ int32_t port_early_init(void) {
 	/* Enable low power timer for systick and configure it to use LSE (TCXO). */
 	RCC_CCIPR |= RCC_CCIPR_LPTIM1SEL_LSE;
 	rcc_periph_clock_enable(RCC_LPTIM1);
+	RCC_APB1RSTR1 |= RCC_APB1RSTR1_LPTIM1RST;
+	RCC_APB1RSTR1 &= ~RCC_APB1RSTR1_LPTIM1RST;
 
 	/* Initialize all required clocks for GPIO ports. */
 	rcc_periph_clock_enable(RCC_GPIOA);
@@ -236,9 +214,17 @@ int32_t port_init(void) {
 	/* Main system console is created on the first USART interface. Enable
 	 * USART clocks and interrupts and start the corresponding HAL module. */
 	rcc_periph_clock_enable(RCC_USART1);
+
+	/* Allow waking up in stop mode. */
+	USART_CR1(USART1) |= USART_CR1_UESM;
+	//USART_CR3(USART1) |= USART_CR3_UCESM;
+	USART_CR3(USART1) |= USART_CR3_WUS_RXNE;
+	RCC_CCIPR |= RCC_CCIPR_USART1SEL_HSI16;
+
 	nvic_enable_irq(NVIC_USART1_IRQ);
 	nvic_set_priority(NVIC_USART1_IRQ, 6 * 16);
 	module_usart_init(&console, "console", USART1);
+	module_usart_set_baudrate(&console, 115200);
 	hal_interface_set_name(&(console.iface.descriptor), "console");
 
 	/* Console is now initialized, set its stream to be used as u_log output. */
@@ -314,6 +300,40 @@ int32_t port_init(void) {
 	);
 
 
+	/* SPI1 */
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO3 | GPIO4 | GPIO5);
+	gpio_set_af(GPIOB, GPIO_AF5, GPIO3 | GPIO4 | GPIO5);
+	rcc_periph_clock_enable(RCC_SPI1);
+	module_spibus_locm3_init(&spi1, "spi1", SPI1);
+	hal_interface_set_name(&(spi1.iface.descriptor), "spi1");
+
+	/* ICM42688P on SPI1 bus */
+	gpio_set(GPIOB, GPIO8);
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO8);
+	module_spidev_locm3_init(&spi1_accel2, "spi1_accel2", &(spi1.iface), GPIOB, GPIO8);
+	hal_interface_set_name(&(spi1_accel2.iface.descriptor), "spi1_accel2");
+
+	/* SYNC32 output */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
+
+#if 0
+	/* ICM-42688-P test code */
+	icm42688p_init(&accel2, &spi1_accel2.iface);
+	WaveformSource *source = &accel2.source;
+	/* source->start(source->parent); */
+	while (1) {
+		size_t read = 0;
+		source->read(source->parent, accel2_data, 32, &read);
+		for (size_t i = 0; i < read; i++) {
+			char s[40] = {0};
+			snprintf(s, sizeof(s), "%5d %5d %5d %5d\r\n", accel2_data[i * 8 + 0], accel2_data[i * 8 + 1], accel2_data[i * 8 + 2], accel2_data[i * 8 + 7]);
+			/* interface_stream_write(&(console.iface), s, strlen(s)); */
+		}
+		vTaskDelay(100);
+	}
+#endif
 
 	return PORT_INIT_OK;
 }
@@ -328,13 +348,16 @@ void tim2_isr(void) {
 
 
 void vPortSetupTimerInterrupt(void) {
+	lptimer_disable(LPTIM1);
 	lptimer_set_internal_clock_source(LPTIM1);
 	lptimer_enable_trigger(LPTIM1, LPTIM_CFGR_TRIGEN_SW);
 	lptimer_set_prescaler(LPTIM1, LPTIM_CFGR_PRESC_1);
+
 	lptimer_enable(LPTIM1);
 	lptimer_set_period(LPTIM1, 0xffff);
 	lptimer_set_compare(LPTIM1, 0 + 31);
 	lptimer_enable_irq(LPTIM1, LPTIM_IER_CMPMIE);
+	nvic_set_priority(NVIC_LPTIM1_IRQ, 5 * 16);
 	nvic_enable_irq(NVIC_LPTIM1_IRQ);
 	lptimer_start_counter(LPTIM1, LPTIM_CR_CNTSTRT);
 }
@@ -358,26 +381,36 @@ void vApplicationIdleHook(void);
 void vApplicationIdleHook(void) {
 
 
-
-	/* Enter STOP 1 mode. Set LPMS to 001, SLEEPDEEP bit and do a WFI. */
-	SCB_SCR |= SCB_SCR_SLEEPDEEP;
-	PWR_CR1 &= ~PWR_CR1_LPMS_MASK;
-	PWR_CR1 |= PWR_CR1_LPMS_STOP_1;
-	__asm("wfi");
-
 }
 
 
+void lptim_schedule_cmp(uint32_t lptim, uint16_t increment) {
+	uint16_t this_tick = 0;
+	while (this_tick != lptimer_get_counter(lptim)) {
+		this_tick = lptimer_get_counter(lptim);
+	}
+	uint16_t next_tick = this_tick + increment;
+	if (next_tick == 0xffff) {
+		next_tick = 0;
+	}
+	lptimer_set_compare(LPTIM1, next_tick);
+}
+
+volatile bool systick_enabled = true;
 void lptim1_isr(void) {
 	if (lptimer_get_flag(LPTIM1, LPTIM_ISR_CMPM)) {
 		lptimer_clear_flag(LPTIM1, LPTIM_ICR_CMPMCF);
-			xPortSysTickHandler();
-			last_tick = lptimer_get_counter(LPTIM1);
-			lptimer_set_compare(LPTIM1, last_tick + 32);
+			if (systick_enabled) {
+				xPortSysTickHandler();
+				lptim_schedule_cmp(LPTIM1, 32);
+			}
+
 	}
 	if (lptimer_get_flag(LPTIM1, LPTIM_ISR_ARRM)) {
 		lptimer_clear_flag(LPTIM1, LPTIM_ICR_ARRMCF);
+			gpio_set(GPIOB, GPIO2);
 			lptim1_ext++;
+			gpio_clear(GPIOB, GPIO2);
 	}
 }
 
@@ -395,3 +428,64 @@ uint32_t lptim_get_extended(void) {
 	return (e << 16) | b;
 }
 
+
+void port_sleep(TickType_t idle_time) {
+	eSleepModeStatus eSleepStatus;
+
+	if (idle_time > 1000) {
+		idle_time = 1000;
+	}
+
+	__asm volatile("cpsid i");
+	__asm volatile("dsb");
+	__asm volatile("isb");
+
+	eSleepStatus = eTaskConfirmSleepModeStatus();
+	if (eSleepStatus == eAbortSleep) {
+		__asm volatile("cpsie i");
+
+	} else {
+		systick_enabled = false;
+
+		gpio_set(GPIOC, GPIO13);
+
+		/* Enter STOP 1 mode. Set LPMS to 001, SLEEPDEEP bit and do a WFI. */
+		SCB_SCR |= SCB_SCR_SLEEPDEEP;
+		PWR_CR1 &= ~PWR_CR1_LPMS_MASK;
+		PWR_CR1 |= PWR_CR1_LPMS_STOP_1;
+
+		/* Wake up in the future. Crop the time difference to 2^16 - 1 to avoid overflow. */
+		uint16_t current_time = 0;
+		while (current_time != lptimer_get_counter(LPTIM1)) {
+			current_time = lptimer_get_counter(LPTIM1);
+		}
+
+		uint16_t wake_cmp = current_time + idle_time * 32;
+		if (wake_cmp == 0xffff) {
+			wake_cmp = 0;
+		}
+		lptimer_set_compare(LPTIM1, current_time + ((idle_time * 32) & 0xffff));
+
+		__asm volatile("dsb");
+		__asm volatile("wfi");
+		__asm volatile("isb");
+
+		uint16_t wakeup_time = 0;
+		while (wakeup_time != lptimer_get_counter(LPTIM1)) {
+			wakeup_time = lptimer_get_counter(LPTIM1);
+		}
+
+		gpio_clear(GPIOC, GPIO13);
+
+		uint16_t ticks_completed = (wakeup_time - current_time) / 32;
+		if (ticks_completed > idle_time) {
+			ticks_completed = idle_time;
+		}
+
+		vTaskStepTick(ticks_completed);
+	}
+
+	lptim_schedule_cmp(LPTIM1, 32);
+	__asm volatile("cpsie i");
+	systick_enabled = true;
+}
