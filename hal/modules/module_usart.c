@@ -104,6 +104,7 @@ static int32_t module_usart_write(void *context, const uint8_t *buf, uint32_t le
 	for (uint32_t i = 0; i < len; i++) {
 		usart_send_blocking(usart->port, buf[i]);
 	}
+	vTaskDelay(5);
 
 	return -1;
 }
