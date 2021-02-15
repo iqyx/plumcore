@@ -373,6 +373,10 @@ menu "Enable services"
 				select LIB_LIBUXB
 				select LIB_NANOPB
 				default y
+
+			config SERVICE_STM32_I2C_MASTER
+				bool "STM32 I2C bus driver in master mode"
+				default y
 		endmenu
 	endmenu
 
@@ -417,6 +421,10 @@ menu "Enable services"
 			bool "SPI NOR flash memory driver"
 			default y
 
+		config SERVICE_SPI_SD
+			bool "SD/MMC card driver using SPI interface"
+			default n
+
 		config SERVICE_ADC_SENSOR
 			bool "Sensor device using ADC"
 			default y
@@ -430,6 +438,10 @@ menu "Enable services"
 			depends on SERVICE_INERTIAL_ICM42688P
 			bool "Try to repeat detection if it fails"
 			default y
+
+		config SERVICE_BQ35100
+			bool "TI BQ35100 primary battery gauge"
+			default n
 
 	endmenu
 
