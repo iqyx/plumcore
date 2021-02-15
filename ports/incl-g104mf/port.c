@@ -98,6 +98,9 @@ volatile uint16_t lptim1_ext;
 
 int16_t accel2_data[8 * 32];
 
+void vPortSetupTimerInterrupt(void);
+void port_sleep(TickType_t idle_time);
+
 int32_t port_early_init(void) {
 	/* Relocate the vector table first if required. */
 	#if defined(CONFIG_RELOCATE_VECTOR_TABLE)
@@ -465,6 +468,7 @@ void tim2_isr(void) {
 }
 
 
+#define PORT_LPTIM_ARR (0x8000)
 void vPortSetupTimerInterrupt(void) {
 	lptimer_disable(LPTIM1);
 	lptimer_set_internal_clock_source(LPTIM1);
@@ -472,7 +476,7 @@ void vPortSetupTimerInterrupt(void) {
 	lptimer_set_prescaler(LPTIM1, LPTIM_CFGR_PRESC_1);
 
 	lptimer_enable(LPTIM1);
-	lptimer_set_period(LPTIM1, 0xffff);
+	lptimer_set_period(LPTIM1, PORT_LPTIM_ARR - 1);
 	lptimer_set_compare(LPTIM1, 0 + 31);
 	lptimer_enable_irq(LPTIM1, LPTIM_IER_CMPMIE);
 	nvic_set_priority(NVIC_LPTIM1_IRQ, 5 * 16);
@@ -502,17 +506,33 @@ void vApplicationIdleHook(void) {
 }
 
 
-void lptim_schedule_cmp(uint32_t lptim, uint16_t increment) {
+static void lptim_schedule_cmp(uint32_t lptim, uint16_t increment_ticks, uint16_t *current_ticks) {
 	uint16_t this_tick = 0;
 	while (this_tick != lptimer_get_counter(lptim)) {
 		this_tick = lptimer_get_counter(lptim);
 	}
-	uint16_t next_tick = this_tick + increment;
+	uint16_t next_tick = (this_tick + increment_ticks) % PORT_LPTIM_ARR;
+
+	/* Cannot write 0xffff to the compare register. Cheat a bit in this case. */
 	if (next_tick == 0xffff) {
 		next_tick = 0;
 	}
-	lptimer_set_compare(LPTIM1, next_tick);
+	lptimer_set_compare(lptim, next_tick);
+	if (current_ticks != NULL) {
+		*current_ticks = this_tick;
+	}
 }
+
+
+static uint16_t lptim_time_till_now(uint32_t lptim, uint16_t last_time) {
+	uint16_t time_now = 0;
+	while (time_now != lptimer_get_counter(lptim)) {
+		time_now = lptimer_get_counter(lptim);
+	}
+
+	return time_now - last_time;
+}
+
 
 volatile bool systick_enabled = true;
 void lptim1_isr(void) {
@@ -520,7 +540,7 @@ void lptim1_isr(void) {
 		lptimer_clear_flag(LPTIM1, LPTIM_ICR_CMPMCF);
 			if (systick_enabled) {
 				xPortSysTickHandler();
-				lptim_schedule_cmp(LPTIM1, 32);
+				lptim_schedule_cmp(LPTIM1, 32, NULL);
 			}
 
 	}
@@ -531,6 +551,7 @@ void lptim1_isr(void) {
 			gpio_clear(GPIOB, GPIO2);
 	}
 }
+
 
 uint32_t lptim_get_extended(void) {
 	uint16_t e = lptim1_ext;
@@ -548,7 +569,7 @@ uint32_t lptim_get_extended(void) {
 
 
 void port_sleep(TickType_t idle_time) {
-	eSleepModeStatus eSleepStatus;
+	eSleepModeStatus sleep_status;
 
 	if (idle_time > 1000) {
 		idle_time = 1000;
@@ -558,52 +579,34 @@ void port_sleep(TickType_t idle_time) {
 	__asm volatile("dsb");
 	__asm volatile("isb");
 
-	eSleepStatus = eTaskConfirmSleepModeStatus();
-	if (eSleepStatus == eAbortSleep) {
+	sleep_status = eTaskConfirmSleepModeStatus();
+	if (sleep_status == eAbortSleep) {
 		__asm volatile("cpsie i");
 
 	} else {
 		systick_enabled = false;
 
-		gpio_set(GPIOC, GPIO13);
-
-		/* Enter STOP 1 mode. Set LPMS to 001, SLEEPDEEP bit and do a WFI. */
+		/* Enter STOP 1 mode. Set LPMS to 001, SLEEPDEEP bit and do a WFI later. */
 		SCB_SCR |= SCB_SCR_SLEEPDEEP;
 		PWR_CR1 &= ~PWR_CR1_LPMS_MASK;
 		PWR_CR1 |= PWR_CR1_LPMS_STOP_1;
 
-		/* Wake up in the future. Crop the time difference to 2^16 - 1 to avoid overflow. */
-		uint16_t current_time = 0;
-		while (current_time != lptimer_get_counter(LPTIM1)) {
-			current_time = lptimer_get_counter(LPTIM1);
-		}
-
-		uint16_t wake_cmp = current_time + idle_time * 32;
-		if (wake_cmp == 0xffff) {
-			wake_cmp = 0;
-		}
-		lptimer_set_compare(LPTIM1, current_time + ((idle_time * 32) & 0xffff));
+		/* Wake up in the future. Next tick is calculated and properly cropped inside */
+		uint16_t time_before_sleep = 0;
+		lptim_schedule_cmp(LPTIM1, idle_time * 32, &time_before_sleep);
 
 		__asm volatile("dsb");
 		__asm volatile("wfi");
 		__asm volatile("isb");
 
-		uint16_t wakeup_time = 0;
-		while (wakeup_time != lptimer_get_counter(LPTIM1)) {
-			wakeup_time = lptimer_get_counter(LPTIM1);
-		}
-
-		gpio_clear(GPIOC, GPIO13);
-
-		uint16_t ticks_completed = (wakeup_time - current_time) / 32;
+		uint16_t ticks_completed = lptim_time_till_now(LPTIM1, time_before_sleep) / 32;
 		if (ticks_completed > idle_time) {
 			ticks_completed = idle_time;
 		}
-
 		vTaskStepTick(ticks_completed);
 	}
 
-	lptim_schedule_cmp(LPTIM1, 32);
+	lptim_schedule_cmp(LPTIM1, 32, NULL);
 	__asm volatile("cpsie i");
 	systick_enabled = true;
 }
