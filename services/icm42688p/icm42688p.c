@@ -85,29 +85,46 @@ waveform_source_ret_t icm42688p_read(Icm42688p *self, void *data, size_t sample_
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 0);
 	int16_t *data16 = (int16_t *)data;
 	*read = 0;
+
+	/* Avoid reading of an empty FIFO. It gives unpredictable results. */
+	uint16_t fifo_count = icm42688p_fifo_count(self);
+	if (sample_count > fifo_count) {
+		sample_count = fifo_count;
+	}
+
 	while (sample_count--) {
 		uint8_t header = read8(self->spidev, ICM42688P_REG_FIFO_DATA);
 		//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("header = 0x%02x"), header);
 
 		if (header & 0x80) {
 			/* FIFO is empty. */
+			u_log(system_log, LOG_TYPE_DEBUG, "som narazil");
 			return WAVEFORM_SOURCE_RET_OK;
 		}
 		if (header & 0x40) {
 			/* Read accelerometer data. */
 			readn(self->spidev, (uint8_t *)&(data16[0]), ICM42688P_REG_FIFO_DATA, sizeof(int16_t) * 3);
+		} else {
+			data16[0] = 0;
+			data16[1] = 0;
+			data16[2] = 0;
 		}
 		if (header & 0x20) {
 			/* Read gyroscope data. */
 			readn(self->spidev, (uint8_t *)&(data16[3]), ICM42688P_REG_FIFO_DATA, sizeof(int16_t) * 3);
+		} else {
+			data16[3] = 0;
+			data16[4] = 0;
+			data16[5] = 0;
 		}
 		/* Temperature (8 bit). */
 		data16[6] = read8(self->spidev, ICM42688P_REG_FIFO_DATA);
-		if (header & 0x08) {
+		//if (header & 0x08) {
 			/* Read timestamp value. */
 			readn(self->spidev, (uint8_t *)&(data16[7]), ICM42688P_REG_FIFO_DATA, sizeof(int16_t));
-		}
-		
+			//data16[7] = 0;
+		//}
+		//data16[7] = header;
 		data16 += 8;
 		(*read)++;
 	}
@@ -144,7 +161,8 @@ icm42688p_ret_t icm42688p_init_defaults(Icm42688p *self) {
 
 	write8(self->spidev, ICM42688P_REG_FIFO_CONFIG, 0x80);
 	write8(self->spidev, ICM42688P_REG_GYRO_CONFIG0, 0xc8);
-	write8(self->spidev, ICM42688P_REG_ACCEL_CONFIG0, 0x68);
+	/* 25 Hz ODR */
+	write8(self->spidev, ICM42688P_REG_ACCEL_CONFIG0, 0x6a);
 	write8(self->spidev, ICM42688P_REG_GYRO_ACCEL_CONFIG0, 0x71);
 
 	/* Enable partial read, include accel, gyro and FSYNC data in the FIFO. */
@@ -152,8 +170,8 @@ icm42688p_ret_t icm42688p_init_defaults(Icm42688p *self) {
 	/* Do not tag any data, measure from the FSYNC rising edge. */
 	write8(self->spidev, ICM42688P_REG_FSYNC_CONFIG, 0x00);
 
-	/* 16 us resolution, enable TMST registers */
-	write8(self->spidev, ICM42688P_REG_TMST_CONFIG, 0x36);
+	/* 16 us resolution, enable TMST + delta */
+	write8(self->spidev, ICM42688P_REG_TMST_CONFIG, 0x28 | 0x06);
 	vTaskDelay(2);
 
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 1);
