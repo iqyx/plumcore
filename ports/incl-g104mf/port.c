@@ -50,8 +50,11 @@
 #include "services/cli/system_cli_tree.h"
 #include "services/stm32-system-clock/clock.h"
 #include "services/stm32-rtc/rtc.h"
-#include "interfaces/inertial.h"
 #include "services/icm42688p/icm42688p.h"
+#include "interfaces/i2c-bus.h"
+#include "services/stm32-i2c/stm32-i2c.h"
+#include "services/bq35100/bq35100.h"
+#include "services/spi-sd/spi-sd.h"
 
 
 /**
@@ -67,6 +70,9 @@ struct module_prng_simple prng;
 struct module_fifo_profiler profiler;
 struct module_spibus_locm3 spi1;
 struct module_spidev_locm3 spi1_accel2;
+struct module_spidev_locm3 spi1_rfm;
+struct module_spibus_locm3 spi2;
+struct module_spidev_locm3 spi2_sd;
 
 #define USART_CR3_UCESM (1 << 23)
 #define USART_CR3_WUS_START (2 << 20)
@@ -82,6 +88,9 @@ IServiceLocator *locator;
 SystemClock system_clock;
 Stm32Rtc rtc;
 Icm42688p accel2;
+Stm32I2c i2c1;
+Bq35100 bq35100;
+SpiSd sd;
 
 #define RCC_CCIPR_LPTIM1SEL_LSE (3 << 18)
 volatile uint16_t last_tick;
@@ -102,7 +111,6 @@ int32_t port_early_init(void) {
 		/* placeholder */
 	#elif defined(CONFIG_INCL_G104MF_CLOCK_DEFAULT)
 		/* Do not intiialize anything, keep MSI clock running. */
-		//rcc_set_msi_range(RCC_CR_MSIRANGE_4MHZ);
 		RCC_CFGR |= RCC_CFGR_STOPWUCK_HSI16;
 		rcc_set_sysclk_source(RCC_HSI16);
 		SystemCoreClock = 16e6;
@@ -112,6 +120,7 @@ int32_t port_early_init(void) {
 
 	rcc_osc_off(RCC_MSI);
 
+	/* Leave SWD running in STOP1 mode for development. */
 	DBGMCU_CR |= DBGMCU_CR_STOP;
 
 	rcc_apb1_frequency = SystemCoreClock;
@@ -166,29 +175,26 @@ int32_t port_init(void) {
 	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
 	gpio_set(GPIOC, GPIO15);
 
-	/* SD_PWR_EN */
-	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO3);
-	gpio_clear(GPIOH, GPIO3);
+	/*USB_VBUS_DET */
+	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
 
 	/* LORA_PWR_EN */
 	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
 	gpio_clear(GPIOA, GPIO0);
 
-	/* SD_SEL */
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO5);
-	gpio_set(GPIOA, GPIO5);
-
 	/* MCU_USB_VBUS_DET */
 	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO4);
+
+	/* 1PPS */
+	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO8);
 
 	/* QSPI_BK1_NCS */
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
 	gpio_set(GPIOB, GPIO11);
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
 	gpio_set_af(GPIOB, GPIO_AF5, GPIO3 | GPIO4 | GPIO5);
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
-	gpio_set(GPIOB, GPIO8);
 
+	/* USB pins */
 	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO11 | GPIO12);
 
 	/* I2C */
@@ -196,15 +202,8 @@ int32_t port_init(void) {
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO6 | GPIO9);
 	gpio_set(GPIOB, GPIO6 | GPIO9);
 
-	/* microSD CS + SPI2 */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12 | GPIO13 | GPIO14 | GPIO15);
-	gpio_set(GPIOB, GPIO12 | GPIO13 | GPIO14 | GPIO15);
-
 	/* ACCEL_INT */	
 	gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO7);
-
-
-
 
 	/* Serial console. */
 	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO9 | GPIO10);
@@ -299,6 +298,93 @@ int32_t port_init(void) {
 		"rtc"
 	);
 
+	gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO6 | GPIO9);
+#if 1
+	rcc_periph_clock_enable(RCC_I2C1);
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6 | GPIO9);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO6 | GPIO9);
+	gpio_set_af(GPIOB, GPIO_AF4, GPIO6 | GPIO9);
+	stm32_i2c_init(&i2c1, I2C1);
+
+	/* BQ35100 test */
+	//bq35100_init(&bq35100, &i2c1.bus);
+#endif
+
+#if 1
+	/* GPS test, power on */
+	gpio_set(GPIOH, GPIO1);
+	vTaskDelay(100);
+	uint8_t backup[] = {0xb5, 0x62, 0x02, 0x41, 0x08, 0x00, 0x00, 0x00, 0x80, 0x00, 0x02, 0x00, 0x00, 0x00, 0xcd, 0x3b};
+
+	/* Go to the backup mode. */
+	uint8_t txbuf = 0xff;
+	uint8_t rxbuf[4] = {0};
+	i2c1.bus.transfer(i2c1.bus.parent, 0x42, backup, sizeof(backup), NULL, 0);
+
+	/* Try to read the output. */
+	while (false) {
+		i2c1.bus.transfer(i2c1.bus.parent, 0x42, &txbuf, 1, rxbuf, 4);
+		u_log(system_log, LOG_TYPE_DEBUG, "GPS '%c%c%c%c'", rxbuf[0], rxbuf[1], rxbuf[2], rxbuf[3]);
+		vTaskDelay(500);
+	}
+
+	/* Power off */
+	gpio_clear(GPIOH, GPIO1);
+#endif
+
+#if 0
+	/* SD_SEL */
+	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO5);
+	gpio_clear(GPIOA, GPIO5);
+	/* SD_PWR_EN */
+	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO3);
+	gpio_clear(GPIOH, GPIO3);
+
+	/* SPI2 */
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
+	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
+	rcc_periph_clock_enable(RCC_SPI2);
+	module_spibus_locm3_init(&spi2, "spi2", SPI2);
+	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
+
+	gpio_set(GPIOB, GPIO12);
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
+	module_spidev_locm3_init(&spi2_sd, "spi2_sd", &(spi2.iface), GPIOB, GPIO12);
+	hal_interface_set_name(&(spi2_sd.iface.descriptor), "spi2_sd");
+
+	while (true) {
+		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
+		gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO13 | GPIO14 | GPIO15);
+		/* SD_SEL */
+		gpio_clear(GPIOA, GPIO5);
+		/* SD_PWR_EN */
+		gpio_set(GPIOH, GPIO3);
+
+		/* Give the card some time and intialize it. */
+		vTaskDelay(100);
+		spi_sd_init(&sd, &spi2_sd.iface);
+
+		/* Write some random stuff. */
+		for (size_t i = 0; i < 4; i++) {
+			u_log(system_log, LOG_TYPE_DEBUG, "wr block %d", i);
+			vTaskDelay(10);
+			//if (spi_sd_read_data(&sd, 1, sd_buf, 512, 1000) != SPI_SD_RET_OK) {
+			if (spi_sd_write_data(&sd, i, 0x08000000, 65536*4, 50000) != SPI_SD_RET_OK) {
+				u_log(system_log, LOG_TYPE_DEBUG, "error");
+			}
+		}
+		/* Wait for the SD card to finish all tasks (hopefully). */
+		vTaskDelay(1000);
+
+		/* Power off the card. */
+		spi_sd_free(&sd);
+		gpio_clear(GPIOH, GPIO3);
+		gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO13 | GPIO14 | GPIO15);
+
+		vTaskDelay(5000);
+	}
+#endif
 
 	/* SPI1 */
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
@@ -318,20 +404,52 @@ int32_t port_init(void) {
 	/* SYNC32 output */
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
 
-#if 0
+	/* SX127x on SPI1 bus */
+	gpio_set(GPIOC, GPIO15);
+	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
+	gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO15);
+	module_spidev_locm3_init(&spi1_rfm, "spi1_rfm", &(spi1.iface), GPIOC, GPIO15);
+	hal_interface_set_name(&(spi1_rfm.iface.descriptor), "spi1_rfm");
+
+	/* Put the SX127x to idle sleep. */
+	vTaskDelay(2);
+	uint8_t rfm_seq_idle[] = {0x80 | 0x36, 0x20};
+	interface_spidev_select(&spi1_rfm.iface);
+	interface_spidev_send(&spi1_rfm.iface, rfm_seq_idle, sizeof(rfm_seq_idle));
+	interface_spidev_deselect(&spi1_rfm.iface);
+
+	vTaskDelay(2);
+	uint8_t rfm_standby[] = {0x81, 0x00};
+	interface_spidev_select(&spi1_rfm.iface);
+	interface_spidev_send(&spi1_rfm.iface, rfm_standby, sizeof(rfm_standby));
+	interface_spidev_deselect(&spi1_rfm.iface);
+
+#if 1
 	/* ICM-42688-P test code */
 	icm42688p_init(&accel2, &spi1_accel2.iface);
 	WaveformSource *source = &accel2.source;
-	/* source->start(source->parent); */
+	source->start(source->parent);
+	uint32_t sample_counter = 0;
+	uint16_t last_fsync = 0;
 	while (1) {
 		size_t read = 0;
 		source->read(source->parent, accel2_data, 32, &read);
+		interface_stream_write(&(console.iface), " ", 1);
+
 		for (size_t i = 0; i < read; i++) {
-			char s[40] = {0};
-			snprintf(s, sizeof(s), "%5d %5d %5d %5d\r\n", accel2_data[i * 8 + 0], accel2_data[i * 8 + 1], accel2_data[i * 8 + 2], accel2_data[i * 8 + 7]);
-			/* interface_stream_write(&(console.iface), s, strlen(s)); */
+			if (accel2_data[i * 8 + 7] != 0) {
+				u_log(system_log, LOG_TYPE_DEBUG, "last_fsync = %u, sample_counter = %u", last_fsync, sample_counter);
+				last_fsync = accel2_data[i * 8 + 7];
+				sample_counter = 0;
+			}
+			sample_counter++;
+			#if 0
+				char s[40] = {0};
+				snprintf(s, sizeof(s), "%5d %5d %5d %5u\r\n", accel2_data[i * 8 + 0], accel2_data[i * 8 + 1], accel2_data[i * 8 + 2], (uint32_t)((uint16_t)accel2_data[i * 8 + 7]));
+				interface_stream_write(&(console.iface), s, strlen(s));
+			#endif
 		}
-		vTaskDelay(100);
+		vTaskDelay(50);
 	}
 #endif
 
