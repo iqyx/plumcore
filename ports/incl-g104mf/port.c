@@ -55,6 +55,7 @@
 #include "services/stm32-i2c/stm32-i2c.h"
 #include "services/bq35100/bq35100.h"
 #include "services/spi-sd/spi-sd.h"
+#include "services/gps-ublox/gps-ublox.h"
 
 
 /**
@@ -91,6 +92,7 @@ Icm42688p accel2;
 Stm32I2c i2c1;
 Bq35100 bq35100;
 SpiSd sd;
+GpsUblox gps;
 
 #define RCC_CCIPR_LPTIM1SEL_LSE (3 << 18)
 volatile uint16_t last_tick;
@@ -187,9 +189,6 @@ int32_t port_init(void) {
 
 	/* MCU_USB_VBUS_DET */
 	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO4);
-
-	/* 1PPS */
-	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO8);
 
 	/* QSPI_BK1_NCS */
 	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
@@ -314,25 +313,25 @@ int32_t port_init(void) {
 #endif
 
 #if 1
+	/* 1PPS */
+	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO8);
+
+	nvic_enable_irq(NVIC_EXTI9_5_IRQ);
+	nvic_set_priority(NVIC_EXTI9_5_IRQ, 5 * 16);
+	exti_select_source(EXTI8, GPIOA);
+	exti_set_trigger(EXTI8, EXTI_TRIGGER_FALLING);
+	exti_enable_request(EXTI8);
+
+
 	/* GPS test, power on */
 	gpio_set(GPIOH, GPIO1);
 	vTaskDelay(100);
-	uint8_t backup[] = {0xb5, 0x62, 0x02, 0x41, 0x08, 0x00, 0x00, 0x00, 0x80, 0x00, 0x02, 0x00, 0x00, 0x00, 0xcd, 0x3b};
-
-	/* Go to the backup mode. */
-	uint8_t txbuf = 0xff;
-	uint8_t rxbuf[4] = {0};
-	i2c1.bus.transfer(i2c1.bus.parent, 0x42, backup, sizeof(backup), NULL, 0);
-
-	/* Try to read the output. */
-	while (false) {
-		i2c1.bus.transfer(i2c1.bus.parent, 0x42, &txbuf, 1, rxbuf, 4);
-		u_log(system_log, LOG_TYPE_DEBUG, "GPS '%c%c%c%c'", rxbuf[0], rxbuf[1], rxbuf[2], rxbuf[3]);
-		vTaskDelay(500);
-	}
-
+	gps_ublox_init(&gps);
+	gps_ublox_set_i2c_transport(&gps, &i2c1.bus, 0x42);
+	//gps_ublox_mode(&gps, GPS_UBLOX_MODE_BACKUP);
+	gps_ublox_start(&gps);
 	/* Power off */
-	gpio_clear(GPIOH, GPIO1);
+	//gpio_clear(GPIOH, GPIO1);
 #endif
 
 #if 0
@@ -427,7 +426,7 @@ int32_t port_init(void) {
 	interface_spidev_send(&spi1_rfm.iface, rfm_standby, sizeof(rfm_standby));
 	interface_spidev_deselect(&spi1_rfm.iface);
 
-#if 1
+#if 0
 	/* ICM-42688-P test code */
 	icm42688p_init(&accel2, &spi1_accel2.iface);
 	WaveformSource *source = &accel2.source;
@@ -610,3 +609,20 @@ void port_sleep(TickType_t idle_time) {
 	__asm volatile("cpsie i");
 	systick_enabled = true;
 }
+
+
+void exti9_5_isr(void) {
+	exti_reset_request(EXTI8);
+
+#if 0
+	/* Interrupt occurs at the rising edge, however the time instant
+	 * is alighed to the falling edge (see ublox configuration).
+	 * Interrupt latency in STOP1 mode is somehow variable, we wait
+	 * for the falling edge in a loop instead. */
+	while (gpio_get(GPIOA, GPIO8)) {
+		;
+	}
+#endif
+	gps_ublox_timepulse_handler(&gps);
+}
+
