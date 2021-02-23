@@ -10,7 +10,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <i2c-bus.h>
+#include <interfaces/i2c-bus.h>
+#include <interfaces/clock.h>
 
 
 enum gps_ublox_mode {
@@ -23,6 +24,11 @@ typedef enum {
 	GPS_UBLOX_RET_FAILED = -1,
 } gps_ublox_ret_t;
 
+enum gps_ublox_proto {
+	GPS_UBLOX_PROTO_UBX = 0x01,
+	GPS_UBLOX_PROTO_NMEA = 0x02,
+};
+
 typedef struct {
 	I2cBus *i2c;
 	uint8_t i2c_addr;
@@ -31,7 +37,13 @@ typedef struct {
 	volatile bool rx_can_run;
 	volatile bool rx_running;
 
-	volatile uint16_t lptim_last;
+	Clock *measure_clock;
+	volatile struct timespec measure_time;
+	
+	volatile struct timespec timepulse_time;
+	volatile int32_t timepulse_accuracy;
+	volatile uint32_t timepulse_count;
+
 
 } GpsUblox;
 
