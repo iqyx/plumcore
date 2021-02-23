@@ -33,6 +33,7 @@
 
 #include "module.h"
 #include "interfaces/clock/descriptor.h"
+#include "interfaces/clock.h"
 
 
 typedef enum {
@@ -47,11 +48,14 @@ typedef struct {
 	bool initialized;
 	IClock iface;
 	bool lse_available;
+	Clock clock;
 } Stm32Rtc;
 
 
 stm32_rtc_ret_t stm32_rtc_init(Stm32Rtc *self);
 stm32_rtc_ret_t stm32_rtc_free(Stm32Rtc *self);
-stm32_rtc_ret_t stm32_rtc_get(Stm32Rtc *self, struct timespec *time);
-stm32_rtc_ret_t stm32_rtc_set(Stm32Rtc *self, struct timespec *time);
+
+clock_ret_t stm32_rtc_get(Stm32Rtc *self, struct timespec *time);
+clock_ret_t stm32_rtc_set(Stm32Rtc *self, const struct timespec *time);
+clock_ret_t stm32_rtc_shift(Stm32Rtc *self, int32_t time_ns);
 
