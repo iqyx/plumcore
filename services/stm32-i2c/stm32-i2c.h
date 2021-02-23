@@ -12,6 +12,10 @@
 #include <stdbool.h>
 #include <i2c-bus.h>
 
+#include "FreeRTOS.h"
+#include "semphr.h"
+#include "task.h"
+
 
 typedef enum {
 	STM32_I2C_RET_OK = 0,
@@ -22,6 +26,8 @@ typedef struct {
 	I2cBus bus;
 	uint32_t locm3_i2c;
 	uint32_t timeout;
+	SemaphoreHandle_t bus_lock;
+	
 } Stm32I2c;
 
 

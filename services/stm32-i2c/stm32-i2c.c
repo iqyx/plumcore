@@ -12,6 +12,7 @@
 
 #include "config.h"
 #include "FreeRTOS.h"
+#include "semphr.h"
 #include "task.h"
 #include "u_log.h"
 #include "u_assert.h"
@@ -39,7 +40,12 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 
 
 i2c_bus_ret_t stm32_i2c_transfer(Stm32I2c *self, uint8_t addr, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen) {
-	i2c_transfer7(self->locm3_i2c, addr, (uint8_t *)txdata, txlen, rxdata, rxlen);
+	if (xSemaphoreTake(self->bus_lock, portMAX_DELAY) == pdTRUE) {
+		i2c_transfer7(self->locm3_i2c, addr, (uint8_t *)txdata, txlen, rxdata, rxlen);
+		xSemaphoreGive(self->bus_lock);
+	} else {
+		return I2C_BUS_RET_FAILED;
+	}
 	return I2C_BUS_RET_OK;
 }
 
@@ -49,17 +55,23 @@ stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, uint32_t locm3_i2c) {
 	self->locm3_i2c = locm3_i2c;
 	self->timeout = 1000;
 
+	self->bus_lock = xSemaphoreCreateMutex();
+	if (self->bus_lock == NULL) {
+		return STM32_I2C_RET_FAILED;
+	}
+
 	i2c_bus_init(&self->bus);
 	self->bus.parent = self;
 	self->bus.transfer = (typeof(self->bus.transfer))stm32_i2c_transfer;
 
 	stm32_i2c_bus_init(self);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("bus initialized"));
 		
 	return STM32_I2C_RET_OK;
 }
 
 
 stm32_i2c_ret_t stm32_i2c_free(Stm32I2c *self) {
-	(void)self;
+	vSemaphoreDelete(self->bus_lock);
 	return STM32_I2C_RET_OK;
 }
