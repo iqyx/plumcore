@@ -22,6 +22,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "version.h"
 #include "config.h"
 #include "module_led.h"
@@ -63,6 +64,8 @@ int32_t port_init(void);
 void port_task_timer_init(void);
 uint32_t port_task_timer_get_value(void);
 uint32_t lptim_get_extended(void);
+
+void port_gps_power(bool en);
 
 
 

@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
@@ -167,6 +168,11 @@ int32_t port_early_init(void) {
 }
 
 
+static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
+	return (time1->tv_sec * 1000000000UL + time1->tv_nsec)
+	     - (time2->tv_sec * 1000000000UL + time2->tv_nsec);
+}
+
 int32_t port_init(void) {
 	/* ADXL power off, GPS power off. */
 	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0 | GPIO1);
@@ -309,32 +315,125 @@ int32_t port_init(void) {
 	stm32_i2c_init(&i2c1, I2C1);
 
 	/* BQ35100 test */
-	//bq35100_init(&bq35100, &i2c1.bus);
+	bq35100_init(&bq35100, &i2c1.bus);
+	while (false) {
+		u_log(system_log, LOG_TYPE_DEBUG, "bat U = %u mV, I = %d mA", bq35100_voltage(&bq35100), bq35100_current(&bq35100));
+		vTaskDelay(1000);
+	}
+
+
 #endif
 
 #if 1
-	/* 1PPS */
-	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO8);
+	gps_ublox_init(&gps);
+	gps_ublox_set_i2c_transport(&gps, &i2c1.bus, 0x42);
+	gps.measure_clock = &rtc.clock;
+	//gps_ublox_mode(&gps, GPS_UBLOX_MODE_BACKUP);
 
+	/* Enable 1PPS interrupt when the driver is properly initialized. */
+	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO8);
 	nvic_enable_irq(NVIC_EXTI9_5_IRQ);
 	nvic_set_priority(NVIC_EXTI9_5_IRQ, 5 * 16);
 	exti_select_source(EXTI8, GPIOA);
-	exti_set_trigger(EXTI8, EXTI_TRIGGER_FALLING);
-	exti_enable_request(EXTI8);
+	exti_set_trigger(EXTI8, EXTI_TRIGGER_RISING);
 
 
-	/* GPS test, power on */
-	gpio_set(GPIOH, GPIO1);
-	vTaskDelay(100);
-	gps_ublox_init(&gps);
-	gps_ublox_set_i2c_transport(&gps, &i2c1.bus, 0x42);
-	//gps_ublox_mode(&gps, GPS_UBLOX_MODE_BACKUP);
-	gps_ublox_start(&gps);
-	/* Power off */
-	//gpio_clear(GPIOH, GPIO1);
+	struct timespec last_measure_time = {0};
+	struct timespec last_timepulse_time = {0};
+
+	while (true) {
+		port_gps_power(true);
+		gps_ublox_start(&gps);
+		exti_enable_request(EXTI8);
+		uint32_t i = 100;
+		while (true) {
+			vTaskDelay(1000);
+
+			/* Read all */
+			struct timespec measure_time = {0};
+			struct timespec timepulse_time = {0};
+			int32_t timepulse_accuracy = 0;
+			uint32_t timepulse_count = 0;
+			UBaseType_t cs = taskENTER_CRITICAL_FROM_ISR();
+			measure_time = gps.measure_time;
+			timepulse_time = gps.timepulse_time;
+			timepulse_accuracy = gps.timepulse_accuracy;
+			timepulse_count = gps.timepulse_count;
+			taskEXIT_CRITICAL_FROM_ISR(cs);
+		
+			
+			// u_log(system_log, LOG_TYPE_DEBUG, "timepulse accuracy %d ns", timepulse_accuracy);
+			// u_log(system_log, LOG_TYPE_DEBUG, "bat U = %u mV, I = %d mA", bq35100_voltage(&bq35100), bq35100_current(&bq35100));
+			i--;
+			if (!i) {
+				u_log(system_log, LOG_TYPE_ERROR, "cannot achieve target timepulse accuracy < 500 ns (current %lu ns), timeout", timepulse_accuracy);
+				break;
+			}
+			if (timepulse_accuracy >= 0 && timepulse_accuracy < 500 && timepulse_count > 1) {
+				u_log(system_log, LOG_TYPE_INFO, "achieved timepulse accuracy < 500 ns (%lu ns), count %lu", timepulse_accuracy, timepulse_count);
+				
+				/* todo */
+				char buf[30] = {0};
+
+				struct tm tm = {0};
+				gmtime_r(&timepulse_time.tv_sec, &tm);
+				strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.", &tm);
+				u_log(system_log, LOG_TYPE_INFO, "timepulse time %s%09luZ", buf, timepulse_time.tv_nsec);
+				
+				gmtime_r(&measure_time.tv_sec, &tm);
+				strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.", &tm);
+				u_log(system_log, LOG_TYPE_INFO, "measured RTC time %s%09luZ", buf, measure_time.tv_nsec);
+
+				int32_t diff_us = timespec_diff(&timepulse_time, &measure_time) / 1000LL;
+				u_log(system_log, LOG_TYPE_DEBUG, "time difference %ld us", diff_us);
+
+				#if 1
+				if (abs(diff_us) > 2000000L) {
+					u_log(system_log, LOG_TYPE_INFO, "step time change");
+					rtc.clock.set(rtc.clock.parent, &timepulse_time);
+					/* Do not break, do a shift to set the clock precisely. */
+					// break;
+				} else if (abs(diff_us) > 1000L) {
+					if (rtc.clock.shift) {
+						rtc.clock.shift(rtc.clock.parent, diff_us * 1000L);
+					}
+					last_measure_time = (struct timespec){0};
+					last_timepulse_time = (struct timespec){0};
+				} else {
+
+					/* Correct the speed. */
+					if (last_measure_time.tv_sec) {
+						int64_t diff_measure_time_ns = timespec_diff(&measure_time, &last_measure_time);
+						int64_t diff_timepulse_time_ns = timespec_diff(&timepulse_time, &last_timepulse_time);
+						int64_t correct_ppb = (diff_timepulse_time_ns - diff_measure_time_ns) * 1000LL / (diff_timepulse_time_ns / 1000000LL);
+						u_log(system_log, LOG_TYPE_INFO, "diff_measured = %ld ns, diff_timepulse = %ld ns, correct_by = %ld ppb", (int32_t)diff_measure_time_ns, (int32_t)diff_timepulse_time_ns, (int32_t)correct_ppb);
+
+						last_measure_time = measure_time;
+						last_timepulse_time = timepulse_time;
+						break;
+					}
+					last_measure_time = measure_time;
+					last_timepulse_time = timepulse_time;
+				}
+
+
+				#endif
+			}
+		}
+		exti_disable_request(EXTI8);
+		gps_ublox_stop(&gps);
+		port_gps_power(false);
+		vTaskDelay(600000);
+
+		// if (gps.lptim_arr_adjust != 0) {
+			// u_log(system_log, LOG_TYPE_DEBUG, "lptim_adjust = %d, lptim_arr_adjust = %d, accumulator = %d", gps.lptim_adjust, gps.lptim_arr_adjust, gps.lptim_accumulator);
+		// }
+		// u_log(system_log, LOG_TYPE_DEBUG, "cas %lu", gps.last_ns);
+		// vTaskDelay(1000);
+	}
+
 #endif
 
-#if 0
 	/* SD_SEL */
 	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO5);
 	gpio_clear(GPIOA, GPIO5);
@@ -342,6 +441,7 @@ int32_t port_init(void) {
 	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO3);
 	gpio_clear(GPIOH, GPIO3);
 
+#if 0
 	/* SPI2 */
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
 	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
@@ -368,6 +468,7 @@ int32_t port_init(void) {
 		spi_sd_init(&sd, &spi2_sd.iface);
 
 		/* Write some random stuff. */
+		#if 1
 		for (size_t i = 0; i < 4; i++) {
 			u_log(system_log, LOG_TYPE_DEBUG, "wr block %d", i);
 			vTaskDelay(10);
@@ -376,6 +477,7 @@ int32_t port_init(void) {
 				u_log(system_log, LOG_TYPE_DEBUG, "error");
 			}
 		}
+		#endif
 		/* Wait for the SD card to finish all tasks (hopefully). */
 		vTaskDelay(1000);
 
@@ -456,6 +558,16 @@ int32_t port_init(void) {
 #endif
 
 	return PORT_INIT_OK;
+}
+
+
+void port_gps_power(bool en) {
+	if (en) {
+		gpio_set(GPIOH, GPIO1);
+		vTaskDelay(100);
+	} else {
+		gpio_clear(GPIOH, GPIO1);
+	}
 }
 
 
