@@ -1,5 +1,13 @@
 language: c
 sudo: false
+dist: bionic
+addons:
+  apt:
+    packages:
+    - protobuf-compiler
+    - python3-venv
+    - python3-pip
+
 script:
   - git fetch --depth=1
   - git fetch --unshallow
@@ -20,18 +28,15 @@ cache:
     - $HOME/gcc-arm-none-eabi-10-2020-q4-major
 
 before_install:
-  - export PATH=$HOME/.local/bin:$HOME/protobuf/bin:$PATH
-  - python3 -m venv ~/.venv/plumcore
-  - source ~/.venv/plumcore/bin/activate
-
-install:
-  - apt install protobuf-compiler
-  - python3 -m pip install -r requirements.txt
+  - sudo update-alternatives --install /usr/bin/python python /usr/bin/python3 1
   - export GCC_DIR=$HOME/gcc-arm-none-eabi-10-2020-q4-major
   - export GCC_ARCHIVE=$HOME/gcc-arm-none-eabi-10-2020-q4-major-linux.tar.bz2
   - export GCC_URL=https://developer.arm.com/-/media/Files/downloads/gnu-rm/10-2020q4/gcc-arm-none-eabi-10-2020-q4-major-x86_64-linux.tar.bz2
   - if [ ! -e $GCC_DIR/bin/arm-none-eabi-gcc ]; then wget $GCC_URL -O $GCC_ARCHIVE; tar xfj $GCC_ARCHIVE -C $HOME; fi
   - export PATH=$PATH:$GCC_DIR/bin
+  - python3 -m venv ~/.venv/plumcore
+  - source ~/.venv/plumcore/bin/activate
+  - python3 -m pip install -r requirements.txt
 
 deploy:
   provider: releases

@@ -659,3 +659,11 @@ void usart2_isr(void) {
 		exti_enable_request(EXTI15);
 	}
 #endif
+
+
+void vApplicationIdleHook(void);
+void vApplicationIdleHook(void) {
+	__asm volatile("dsb");
+	__asm volatile("wfi");
+	__asm volatile("isb");
+}
