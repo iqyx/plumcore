@@ -1,0 +1,10 @@
+config APP1
+	bool "App1 test application"
+
+menu "App1 application configuration"
+ 	depends on APP1
+
+	config APP1_VAR1
+		bool "app1 variable"
+
+endmenu

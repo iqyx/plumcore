@@ -1,0 +1,62 @@
+config HOSTNAME
+	string "System host name"
+	default "plumcore"
+
+config DEFAULT_MQTT_CONNECTION
+	bool "Create a default MQTT connection using first TCP/IP interface available"
+	select SERVICE_MQTT_TCPIP
+	default y
+
+if DEFAULT_MQTT_CONNECTION
+	config DEFAULT_MQTT_USE_HOSTNAME_ID
+		bool "Use hostname as a client ID"
+		default y
+
+	config DEFAULT_MQTT_CUSTOM_ID
+		string "Custom client ID"
+		default "unconfigured-id"
+		depends on !DEFAULT_MQTT_USE_HOSTNAME_ID
+
+	config DEFAULT_MQTT_PING_INTERVAL
+		int "MQTT ping interval"
+		default 60000
+
+	config DEFAULT_MQTT_BROKER_IP
+		string "MQTT broker IP address"
+		default "10.10.10.10"
+
+	config DEFAULT_MQTT_BROKER_PORT
+		int "MQTT broker TCP port"
+		default 1883
+endif
+
+config DEFAULT_CONSOLE_CLI
+	bool "Start default CLI on a system console"
+	select SERVICE_CLI
+	select SERVICE_LOGINMGR
+	default yes
+
+	config CONFIG_LOAD_FILE
+		bool "Load startup configuration from a file"
+		default yes
+
+		config CONFIG_LOAD_FILE_FSNAME
+			depends on CONFIG_LOAD_FILE
+			string "Name of the filesystem"
+			default "system"
+
+		config CONFIG_LOAD_FILE_FILENAME
+			depends on CONFIG_LOAD_FILE
+			string "File name"
+			default "default.cfg"
+
+config DEFAULT_PLOG_SENSOR_UPLOAD
+	bool "Start default PLOG sensor upload service"
+	select DEFAULT_PLOG_ROUTER
+	select SERVICE_PLOG_SENSOR_UPLOAD
+	default yes
+
+config DEFAULT_PLOG_ROUTER
+	bool "Start default PLOG router service"
+	select SERVICE_PLOG_ROUTER
+	default yes

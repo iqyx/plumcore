@@ -1,0 +1,268 @@
+menu "Low-level platform drivers"
+
+	menu "Drivers for STM32 microcontrollers"
+		config SERVICE_STM32_WATCHDOG
+			bool "STM32 watchdog support"
+			default y
+
+		config SERVICE_STM32_RTC
+			bool "STM32 RTC clock support"
+			default y
+
+		config SERVICE_STM32_ADC
+			bool "STM32 ADC support"
+			default y
+
+		config SERVICE_STM32_TIMER_CAPSENSE
+			bool "Support capacitive sensing using STM32 timer peripheral"
+			default n
+
+		config SERVICE_STM32_SYSTEM_CLOCK
+			bool "STM32 system clock implemented using STM32 timer peripheral"
+			default y
+
+		config SERVICE_STM32_I2C_SENSORS
+			bool "Support for some basic I2C sensors using STM32 I2C peripheral"
+			default y
+
+		config SERVICE_UXB_MASTER
+			bool "Support master role on the UXB bus using STM32 SPI peripheral"
+			select LIB_LIBUXB
+			select LIB_NANOPB
+			default y
+
+		config SERVICE_STM32_I2C_MASTER
+			bool "STM32 I2C bus driver in master mode"
+			default y
+	endmenu
+endmenu
+
+menu "UXB extension bus interface drivers"
+	depends on SERVICE_UXB_MASTER
+
+	config SERVICE_UXB_SOLAR_CHARGER
+		bool "UXB solar-charger interface support"
+		default y
+
+	config SERVICE_UXB_LDET
+		bool "UXB ldet interface support (lightning detector samplers)"
+		default y
+
+	config SERVICE_UXB_WAVEFORM_SOURCE
+		bool "UXB waveform-source interface support"
+		default y
+
+	config SERVICE_UXB_CAN
+		bool "UXB can interface support"
+		default y
+endmenu
+
+menu "High level device drivers"
+	config SERVICE_RADIO_RFM69
+		bool "SX1231/RFM69 sub-1GHz radio transceiver support"
+		default n
+
+	config SERVICE_SENSOR_OVER_CAN
+		bool "Support for attaching sensors over CAN bus"
+		default y
+
+	config SERVICE_RADIO_AX5243
+		bool "OnSemi AX5243 sub-1GHz radio transceiver support"
+		default n
+
+	config SERVICE_GSM_QUECTEL
+		bool "Support for Quectel GSM modems"
+		default y
+
+	config SERVICE_SPI_FLASH
+		bool "SPI NOR flash memory driver"
+		default y
+
+	config SERVICE_SPI_SD
+		bool "SD/MMC card driver using SPI interface"
+		default n
+
+	config SERVICE_ADC_SENSOR
+		bool "Sensor device using ADC"
+		default y
+		select SERVICE_STM32_ADC
+
+	config SERVICE_INERTIAL_ICM42688P
+		bool "TDK InvenSense ICM-42688-P inertial 6-DOF sensor"
+		default n
+
+	config ICM42688P_DETECT_REPEAT
+		depends on SERVICE_INERTIAL_ICM42688P
+		bool "Try to repeat detection if it fails"
+		default y
+
+	config SERVICE_BQ35100
+		bool "TI BQ35100 primary battery gauge"
+		default n
+
+	config SERVICE_GPS_UBLOX
+		depends on SERVICE_STM32_I2C_MASTER
+		bool "u-blox GNSS receiver driver"
+		default n
+endmenu
+
+menu "Filesystem and memory management services"
+	config SERVICE_FS_SPIFFS
+		bool "SPIFFS NOR flash memory filesystem service"
+		default y
+		select LIB_SPIFFS
+
+endmenu
+
+menu "System services"
+	config SERVICE_PLOG_ROUTER
+		bool "PLOG Message router service"
+		default y
+
+	config SERVICE_PLOCATOR
+		bool "System service locator service"
+		default y
+endmenu
+
+menu "Data manipulation/evaluation/processing services"
+	config SERVICE_DATA_PROCESS
+		bool "data-process framework for flow-graph like data processing"
+		default n
+
+	config SERVICE_USART_LOGGER
+		bool "USART logger service"
+		default y
+
+	config SERVICE_PLOG_PACKAGER
+		bool "Service for packaging PLOG messages into compressed blobs"
+		default y
+endmenu
+
+menu "User interface services"
+	config SERVICE_CLI
+		bool "Command line interface"
+		default y
+		select LIB_TREECLI
+		select LIB_LINEEDIT
+
+	menu "Command line interface configuration"
+		depends on SERVICE_CLI
+
+		config SERVICE_CLI_SERVICE_DATA_PROCESS
+			bool "Data-process service configuration"
+			depends on SERVICE_DATA_PROCESS
+			default y
+
+		config SERVICE_CLI_DEVICE_DRIVER_SENSOR_OVER_CAN
+			bool "/device/driver/sensor-over-can driver configuration submenu"
+			depends on SERVICE_SENSOR_OVER_CAN
+			default y
+
+		config SERVICE_CLI_DEVICE_SENSOR
+			bool "/device/sensor submenu"
+			default y
+
+		config SERVICE_CLI_DEVICE_UXB
+			bool "/device/uxb submenu"
+			default y
+			depends on SERVICE_UXB_MASTER
+
+		config SERVICE_CLI_DEVICE_CAN
+			bool "/device/can submenu"
+			default y
+
+		config SERVICE_CLI_SERVICE_PLOG_ROUTER
+			bool "PLOG-router service configuration"
+			default y
+			depends on SERVICE_PLOG_ROUTER
+
+		config SERVICE_CLI_SERVICE_PLOG_RELAY
+			bool "PLOG-relay service configuration"
+			default y
+			depends on SERVICE_PLOG_RELAY
+
+		config SERVICE_CLI_DEVICE_CLOCK
+			bool "/device/clock submenu"
+			default y
+
+		config SERVICE_CLI_SYSTEM_BOOTLOADER
+			bool "/system/bootloader bootloader configuration submenu"
+			default y
+	endmenu
+
+	config SERVICE_LOGINMGR
+		bool "Console login manager"
+		default n
+		select LIB_LINEEDIT
+endmenu
+
+menu "Communication server/client services"
+	menu "MQTT client/server services"
+		config SERVICE_MQTT_FILE_SERVER
+			bool "MQTT File server service"
+			default y
+
+		config SERVICE_STREAM_OVER_MQTT
+			bool "Support for accessing stream interfaces using MQTT protocol"
+			default y
+
+		config SERVICE_MQTT_SENSOR_UPLOAD
+			bool "Upload sensor data over MQTT"
+			default y
+
+		config SERVICE_MQTT_FILE_DOWNLOAD
+			bool "Download files published on the MQTT broker"
+			default y
+	endmenu
+
+	menu "PLOG message queue publish/subscribe services"
+		config SERVICE_PLOG_SENSOR_UPLOAD
+			bool "Service for uploading sensor data over the PLOG message router"
+			default y
+
+		config SERVICE_PLOG_RELAY
+			bool "Relay data from/to PLOG message router to/from various interfaces"
+			default y
+	endmenu
+
+	menu "Services implemented over raw UDP/TCP protocols"
+		config SERVICE_TCPIP_SENSOR_UPLOAD
+			bool "Upload sensor data as text over a raw TCP connection"
+			default y
+	endmenu
+endmenu
+
+menu "Communication protocols"
+	menu "Interface MAC protocols"
+		config SERVICE_RADIO_MAC_SIMPLE
+			bool "Simple radio MAC protocol support"
+			default y
+	endmenu
+
+	menu "Link-layer protocols"
+
+	endmenu
+
+	menu "Networking protocols"
+
+	endmenu
+
+	menu "Presentation layer protocols"
+
+	endmenu
+
+	menu "Application layer protocols"
+		config SERVICE_MQTT_TCPIP
+			bool "MQTT protocol support over a raw TCP connection"
+			select LIB_WOLFMQTT
+			default y
+	endmenu
+endmenu
+
+menu "Language interpreters"
+	config SERVICE_SCRIPT_ES
+		bool "ECMAScript language interpreter (Duktape)"
+		default n
+		select LIB_DUKTAPE
+
+endmenu
