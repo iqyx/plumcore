@@ -1,7 +1,7 @@
 /*
- * STM32 internal RTC clock driver service.
+ * I2C bus interface
  *
- * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,31 +31,24 @@
 #include <stdbool.h>
 #include <time.h>
 
-#include "module.h"
-#include "interfaces/clock/descriptor.h"
-#include "interfaces/clock.h"
+#include "interface.h"
 
 
 typedef enum {
-	STM32_RTC_RET_OK = 0,
-	STM32_RTC_RET_FAILED,
-	STM32_RTC_RET_NULL,
-} stm32_rtc_ret_t;
-
+	I2C_BUS_RET_OK = 0,
+	I2C_BUS_RET_FAILED,
+} i2c_bus_ret_t;
 
 typedef struct {
-	Module module;
-	bool initialized;
-	IClock iface;
-	bool lse_available;
-	Clock clock;
-} Stm32Rtc;
+	Interface interface;
+
+	void *parent;
+	i2c_bus_ret_t (*transfer)(void *parent, uint8_t addr, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen);
+} I2cBus;
 
 
-stm32_rtc_ret_t stm32_rtc_init(Stm32Rtc *self);
-stm32_rtc_ret_t stm32_rtc_free(Stm32Rtc *self);
+i2c_bus_ret_t i2c_bus_init(I2cBus *self);
+i2c_bus_ret_t i2c_bus_free(I2cBus *self);
 
-clock_ret_t stm32_rtc_get(Stm32Rtc *self, struct timespec *time);
-clock_ret_t stm32_rtc_set(Stm32Rtc *self, const struct timespec *time);
-clock_ret_t stm32_rtc_shift(Stm32Rtc *self, int32_t time_ns);
+
 

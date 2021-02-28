@@ -1,7 +1,7 @@
 /*
- * STM32 internal RTC clock driver service.
+ * Waveform source interface
  *
- * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,31 +31,43 @@
 #include <stdbool.h>
 #include <time.h>
 
-#include "module.h"
-#include "interfaces/clock/descriptor.h"
-#include "interfaces/clock.h"
+#include "interface.h"
 
 
 typedef enum {
-	STM32_RTC_RET_OK = 0,
-	STM32_RTC_RET_FAILED,
-	STM32_RTC_RET_NULL,
-} stm32_rtc_ret_t;
+	WAVEFORM_SOURCE_RET_OK = 0,
+	WAVEFORM_SOURCE_RET_FAILED,
+} waveform_source_ret_t;
 
+/* All formats are in native endianness. */
+enum waveform_source_format {
+	WAVEFORM_SOURCE_FORMAT_U8,
+	WAVEFORM_SOURCE_FORMAT_S8,
+	WAVEFORM_SOURCE_FORMAT_U16,
+	WAVEFORM_SOURCE_FORMAT_S16,
+	WAVEFORM_SOURCE_FORMAT_U32,
+	WAVEFORM_SOURCE_FORMAT_S32,
+	WAVEFORM_SOURCE_FORMAT_FLOAT,
+};
 
 typedef struct {
-	Module module;
-	bool initialized;
-	IClock iface;
-	bool lse_available;
-	Clock clock;
-} Stm32Rtc;
+	Interface interface;
+
+	void *parent;
+	waveform_source_ret_t (*start)(void *parent);
+	waveform_source_ret_t (*stop)(void *parent);
+	waveform_source_ret_t (*read)(void *parent, void *data, size_t sample_count, size_t *read);
+	waveform_source_ret_t (*set_format)(void *parent, enum waveform_source_format format, uint32_t channels);
+	waveform_source_ret_t (*get_format)(void *parent, enum waveform_source_format *format, uint32_t *channels);
+	waveform_source_ret_t (*set_sample_rate)(void *parent, float sample_rate_Hz);
+	waveform_source_ret_t (*get_sample_rate)(void *parent, float *sample_rate_Hz);
+	
+
+} WaveformSource;
 
 
-stm32_rtc_ret_t stm32_rtc_init(Stm32Rtc *self);
-stm32_rtc_ret_t stm32_rtc_free(Stm32Rtc *self);
+waveform_source_ret_t waveform_source_init(WaveformSource *self);
+waveform_source_ret_t waveform_source_free(WaveformSource *self);
 
-clock_ret_t stm32_rtc_get(Stm32Rtc *self, struct timespec *time);
-clock_ret_t stm32_rtc_set(Stm32Rtc *self, const struct timespec *time);
-clock_ret_t stm32_rtc_shift(Stm32Rtc *self, int32_t time_ns);
+
 

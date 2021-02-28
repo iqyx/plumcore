@@ -163,13 +163,14 @@ env.Append(LINKFLAGS = [
 
 env.Append(CFLAGS = [
 	"-Os",
-	"-g",
+	"-g3",
+	"-gdwarf-4",
 	"-fno-common",
 	"-fdiagnostics-color=always",
 	"-ffunction-sections",
 	"-fdata-sections",
 	"-fdiagnostics-color=always",
-	"--std=gnu99",
+	"--std=gnu11",
 	"-Wall",
 	"-Wextra",
 	"-pedantic",
@@ -192,6 +193,7 @@ env.Append(CFLAGS = [
 	"-Wredundant-decls",
 	"-Wmissing-prototypes",
 	"-Wstrict-prototypes",
+	"-Wno-expansion-to-defined",
 ])
 
 env.Append(LIBS = [

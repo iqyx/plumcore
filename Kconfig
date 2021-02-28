@@ -21,7 +21,48 @@ menu "Target configuration"
 
 		config PORT_NWDAQ_G201
 			bool "nwDaq-G201"
+
+		config PORT_INCL_G104MF
+			bool "incl-g104mf"
+			select SERVICE_STM32_RTC
+			select SERVICE_STM32_SYSTEM_CLOCK
+			select SERVICE_PLOCATOR
+
 	endchoice
+
+	if PORT_INCL_G104MF
+		config PORT_NAME
+			string
+			default "incl-g104mf"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+
+		choice
+			prompt "Clock speed"
+
+			config INCL_G104MF_CLOCK_80MHZ
+				bool "80 MHz (MSI, PLL)"
+
+			config INCL_G104MF_CLOCK_DEFAULT
+				bool "4 MHz (MSI)"
+		endchoice
+
+		config INCL_G104MF_ENABLE_LEDS
+			bool "Enable LEDs (disables SWD debug!)"
+			default n
+
+		config INCL_G104MF_ENABLE_WATCHDOG
+			bool "Enable watchdog"
+			select SERVICE_STM32_WATCHDOG
+			default y
+
+	endif
 
 	if PORT_PLUMPOT_CELLULAR
 		config PORT_NAME
@@ -332,6 +373,10 @@ menu "Enable services"
 				select LIB_LIBUXB
 				select LIB_NANOPB
 				default y
+
+			config SERVICE_STM32_I2C_MASTER
+				bool "STM32 I2C bus driver in master mode"
+				default y
 		endmenu
 	endmenu
 
@@ -376,10 +421,32 @@ menu "Enable services"
 			bool "SPI NOR flash memory driver"
 			default y
 
+		config SERVICE_SPI_SD
+			bool "SD/MMC card driver using SPI interface"
+			default n
+
 		config SERVICE_ADC_SENSOR
 			bool "Sensor device using ADC"
 			default y
 			select SERVICE_STM32_ADC
+
+		config SERVICE_INERTIAL_ICM42688P
+			bool "TDK InvenSense ICM-42688-P inertial 6-DOF sensor"
+			default n
+
+		config ICM42688P_DETECT_REPEAT
+			depends on SERVICE_INERTIAL_ICM42688P
+			bool "Try to repeat detection if it fails"
+			default y
+
+		config SERVICE_BQ35100
+			bool "TI BQ35100 primary battery gauge"
+			default n
+
+		config SERVICE_GPS_UBLOX
+			depends on SERVICE_STM32_I2C_MASTER
+			bool "u-blox GNSS receiver driver"
+			default n
 	endmenu
 
 	menu "Filesystem and memory management services"
