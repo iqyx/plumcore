@@ -1,0 +1,60 @@
+config FW_IMAGE_ELF
+	bool "Generate ELF image"
+
+menu "ELF image configuration"
+	depends on FW_IMAGE_ELF
+
+	config ELF_IMAGE_TO_BIN
+		bool "Flatten the image to a *.bin"
+		default y
+
+	config ELF_IMAGE_LOAD_ADDRESS
+		hex "Load address of the generated image (in the internal flash memory)"
+		default PORT_FLASH_ADDRESS
+
+	config RELOCATE_VECTOR_TABLE
+		depends on ELF_IMAGE_LOAD_ADDRESS != PORT_FLASH_ADDRESS
+		bool "Relocate the vector table"
+		default y
+
+	config VECTOR_TABLE_ADDRESS
+		# visible n
+		hex
+		default ELF_IMAGE_LOAD_ADDRESS
+endmenu
+
+
+config FW_IMAGE_UBLOAD
+	bool "Generate uBLoad firmware image (*.ubf)"
+
+menu "uBLoad firmware image configuration"
+	depends on FW_IMAGE_UBLOAD
+
+	config FW_IMAGE_LOAD_ADDRESS
+		depends on FW_IMAGE_UBLOAD_PIC = n
+		hex "Load address of the firmware image"
+		default PORT_FLASH_ADDRESS
+
+	# uBLoad images does not do vector table relocation.
+	# Relocation is done by the bootloader instead.
+
+	config FW_IMAGE_SIGN
+		bool "Sign the image"
+		default y
+		select FW_IMAGE_HASH
+
+	config FW_IMAGE_SIGN_KEY
+		depends on FW_IMAGE_SIGN
+		string "Signing key"
+		default "default_fw.key"
+
+	config FW_IMAGE_SIGN_KEY_GENERATE
+		depends on FW_IMAGE_SIGN
+		bool "Generate a random key pair if no key is found"
+		default y
+
+	config FW_IMAGE_HASH
+		bool "Append hash for firmware integrity checking"
+		default y
+endmenu
+

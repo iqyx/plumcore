@@ -1,0 +1,8 @@
+config PORT_PLATFORM_ARM_CM4F
+	bool
+
+menu "ARM Cortex M4F platform configuration"
+	depends on PORT_PLATFORM_ARM_CM4F
+	
+	# Placeholder
+endmenu

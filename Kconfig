@@ -1,701 +1,103 @@
 mainmenu "plumCore configuration"
 
-menu "Target configuration"
+choice
+	prompt "Target board/device (port configuration)"
+	source "ports/*/Kconfig"
+endchoice
+
+
+# Platform configuration determines *how* is the framework code compiled
+# (eg. instruction set if multiple are supported, endianness, whether
+# using FPU/soft-fpu..)
+source "platforms/*/Kconfig"
+
+
+menu "Microkernel (scheduler & IPC) configuration"
 	choice
-		prompt "Select hardware port to build"
+		prompt "Select the scheduler and IPC implementation to use as a microkernel"
 
-		config PORT_PLUMPOT_CELLULAR
-			bool "plumpot-cellular"
-			select SERVICE_STM32_RTC
-			select SERVICE_STM32_SYSTEM_CLOCK
-			select SERVICE_PLOCATOR
+		config KERNEL_FREERTOS
+			bool "FreeRTOS"
 
-		config PORT_PLUMPOT_CELLULAR_BOOTLOADER
-			bool "plumpot-cellular-bootloader"
-
-		config PORT_NUCLEO_F411RE
-			bool "STM32 Nucleo-F411RE"
-
-		config PORT_QNODE4
-			bool "qNode4 testing platform"
-
-		config PORT_NWDAQ_G201
-			bool "nwDaq-G201"
-
-		config PORT_INCL_G104MF
-			bool "incl-g104mf"
-			select SERVICE_STM32_RTC
-			select SERVICE_STM32_SYSTEM_CLOCK
-			select SERVICE_PLOCATOR
-
+		config KERNEL_CMRX
+			bool "CMRX"
 	endchoice
 
-	if PORT_INCL_G104MF
-		config PORT_NAME
-			string
-			default "incl-g104mf"
-
-		config PLATFORM_NAME
-			string
-			default "cortex-m4f"
-
-		config PORT_FLASH_ADDRESS
-			hex
-			default "0x08000000"
-
-		choice
-			prompt "Clock speed"
-
-			config INCL_G104MF_CLOCK_80MHZ
-				bool "80 MHz (MSI, PLL)"
-
-			config INCL_G104MF_CLOCK_DEFAULT
-				bool "4 MHz (MSI)"
-		endchoice
-
-		config INCL_G104MF_ENABLE_LEDS
-			bool "Enable LEDs (disables SWD debug!)"
-			default n
-
-		config INCL_G104MF_ENABLE_WATCHDOG
-			bool "Enable watchdog"
-			select SERVICE_STM32_WATCHDOG
-			default y
-
-	endif
-
-	if PORT_PLUMPOT_CELLULAR
-		config PORT_NAME
-			string
-			default "plumpot-cellular"
-
-		config PLATFORM_NAME
-			string
-			default "cortex-m4f"
-
-		config PORT_FLASH_ADDRESS
-			hex
-			default "0x08000000"
-
-		config PLUMPOT_CELLULAR_ENABLE_GSM
-			bool "Enable onboard GSM modem"
-			select SERVICE_GSM_QUECTEL
-			default y
-
-		config PLUMPOT_CELLULAR_MQTT_OVER_GSM
-			bool "Create a default MQTT connection over the GSM modem"
-			select DEFAULT_MQTT_CONNECTION
-			select SERVICE_STREAM_OVER_MQTT
-			select SERVICE_MQTT_SENSOR_UPLOAD
-			select SERVICE_MQTT_FILE_SERVER
-			select PLUMPOT_CELLULAR_ENABLE_GSM
-			default y
-
-		config PLUMPOT_CELLULAR_ENABLE_I2C_SENSORS
-			bool "Enable some I2C sensors on the I2C connector"
-			default n
-			select SERVICE_STM32_I2C_SENSORS
-
-		config PLUMPOT_CELLULAR_ENABLE_WATCHDOG
-			bool "Enable watchdog"
-			select SERVICE_STM32_WATCHDOG
-			default y
-
-		config PLUMPOT_CELLULAR_ENABLE_UXB
-			bool "Enable UXB extension bus"
-			select SERVICE_UXB_MASTER
-			default y
-
-		config PLUMPOT_CELLULAR_UXB_VOLTAGE
-			bool "Measure UXB Vbus voltage"
-			select SERVICE_STM32_ADC
-			default y
-
-		choice
-			prompt "Clock speed"
-
-			config PLUMPOT_CELLULAR_CLOCK_HSE_16MHZ
-				bool "16MHz (HSE, no PLL)"
-
-			config PLUMPOT_CELLULAR_CLOCK_HSE_84MHZ
-				bool "84MHz (HSE, PLL)"
-		endchoice
-
-	endif
-
-	if PORT_NUCLEO_F411RE
-		config NUCLEO_F411RE_RFM69_RADIO
-			bool "RFM69 radio attached"
-			default n
-
-		config PORT_NAME
-			string
-			default "nucleo-f411re"
-
-		config PLATFORM_NAME
-			string
-			default "cortex-m4f"
-	endif
-
-	if PORT_QNODE4
-		config QNODE4_SPI_FLASH
-			bool "SPI flash support"
-			default y
-
-		config QNODE4_I2C_EEPROM
-			bool "I2C EEPROM support"
-			default n
-
-		config QNODE4_I2C_MCP9808
-			bool "MCP9808 temperature sensor support"
-			default n
-
-		config PORT_NAME
-			string
-			default "qnode4"
-
-		config PLATFORM_NAME
-			string
-			default "cortex-m4f"
-	endif
-
-	if PORT_NWDAQ_G201
-		config PORT_NAME
-			string
-			default "nwdaq-g201"
-
-		config PLATFORM_NAME
-			string
-			default "cortex-m4f"
-
-		config NWDAQ_G201_BAT_VOLTAGE
-			bool "Measure battery voltage (create a sensor device)"
-			default y
-			select SERVICE_ADC_SENSOR
-
-		config NWDAQ_G201_ENABLE_FLASH
-			bool "Enable onboard SPI flash memory"
-			default y
-			select SERVICE_SPI_FLASH
-			select SERVICE_FS_SPIFFS
-
-		config NWDAQ_G201_ENABLE_RADIO
-			bool "Enable onboard SX1231 radio transceiver"
-			default y
-			select SERVICE_RADIO_RFM69
-
-		config NWDAQ_G201_ENABLE_LED
-			bool "Enable status LED"
-			default y
-	endif
+	source "microkernel/*.Kconfig"
 endmenu
 
-menu "Firmware images"
 
-	choice
-		prompt "Select image format to build"
+# Services are either board and platform dependent (device drivers)
+# or independent (high level drivers, communication services, etc.).
+# Multiple instances of the same service can be running.
+menu "Service configuration"
+	source "services/Kconfig"
+endmenu
 
-		config FW_IMAGE_ELF
-			bool "Generate ELF image"
 
-		config FW_IMAGE_UBLOAD
-			bool "Generate uBLoad firmware image (*.ubf)"
+# The kernel and services depend on some external libraries.
+# Download and patch them.
+menu "Libraries"
+	source "lib/Kconfig"
+endmenu
 
-	endchoice
 
-	menu "ELF image configuration"
-		depends on FW_IMAGE_ELF
+# System part of the framework contains the whole startup logic.
+# It configures the platform, microkernel, board and lets the application
+# continue with the startup.
+menu "System startup and configuration"
+	source "system/Kconfig"
+endmenu
 
-		config ELF_IMAGE_TO_BIN
-			bool "Flatten the image to a *.bin"
-			default y
 
-		config ELF_IMAGE_LOAD_ADDRESS
-			hex "Load address of the generated image (in the internal flash memory)"
-			default PORT_FLASH_ADDRESS
+# An application determines the particular usecase the device/board
+# is used in. Theres always only a single application at a time
+# running on the device. The application may specify multiple services
+# to be run and even multiple instances of the same service if required.
+# Applications are configurable and may contain optional components.
+choice 
+	prompt "Application configuration"
 
-		config RELOCATE_VECTOR_TABLE
-			depends on ELF_IMAGE_LOAD_ADDRESS != PORT_FLASH_ADDRESS
-			bool "Relocate the vector table"
-			default y
+	config APP_EXTERNAL
+		bool "Application in external directory"
 
-		config VECTOR_TABLE_ADDRESS
-			# visible n
-			hex
-			default ELF_IMAGE_LOAD_ADDRESS
+	menu "External application configuration"
+		depends on APP_EXTERNAL
+		config APP_EXTERNAL_DIR
+			depends on APP_EXTERNAL
+			string "Environment variable containing path to the application"
+			default "PLUMCORE_EXT_APP"
 	endmenu
 
-	menu "uBLoad firmware image configuration"
-		depends on FW_IMAGE_UBLOAD
+	source "applications/*/Kconfig"
+endchoice
 
-		config FW_IMAGE_LOAD_ADDRESS
-			depends on FW_IMAGE_UBLOAD_PIC = n
-			hex "Load address of the firmware image"
-			default PORT_FLASH_ADDRESS
 
-		# uBLoad images does not do vector table relocation.
-		# Relocation is done by the bootloader instead.
-
-		config FW_IMAGE_SIGN
-			bool "Sign the image"
-			default y
-			select FW_IMAGE_HASH
-
-		config FW_IMAGE_SIGN_KEY
-			depends on FW_IMAGE_SIGN
-			string "Signing key"
-			default "default_fw.key"
-
-		config FW_IMAGE_SIGN_KEY_GENERATE
-			depends on FW_IMAGE_SIGN
-			bool "Generate a random key pair if no key is found"
-			default y
-
-		config FW_IMAGE_HASH
-			bool "Append hash for firmware integrity checking"
-			default y
-	endmenu
-
+# The build process itself is done in the *build* directory while
+# the artifacts are moved to the *bin* directory.
+menu "Build artifacts (firmware images)"
 	menu "Output file name format"
-
 		config OUTPUT_FILE_PREFIX
 			string "Generic prefix of output file names"
 			default "plumcore"
 
 		config OUTPUT_FILE_PORT_PREFIX
-			bool "Prefix PORT_NAME to output file names"
-			default "y"
+			bool "Prefix port/board to output file names"
+			default y
+
+		config OUTPUT_FILE_APP_PREFIX
+			bool "Prefix application name to output file names"
+			default y
 
 		config OUTPUT_FILE_VERSION_SUFFIX
 			bool "Append the current version string to output file names"
 			default y
+
+		config OUTPUT_FILE_META_SUFFIX
+			bool "Append metadata string to output file names"
+			default y
 	endmenu
+
+	source "scripts/build_artifacts/Kconfig"
 endmenu
 
-menu "System startup and configuration"
-	config HOSTNAME
-		string "System host name"
-		default "plumcore"
-
-	config DEFAULT_MQTT_CONNECTION
-		bool "Create a default MQTT connection using first TCP/IP interface available"
-		select SERVICE_MQTT_TCPIP
-		default y
-
-	if DEFAULT_MQTT_CONNECTION
-		config DEFAULT_MQTT_USE_HOSTNAME_ID
-			bool "Use hostname as a client ID"
-			default y
-
-		config DEFAULT_MQTT_CUSTOM_ID
-			string "Custom client ID"
-			default "unconfigured-id"
-			depends on !DEFAULT_MQTT_USE_HOSTNAME_ID
-
-		config DEFAULT_MQTT_PING_INTERVAL
-			int "MQTT ping interval"
-			default 60000
-
-		config DEFAULT_MQTT_BROKER_IP
-			string "MQTT broker IP address"
-			default "10.10.10.10"
-
-		config DEFAULT_MQTT_BROKER_PORT
-			int "MQTT broker TCP port"
-			default 1883
-	endif
-
-	config DEFAULT_CONSOLE_CLI
-		bool "Start default CLI on a system console"
-		select SERVICE_CLI
-		select SERVICE_LOGINMGR
-		default yes
-
-		config CONFIG_LOAD_FILE
-			bool "Load startup configuration from a file"
-			default yes
-
-			config CONFIG_LOAD_FILE_FSNAME
-				depends on CONFIG_LOAD_FILE
-				string "Name of the filesystem"
-				default "system"
-
-			config CONFIG_LOAD_FILE_FILENAME
-				depends on CONFIG_LOAD_FILE
-				string "File name"
-				default "default.cfg"
-
-	config DEFAULT_PLOG_SENSOR_UPLOAD
-		bool "Start default PLOG sensor upload service"
-		select DEFAULT_PLOG_ROUTER
-		select SERVICE_PLOG_SENSOR_UPLOAD
-		default yes
-
-	config DEFAULT_PLOG_ROUTER
-		bool "Start default PLOG router service"
-		select SERVICE_PLOG_ROUTER
-		default yes
-
-endmenu
-
-menu "Enable services"
-	comment "Most of the functionality in the plumCore is implemented as user space services. Select enabled services."
-
-	menu "Low-level platform drivers"
-
-		menu "Drivers for STM32 microcontrollers"
-			config SERVICE_STM32_WATCHDOG
-				bool "STM32 watchdog support"
-				default y
-
-			config SERVICE_STM32_RTC
-				bool "STM32 RTC clock support"
-				default y
-
-			config SERVICE_STM32_ADC
-				bool "STM32 ADC support"
-				default y
-
-			config SERVICE_STM32_TIMER_CAPSENSE
-				bool "Support capacitive sensing using STM32 timer peripheral"
-				default n
-
-			config SERVICE_STM32_SYSTEM_CLOCK
-				bool "STM32 system clock implemented using STM32 timer peripheral"
-				default y
-
-			config SERVICE_STM32_I2C_SENSORS
-				bool "Support for some basic I2C sensors using STM32 I2C peripheral"
-				default y
-
-			config SERVICE_UXB_MASTER
-				bool "Support master role on the UXB bus using STM32 SPI peripheral"
-				select LIB_LIBUXB
-				select LIB_NANOPB
-				default y
-
-			config SERVICE_STM32_I2C_MASTER
-				bool "STM32 I2C bus driver in master mode"
-				default y
-		endmenu
-	endmenu
-
-	menu "UXB extension bus interface drivers"
-		depends on SERVICE_UXB_MASTER
-
-		config SERVICE_UXB_SOLAR_CHARGER
-			bool "UXB solar-charger interface support"
-			default y
-
-		config SERVICE_UXB_LDET
-			bool "UXB ldet interface support (lightning detector samplers)"
-			default y
-
-		config SERVICE_UXB_WAVEFORM_SOURCE
-			bool "UXB waveform-source interface support"
-			default y
-
-		config SERVICE_UXB_CAN
-			bool "UXB can interface support"
-			default y
-	endmenu
-
-	menu "High level device drivers"
-		config SERVICE_RADIO_RFM69
-			bool "SX1231/RFM69 sub-1GHz radio transceiver support"
-			default n
-
-		config SERVICE_SENSOR_OVER_CAN
-			bool "Support for attaching sensors over CAN bus"
-			default y
-
-		config SERVICE_RADIO_AX5243
-			bool "OnSemi AX5243 sub-1GHz radio transceiver support"
-			default n
-
-		config SERVICE_GSM_QUECTEL
-			bool "Support for Quectel GSM modems"
-			default y
-
-		config SERVICE_SPI_FLASH
-			bool "SPI NOR flash memory driver"
-			default y
-
-		config SERVICE_SPI_SD
-			bool "SD/MMC card driver using SPI interface"
-			default n
-
-		config SERVICE_ADC_SENSOR
-			bool "Sensor device using ADC"
-			default y
-			select SERVICE_STM32_ADC
-
-		config SERVICE_INERTIAL_ICM42688P
-			bool "TDK InvenSense ICM-42688-P inertial 6-DOF sensor"
-			default n
-
-		config ICM42688P_DETECT_REPEAT
-			depends on SERVICE_INERTIAL_ICM42688P
-			bool "Try to repeat detection if it fails"
-			default y
-
-		config SERVICE_BQ35100
-			bool "TI BQ35100 primary battery gauge"
-			default n
-
-		config SERVICE_GPS_UBLOX
-			depends on SERVICE_STM32_I2C_MASTER
-			bool "u-blox GNSS receiver driver"
-			default n
-	endmenu
-
-	menu "Filesystem and memory management services"
-		config SERVICE_FS_SPIFFS
-			bool "SPIFFS NOR flash memory filesystem service"
-			default y
-			select LIB_SPIFFS
-
-	endmenu
-
-	menu "System services"
-		config SERVICE_PLOG_ROUTER
-			bool "PLOG Message router service"
-			default y
-
-		config SERVICE_PLOCATOR
-			bool "System service locator service"
-			default y
-	endmenu
-
-	menu "Data manipulation/evaluation/processing services"
-		config SERVICE_DATA_PROCESS
-			bool "data-process framework for flow-graph like data processing"
-			default n
-
-		config SERVICE_USART_LOGGER
-			bool "USART logger service"
-			default y
-
-		config SERVICE_PLOG_PACKAGER
-			bool "Service for packaging PLOG messages into compressed blobs"
-			default y
-	endmenu
-
-	menu "User interface services"
-		config SERVICE_CLI
-			bool "Command line interface"
-			default y
-			select LIB_TREECLI
-			select LIB_LINEEDIT
-
-		menu "Command line interface configuration"
-			depends on SERVICE_CLI
-
-			config SERVICE_CLI_SERVICE_DATA_PROCESS
-				bool "Data-process service configuration"
-				depends on SERVICE_DATA_PROCESS
-				default y
-
-			config SERVICE_CLI_DEVICE_DRIVER_SENSOR_OVER_CAN
-				bool "/device/driver/sensor-over-can driver configuration submenu"
-				depends on SERVICE_SENSOR_OVER_CAN
-				default y
-
-			config SERVICE_CLI_DEVICE_SENSOR
-				bool "/device/sensor submenu"
-				default y
-
-			config SERVICE_CLI_DEVICE_UXB
-				bool "/device/uxb submenu"
-				default y
-				depends on SERVICE_UXB_MASTER
-
-			config SERVICE_CLI_DEVICE_CAN
-				bool "/device/can submenu"
-				default y
-
-			config SERVICE_CLI_SERVICE_PLOG_ROUTER
-				bool "PLOG-router service configuration"
-				default y
-				depends on SERVICE_PLOG_ROUTER
-
-			config SERVICE_CLI_SERVICE_PLOG_RELAY
-				bool "PLOG-relay service configuration"
-				default y
-				depends on SERVICE_PLOG_RELAY
-
-			config SERVICE_CLI_DEVICE_CLOCK
-				bool "/device/clock submenu"
-				default y
-
-			config SERVICE_CLI_SYSTEM_BOOTLOADER
-				bool "/system/bootloader bootloader configuration submenu"
-				default y
-		endmenu
-
-		config SERVICE_LOGINMGR
-			bool "Console login manager"
-			default n
-			select LIB_LINEEDIT
-	endmenu
-
-	menu "Communication server/client services"
-		menu "MQTT client/server services"
-			config SERVICE_MQTT_FILE_SERVER
-				bool "MQTT File server service"
-				default y
-
-			config SERVICE_STREAM_OVER_MQTT
-				bool "Support for accessing stream interfaces using MQTT protocol"
-				default y
-
-			config SERVICE_MQTT_SENSOR_UPLOAD
-				bool "Upload sensor data over MQTT"
-				default y
-
-			config SERVICE_MQTT_FILE_DOWNLOAD
-				bool "Download files published on the MQTT broker"
-				default y
-		endmenu
-
-		menu "PLOG message queue publish/subscribe services"
-			config SERVICE_PLOG_SENSOR_UPLOAD
-				bool "Service for uploading sensor data over the PLOG message router"
-				default y
-
-			config SERVICE_PLOG_RELAY
-				bool "Relay data from/to PLOG message router to/from various interfaces"
-				default y
-		endmenu
-
-		menu "Services implemented over raw UDP/TCP protocols"
-			config SERVICE_TCPIP_SENSOR_UPLOAD
-				bool "Upload sensor data as text over a raw TCP connection"
-				default y
-		endmenu
-	endmenu
-
-	menu "Communication protocols"
-		menu "Interface MAC protocols"
-			config SERVICE_RADIO_MAC_SIMPLE
-				bool "Simple radio MAC protocol support"
-				default y
-		endmenu
-
-		menu "Link-layer protocols"
-
-		endmenu
-
-		menu "Networking protocols"
-
-		endmenu
-
-		menu "Presentation layer protocols"
-
-		endmenu
-
-		menu "Application layer protocols"
-			config SERVICE_MQTT_TCPIP
-				bool "MQTT protocol support over a raw TCP connection"
-				select LIB_WOLFMQTT
-				default y
-		endmenu
-	endmenu
-
-	menu "Language interpreters"
-		config SERVICE_SCRIPT_ES
-			bool "ECMAScript language interpreter (Duktape)"
-			default n
-			select LIB_DUKTAPE
-
-	endmenu
-
-endmenu
-
-menu "Scheduler & IPC"
-	menu "FreeRTOS configuration"
-		config FREERTOS_USE_PREEMPTION
-			bool "Use preemption"
-			default y
-
-		config FREERTOS_TICK_RATE_HZ
-			int "Tick rate (Hz)"
-			default 1000
-
-		config FREERTOS_MAX_PRIORITIES
-			int "Maximum priorities"
-			default 5
-
-		config FREERTOS_MINIMAL_STACK_SIZE
-			int "Minimal stack size"
-			default 130
-
-		config FREERTOS_MAX_TASK_NAME_LEN
-			int "Maximum task name length"
-			default 32
-
-		config FREERTOS_USE_MUTEXES
-			bool "Use mutexes"
-			default y
-
-		config CONFIG_FREERTOS_USE_RECURSIVE_MUTEXES
-			depends on FREERTOS_USE_MUTEXES
-			bool "Use recursive mutexes"
-			default y
-
-		config FREERTOS_QUEUE_REGISTRY_SIZE
-			int "Queue registry size"
-			default 8
-
-		config FREERTOS_CHECK_FOR_STACK_OVERFLOW
-			bool "Check for stack overflows"
-			default y
-
-		config FREERTOS_CHECK_FOR_STACK_OVERFLOW_METHOD2
-			depends on FREERTOS_CHECK_FOR_STACK_OVERFLOW
-			bool "Use method 2"
-			default y
-
-
-	endmenu
-endmenu
-
-menu "Libraries"
-	comment "Download, patch and compile external library dependencies"
-
-	config LIB_LINEEDIT
-		bool "lineedit (single-line editor library with command history)"
-		default y
-
-	config LIB_WOLFMQTT
-		bool "WolfMQTT library"
-		default n
-
-	config LIB_NANOPB
-		bool "NanoPB protocol buffers library"
-		default y
-
-	config LIB_HEATSHRINK
-		bool "Heatshrink LZSS compression/decompression library"
-		default n
-
-	config LIB_LIBUXB
-		bool "UXB bus master library for STM32"
-		default y
-
-	config LIB_SFFS
-		bool "SFFS simple flash filesystem library"
-		default y
-
-	config LIB_TREECLI
-		bool "treecli tree-structured command line interface library"
-		default y
-
-	config LIB_DUKTAPE
-		bool "duktape ECMAScript interpreter library"
-		default n
-
-	config LIB_SPIFFS
-		bool "SPIFFS NOR flash memory filesystem library"
-		default y
-endmenu

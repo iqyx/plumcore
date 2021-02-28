@@ -1,0 +1,36 @@
+config LIB_LINEEDIT
+	bool "lineedit (single-line editor library with command history)"
+	default y
+
+config LIB_WOLFMQTT
+	bool "WolfMQTT library"
+	default n
+
+config LIB_NANOPB
+	bool "NanoPB protocol buffers library"
+	default y
+
+config LIB_HEATSHRINK
+	bool "Heatshrink LZSS compression/decompression library"
+	default n
+
+config LIB_LIBUXB
+	bool "UXB bus master library for STM32"
+	default y
+
+config LIB_SFFS
+	bool "SFFS simple flash filesystem library"
+	default y
+
+config LIB_TREECLI
+	bool "treecli tree-structured command line interface library"
+	default y
+
+config LIB_DUKTAPE
+	bool "duktape ECMAScript interpreter library"
+	default n
+
+config LIB_SPIFFS
+	bool "SPIFFS NOR flash memory filesystem library"
+	default y
+

@@ -1,0 +1,17 @@
+config PORT_NUCLEO_F411RE
+	bool "STM32 Nucleo-F411RE"
+
+	menu "Configuraton"
+		depends on PORT_NUCLEO_F411RE
+		config NUCLEO_F411RE_RFM69_RADIO
+			bool "RFM69 radio attached"
+			default n
+
+		config PORT_NAME
+			string
+			default "nucleo-f411re"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+	endmenu

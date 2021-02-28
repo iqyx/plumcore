@@ -1,0 +1,41 @@
+config PORT_INCL_G104MF
+	bool "incl-g104mf wireless accelerometer"
+	select SERVICE_STM32_RTC
+	select SERVICE_STM32_SYSTEM_CLOCK
+	select SERVICE_PLOCATOR
+	select PORT_PLATFORM_ARM_CM4F
+
+	menu "Configuration"
+		depends on PORT_INCL_G104MF
+
+		config PORT_NAME
+			string
+			default "incl-g104mf"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+
+		choice
+			prompt "Clock speed"
+
+			config INCL_G104MF_CLOCK_80MHZ
+				bool "80 MHz (MSI, PLL)"
+
+			config INCL_G104MF_CLOCK_DEFAULT
+				bool "4 MHz (MSI)"
+		endchoice
+
+		config INCL_G104MF_ENABLE_LEDS
+			bool "Enable LEDs (disables SWD debug!)"
+			default n
+
+		config INCL_G104MF_ENABLE_WATCHDOG
+			bool "Enable watchdog"
+			select SERVICE_STM32_WATCHDOG
+			default y
+	endmenu

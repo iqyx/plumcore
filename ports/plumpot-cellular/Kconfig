@@ -1,0 +1,65 @@
+config PORT_PLUMPOT_CELLULAR
+	bool "plumpot-cellular"
+	select SERVICE_STM32_RTC
+	select SERVICE_STM32_SYSTEM_CLOCK
+	select SERVICE_PLOCATOR
+
+	menu "Configuration"
+		depends on PORT_PLUMPOT_CELLULAR
+
+		config PORT_NAME
+			string
+			default "plumpot-cellular"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+
+		config PLUMPOT_CELLULAR_ENABLE_GSM
+			bool "Enable onboard GSM modem"
+			select SERVICE_GSM_QUECTEL
+			default y
+
+		config PLUMPOT_CELLULAR_MQTT_OVER_GSM
+			bool "Create a default MQTT connection over the GSM modem"
+			select DEFAULT_MQTT_CONNECTION
+			select SERVICE_STREAM_OVER_MQTT
+			select SERVICE_MQTT_SENSOR_UPLOAD
+			select SERVICE_MQTT_FILE_SERVER
+			select PLUMPOT_CELLULAR_ENABLE_GSM
+			default y
+
+		config PLUMPOT_CELLULAR_ENABLE_I2C_SENSORS
+			bool "Enable some I2C sensors on the I2C connector"
+			default n
+			select SERVICE_STM32_I2C_SENSORS
+
+		config PLUMPOT_CELLULAR_ENABLE_WATCHDOG
+			bool "Enable watchdog"
+			select SERVICE_STM32_WATCHDOG
+			default y
+
+		config PLUMPOT_CELLULAR_ENABLE_UXB
+			bool "Enable UXB extension bus"
+			select SERVICE_UXB_MASTER
+			default y
+
+		config PLUMPOT_CELLULAR_UXB_VOLTAGE
+			bool "Measure UXB Vbus voltage"
+			select SERVICE_STM32_ADC
+			default y
+
+		choice
+			prompt "Clock speed"
+
+			config PLUMPOT_CELLULAR_CLOCK_HSE_16MHZ
+				bool "16MHz (HSE, no PLL)"
+
+			config PLUMPOT_CELLULAR_CLOCK_HSE_84MHZ
+				bool "84MHz (HSE, PLL)"
+		endchoice
+	endmenu
