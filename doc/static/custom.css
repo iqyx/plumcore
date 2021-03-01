@@ -1,0 +1,89 @@
+html {
+	font-size: 130%;
+}
+
+body {
+	margin: 0;
+}
+
+@page { 
+	size: auto A4 portrait;
+	margin-top: 20mm;
+	margin-bottom: 20mm;
+}
+
+h2 {
+	page-break-before: always;
+}
+
+.align-left {
+	float: left;
+/*	padding-right: 2em;*/
+}
+
+.tag-button {
+    background-image: none;
+    border: 1px solid #ccc;
+    border-radius: .3em;
+    padding: .5em .7em;
+    text-decoration: none;
+    background-color: #eee;
+}
+
+.wy-nav-content {
+	max-width: 100% !important;
+}
+
+/*
+.md-tabs {
+	display: none;
+}
+
+.md-grid {
+	max-width: 100%;
+}
+
+.md-nav__link {
+	margin-top: 0;
+	padding-top: 0.5rem;
+}
+
+.md-nav__link:hover {
+	background-color: red;
+}
+
+.md-nav__item {
+	padding-left: 0;
+}
+
+.md-nav__item .md-nav__item {
+	padding-left: 0;
+}
+
+.md-nav__list > .md-nav__item > .md-nav__list a {
+	padding-left: 1rem;
+}
+
+.md-nav__list > .md-nav__item > .md-nav__list > .md-nav__item > .md-nav__list > .md-nav__item a {
+	padding-left: 2rem;
+}
+
+.md-sidebar--primary {
+	background-color: #444;
+	color: #ddd;
+}
+
+.md-nav__link[href^="#"] {
+	background-color: #ddd;
+	color: #444;
+}
+
+.md-sidebar--secondary {
+	margin-left: 100%;
+}
+
+.md-main__inner {
+	padding-top: 0;
+}
+*/
+

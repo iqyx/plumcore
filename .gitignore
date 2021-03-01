@@ -28,3 +28,6 @@ version.h
 # ignore generated configuration files
 .config
 config.h
+
+# ignore documentation builddirectory
+doc/build
