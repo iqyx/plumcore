@@ -100,6 +100,7 @@ Export("objs")
 SConscript("kconfig.SConscript")
 SConscript("platforms/SConscript")
 SConscript("ports/SConscript")
+SConscript("doc.SConscript")
 
 
 env["CC"] = "%s-gcc" % env["TOOLCHAIN"]

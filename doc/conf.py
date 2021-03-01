@@ -9,7 +9,7 @@ extensions = [
 ]
 autosectionlabel_prefix_document = True
 templates_path = ['templates']
-exclude_patterns = ['build', 'static']
+exclude_patterns = ['build', 'static', 'lib/script/duktape']
 
 html_theme = 'sphinx_rtd_theme'
 html_title = 'plumCore IoT/DAQ framework'

@@ -12,7 +12,7 @@ body {
 	margin-bottom: 20mm;
 }
 
-h2 {
+h2, h3 {
 	page-break-before: always;
 }
 
