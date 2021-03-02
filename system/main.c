@@ -30,12 +30,15 @@
 #include <string.h>
 
 #include "main.h"
+#include "app.h"
 
 #ifdef MODULE_NAME
 #undef MODULE_NAME
 #endif
 #define MODULE_NAME "system"
 
+/* Statically allocate memory for the application instance. */
+App app;
 
 static void init_task(void *p) {
 	(void)p;
@@ -48,6 +51,9 @@ static void init_task(void *p) {
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing services..."));
 	system_init();
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing services..."));
+	app_init(&app);
 
 	vTaskDelete(NULL);
 }
