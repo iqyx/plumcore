@@ -23,11 +23,8 @@ config PORT_INCL_G104MF
 		choice
 			prompt "Clock speed"
 
-			config INCL_G104MF_CLOCK_80MHZ
-				bool "80 MHz (MSI, PLL)"
-
-			config INCL_G104MF_CLOCK_DEFAULT
-				bool "4 MHz (MSI)"
+			config INCL_G104MF_CLOCK_HSI16
+				bool "16 MHz (using HSI16)"
 		endchoice
 
 		config INCL_G104MF_ENABLE_LEDS
@@ -37,5 +34,9 @@ config PORT_INCL_G104MF
 		config INCL_G104MF_ENABLE_WATCHDOG
 			bool "Enable watchdog"
 			select SERVICE_STM32_WATCHDOG
+			default y
+
+		config STM32_DEBUG_IN_STOP
+			bool "Enable debugging in stop mode"
 			default y
 	endmenu

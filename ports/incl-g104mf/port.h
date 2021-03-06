@@ -61,11 +61,18 @@ int32_t port_init(void);
 #define PORT_INIT_OK 0
 #define PORT_INIT_FAILED -1
 
+void port_sd_power(bool power);
+
 void port_task_timer_init(void);
 uint32_t port_task_timer_get_value(void);
 uint32_t lptim_get_extended(void);
 
 void port_gps_power(bool en);
+void port_rfm_init(void);
+void port_accel2_init(void);
+void port_gps_init(void);
+void port_battery_gauge_init(void);
+static void port_sd_init(void);
 
 
 
