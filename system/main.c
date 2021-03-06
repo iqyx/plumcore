@@ -31,6 +31,8 @@
 
 #include "main.h"
 #include "app.h"
+#include "interfaces/servicelocator.h"
+#include "services/plocator/plocator.h"
 
 #ifdef MODULE_NAME
 #undef MODULE_NAME
@@ -39,9 +41,18 @@
 
 /* Statically allocate memory for the application instance. */
 App app;
+PLocator plocator;
+IServiceLocator *locator;
+
 
 static void init_task(void *p) {
 	(void)p;
+
+	/* First, initialize the service locator service. It is required to
+	 * advertise any port-specific devices and interfaces. */
+	if (plocator_init(&plocator) == PLOCATOR_RET_OK) {
+		locator = plocator_iface(&plocator);
+	}
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Platform initialization..."));
 	platform_init();
@@ -52,7 +63,9 @@ static void init_task(void *p) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing services..."));
 	system_init();
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing services..."));
+	startup_banner();
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing application..."));
 	app_init(&app);
 
 	vTaskDelete(NULL);
