@@ -112,6 +112,9 @@ menu "Filesystem and memory management services"
 		default y
 		select LIB_SPIFFS
 
+	config SERVICE_WORN_LOG_BLOCK
+		bool "WORN (write-once, read-never) log on a block device storage"
+		default n
 endmenu
 
 menu "System services"
