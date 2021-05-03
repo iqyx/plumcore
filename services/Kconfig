@@ -104,6 +104,10 @@ menu "High level device drivers"
 		depends on SERVICE_STM32_I2C_MASTER
 		bool "u-blox GNSS receiver driver"
 		default n
+
+	config SERVICE_LORA_RN2483
+		bool "Microchip RN2483 LoRaWAN modem driver"
+		default n
 endmenu
 
 menu "Filesystem and memory management services"
