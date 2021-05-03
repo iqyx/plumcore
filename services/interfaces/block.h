@@ -24,8 +24,8 @@ typedef struct {
 	block_ret_t (*get_block_size)(void *parent, size_t *block_size);
 	block_ret_t (*set_block_size)(void *parent, size_t block_size);
 	block_ret_t (*get_size)(void *parent, size_t *size);
-	block_ret_t (*read)(void *parent, size_t block, uint8_t *buf, size_t len);
-	block_ret_t (*write)(void *parent, size_t block, const uint8_t *buf, size_t len);
+	block_ret_t (*read)(void *parent, size_t block, uint8_t *buf);
+	block_ret_t (*write)(void *parent, size_t block, const uint8_t *buf);
 	block_ret_t (*flush)(void *parent);
 } block_vmt_t;
 
