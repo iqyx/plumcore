@@ -98,6 +98,7 @@ env["CXX"] = "%s-g++" % env["TOOLCHAIN"]
 env["AR"] = "%s-ar" % env["TOOLCHAIN"]
 env["AS"] = "%s-as" % env["TOOLCHAIN"]
 env["LD"] = "%s-gcc" % env["TOOLCHAIN"]
+env["GDB"] = "%s-gdb" % env["TOOLCHAIN"]
 env["OBJCOPY"] = "%s-objcopy" % env["TOOLCHAIN"]
 env["OBJDUMP"] = "%s-objdump" % env["TOOLCHAIN"]
 env["SIZE"] = "%s-size" % env["TOOLCHAIN"]
@@ -132,6 +133,7 @@ env.Append(LINKFLAGS = [
 	"--static",
 	"-nostartfiles",
 	"--specs=nano.specs",
+	"-Wl,-u_printf_float",
 	"-T", env["LDSCRIPT"],
 	"-Wl,-Map=%s.map" % env["PORTFILE"],
 	"-Wl,--gc-sections",
@@ -151,8 +153,8 @@ env.Append(LINKFLAGS = [
 	"-Wl,--defsym=LOAD_ADDRESS=%s" % env["LOAD_ADDRESS"],
 ])
 
-
 env.Append(CFLAGS = [
+
 	"-Os",
 	"-g3",
 	"-gdwarf-4",
@@ -185,6 +187,7 @@ env.Append(CFLAGS = [
 	"-Wmissing-prototypes",
 	"-Wstrict-prototypes",
 	"-Wno-expansion-to-defined",
+	"-Wno-unused-function",
 ])
 
 env.Append(LIBS = [
