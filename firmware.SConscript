@@ -102,3 +102,41 @@ oocd = env.Command(
 )
 
 env.Alias("program", oocd);
+
+
+###################################################################
+# GDB programming
+###################################################################
+
+gdb_load = env.Command(
+	source = image_elf,
+	target = "gdb",
+	action = """
+	$GDB \
+	-ex "target extended-remote %s" \
+	-ex "load" \
+	-ex "monitor reset" \
+	-ex "set confirm off" \
+	-ex "quit" \
+	$SOURCE
+	""" % (conf["GDB_REMOTE_TARGET"])
+)
+
+env.Alias("gdb-program", gdb_load);
+
+
+###################################################################
+# GDB debugging
+###################################################################
+
+gdb_debug = env.Command(
+	source = image_elf,
+	target = "debug",
+	action = """
+	$GDB \
+	-ex "target extended-remote %s" \
+	$SOURCE
+	""" % (conf["GDB_REMOTE_TARGET"])
+)
+
+env.Alias("debug", gdb_debug);
