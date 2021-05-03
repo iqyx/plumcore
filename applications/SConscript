@@ -6,9 +6,8 @@ Import("objs")
 
 app_ext_dir = None
 if conf["APP_EXTERNAL"] == "y":
-	app_ext_dir_var = conf.get("APP_EXTERNAL_DIR")
 	try:
-		app_ext_dir = os.environ[app_ext_dir_var]
+		app_ext_dir = os.environ["PLUMCORE_EXT_APP"]
 	except KeyError:
 		raise Exception("Env variable with external application path not defined (%s)" % app_ext_dir_var)
 
@@ -17,10 +16,10 @@ if conf["APP_EXTERNAL"] == "y":
 
 	print("Including external application in '%s'" % app_ext_dir)
 
-	try:
-		env.LoadKconfig(app_ext_dir + "/Kconfig", app_ext_dir + "/.config")
-	except:
-		raise Exception("Cannot import external application configuration. Did you run menuconfig?")
+	# try:
+		# env.LoadKconfig(app_ext_dir + "/Kconfig", app_ext_dir + "/.config")
+	# except:
+		# raise Exception("Cannot import external application configuration. Did you run menuconfig?")
 
 # Configuration of the external application is loaded now (if selected). Continue as usual
 
