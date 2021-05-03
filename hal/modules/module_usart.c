@@ -64,6 +64,11 @@ void module_usart_interrupt_handler(struct module_usart *usart) {
 		/* Clear the flag by reading USART_SR and USART_DR.
 		 * Ignore the received byte. */
 		usart_recv(usart->port);
+		#if defined(STM32L4)
+			if (USART_ISR(usart->port) & USART_ISR_ORE) {
+				USART_ICR(usart->port) |= USART_ICR_ORECF;
+			}
+		#endif
 	}
 }
 
@@ -134,6 +139,7 @@ int32_t module_usart_init(struct module_usart *usart, const char *name, uint32_t
 	usart_set_parity(usart->port, USART_PARITY_NONE);
 	usart_set_flow_control(usart->port, USART_FLOWCONTROL_NONE);
 	usart_enable(usart->port);
+	USART_CR3(usart->port) |= USART_CR3_OVRDIS;
 
 	usart->rxqueue = xQueueCreate(MODULE_USART_RX_QUEUE_LEN, sizeof(uint8_t));
 	usart->txqueue = xQueueCreate(MODULE_USART_TX_QUEUE_LEN, sizeof(uint8_t));
