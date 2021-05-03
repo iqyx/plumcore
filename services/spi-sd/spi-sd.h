@@ -97,5 +97,5 @@ spi_sd_ret_t spi_sd_write_data(SpiSd *self, uint32_t block, const uint8_t buf[51
 
 block_ret_t spi_sd_get_block_size(SpiSd *self, size_t *block_size);
 block_ret_t spi_sd_get_size(SpiSd *self, size_t *block_size);
-block_ret_t spi_sd_read(SpiSd *self, size_t block, uint8_t *buf, size_t len);
-block_ret_t spi_sd_write(SpiSd *self, size_t block, const uint8_t *buf, size_t len);
+block_ret_t spi_sd_read(SpiSd *self, size_t block, uint8_t *buf);
+block_ret_t spi_sd_write(SpiSd *self, size_t block, const uint8_t *buf);

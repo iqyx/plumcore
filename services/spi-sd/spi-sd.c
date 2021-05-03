@@ -428,15 +428,19 @@ block_ret_t spi_sd_get_size(SpiSd *self, size_t *block_size) {
 }
 
 
-block_ret_t spi_sd_read(SpiSd *self, size_t block, uint8_t *buf, size_t len) {
-
-	return BLOCK_RET_OK;
+block_ret_t spi_sd_read(SpiSd *self, size_t block, uint8_t *buf) {
+	if (spi_sd_read_data(self, block, buf, 512, 1000) == SPI_SD_RET_OK) {
+		return BLOCK_RET_OK;
+	}
+	return BLOCK_RET_FAILED;
 }
 
 
-block_ret_t spi_sd_write(SpiSd *self, size_t block, const uint8_t *buf, size_t len) {
-
-	return BLOCK_RET_OK;
+block_ret_t spi_sd_write(SpiSd *self, size_t block, const uint8_t *buf) {
+	if (spi_sd_write_data(self, block, buf, 512, 10000) == SPI_SD_RET_OK) {
+		return BLOCK_RET_OK;
+	}
+	return BLOCK_RET_FAILED;
 }
 
 
