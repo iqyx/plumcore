@@ -155,7 +155,7 @@ bq35100_ret_t bq35100_mac(Bq35100 *self, bq35100_control_t control, const uint8_
 
 
 bq35100_ret_t bq35100_gauge_start(Bq35100 *self) {
-	//return bq35100_mac(self, BQ35100_CONTROL_GAUGE_START, NULL, 0, NULL, 0);
+	// return bq35100_mac(self, BQ35100_CONTROL_GAUGE_START, NULL, 0, NULL, 0);
 	return bq35100_write_uint16(self, 0x00, (uint16_t)BQ35100_CONTROL_GAUGE_START);
 }
 
@@ -163,6 +163,7 @@ bq35100_ret_t bq35100_gauge_start(Bq35100 *self) {
 int32_t bq35100_capacity(Bq35100 *self) {
 	int32_t capacity = 0;
 	bq35100_read_int32(self, BQ35100_CMD_ACCUMULATED_CAPACITY, &capacity);
+	vTaskDelay(10);
 	return capacity;
 }
 
@@ -170,6 +171,7 @@ int32_t bq35100_capacity(Bq35100 *self) {
 uint16_t bq35100_voltage(Bq35100 *self) {
 	uint16_t voltage = 0;
 	bq35100_read_uint16(self, BQ35100_CMD_VOLTAGE, &voltage);
+	vTaskDelay(10);
 	return voltage;
 }
 
@@ -177,6 +179,7 @@ uint16_t bq35100_voltage(Bq35100 *self) {
 int16_t bq35100_temperature(Bq35100 *self) {
 	int16_t temperature = 0;
 	bq35100_read_int16(self, BQ35100_CMD_TEMPERATURE, &temperature);
+	vTaskDelay(10);
 	return temperature;
 }
 
@@ -184,6 +187,7 @@ int16_t bq35100_temperature(Bq35100 *self) {
 int16_t bq35100_current(Bq35100 *self) {
 	int16_t current = 0;
 	bq35100_read_int16(self, BQ35100_CMD_CURRENT, &current);
+	vTaskDelay(10);
 	return current;
 }
 
@@ -344,6 +348,35 @@ static bq35100_ret_t bq35100_calibrate_cc_offset(Bq35100 *self) {
 }
 
 
+static bq35100_ret_t bq35100_calibrate_board_offset(Bq35100 *self) {
+	/* Start calibration and wait for CCA bit. */
+	uint16_t status = 0;
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Start board offset calibration"));
+	do {
+		vTaskDelay(10);
+		bq35100_write_uint16(self, BQ35100_CMD_CONTROL, (uint16_t)BQ35100_CONTROL_BOARD_OFFSET);
+		vTaskDelay(10);
+		bq35100_write_uint16(self, BQ35100_CMD_CONTROL, (uint16_t)BQ35100_CONTROL_STATUS);
+		vTaskDelay(10);
+		bq35100_read_uint16(self, BQ35100_CMD_CONTROL, &status);
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("status = 0x%04x"), status);
+		vTaskDelay(500);
+	} while ((status & BQ35100_CONTROL_STATUS_BCA) == 0);
+
+	/* Calibrating now, wait until CCA is cleared. */
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Calibrating board offset..."));
+	do {
+		vTaskDelay(1000);
+		bq35100_write_uint16(self, BQ35100_CMD_CONTROL, (uint16_t)BQ35100_CONTROL_STATUS);
+		vTaskDelay(10);
+		bq35100_read_uint16(self, BQ35100_CMD_CONTROL, &status);
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("status = 0x%04x"), status);
+	} while (status & BQ35100_CONTROL_STATUS_BCA);
+
+	return BQ35100_RET_OK;
+}
+
+
 bq35100_ret_t bq35100_init(Bq35100 *self, I2cBus *i2c) {
 	memset(self, 0, sizeof(Bq35100));
 	self->i2c = i2c;
@@ -358,18 +391,28 @@ bq35100_ret_t bq35100_init(Bq35100 *self, I2cBus *i2c) {
 	self->source.get_sample_rate = (typeof(self->source.get_sample_rate))icm42688p_get_sample_rate;
 	self->source.set_sample_rate = (typeof(self->source.set_sample_rate))icm42688p_set_sample_rate;
 	*/
+	bq35100_gauge_start(self);
+	vTaskDelay(10);
 
 	uint8_t status = bq35100_battery_status(self);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("battery status = 0x%02x"), status);
 	(void)status;
-
-	bq35100_gauge_start(self);
 	vTaskDelay(10);
+
+	uint16_t control_status = 0;
+	bq35100_write_uint16(self, BQ35100_CMD_CONTROL, (uint16_t)BQ35100_CONTROL_STATUS);
+	vTaskDelay(10);
+	bq35100_read_uint16(self, BQ35100_CMD_CONTROL, &control_status);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("control status = 0x%04x"), control_status);
+
 
 	//bq35100_enter_calib(self);
 	//bq35100_calibrate_cc_offset(self);
 	//bq35100_exit_calib(self);
 
+	// bq35100_enter_calib(self);
+	// bq35100_calibrate_board_offset(self);
+	// bq35100_exit_calib(self);
 
 	/* Calibrate for 1R sensing resistor. */
 	//bq35100_set_cc_gain(self, 0.00464f);
