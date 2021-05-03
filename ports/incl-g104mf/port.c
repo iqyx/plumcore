@@ -1,15 +1,24 @@
+/* SPDX-License-Identifier: BSD-2-Clause
+ *
+ * incl-g104mf accelerometer/inclinometer port specific code
+ *
+ * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
+ * All rights reserved.
+ */
+
 #include <stdint.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include <libopencm3/cm3/scb.h>
+#include <libopencm3/cm3/nvic.h>
+#include <libopencm3/cm3/scs.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/spi.h>
-#include <libopencm3/cm3/scb.h>
-#include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/adc.h>
 #include <libopencm3/stm32/i2c.h>
 #include <libopencm3/stm32/exti.h>
@@ -66,7 +75,7 @@
 #include "services/bq35100/bq35100.h"
 #include "services/spi-sd/spi-sd.h"
 #include "services/gps-ublox/gps-ublox.h"
-
+#include "services/lora-rn2483/lora-rn2483.h"
 
 /**
  * Port specific global variables and singleton instances.
@@ -159,11 +168,47 @@ int32_t port_early_init(void) {
 	RCC_AHB1SMENR = 0;
 	RCC_AHB2SMENR = 0;
 	RCC_AHB3SMENR = 0;
-	RCC_APB1SMENR1 = RCC_APB1SMENR1_LPTIM1SMEN;
+	RCC_APB1SMENR1 = RCC_APB1SMENR1_LPTIM1SMEN | RCC_APB1SMENR1_USART2SMEN;
 	RCC_APB1SMENR2 = 0;
 	RCC_APB2SMENR = RCC_APB2SMENR_USART1SMEN;
 
 	return PORT_EARLY_INIT_OK;
+}
+
+
+void port_check_debug(void) {
+/*
+	if (SCS_DHCSR & SCS_DHCSR_C_DEBUGEN) {
+		u_log(system_log, LOG_TYPE_DEBUG, "debugger connected");
+	} else {
+		u_log(system_log, LOG_TYPE_INFO, "debugger not connected");
+	}
+*/
+	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO13 | GPIO14);
+	vTaskDelay(10);
+	if (gpio_get(GPIOA, GPIO13)) {
+		u_log(system_log, LOG_TYPE_INFO, "debugger not connected, disabling debug features");
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13 | GPIO14);
+		DBGMCU_CR &= ~DBGMCU_CR_STOP;
+		DBGMCU_CR &= ~DBGMCU_CR_SLEEP;
+	} else {
+		u_log(system_log, LOG_TYPE_DEBUG, "debugger connected");
+		gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14);
+	}
+
+}
+
+
+void port_enable_swd(bool e) {
+	if (e) {
+		gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14);
+		#if defined(CONFIG_STM32_DEBUG_IN_STOP)
+			DBGMCU_CR |= DBGMCU_CR_STOP;
+		#endif
+	} else {
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13 | GPIO14);
+		DBGMCU_CR &= ~DBGMCU_CR_STOP;
+	}
 }
 
 
@@ -191,7 +236,7 @@ static void console_init(void) {
 	nvic_enable_irq(NVIC_USART1_IRQ);
 	nvic_set_priority(NVIC_USART1_IRQ, 6 * 16);
 	module_usart_init(&console, "console", USART1);
-	module_usart_set_baudrate(&console, 115200);
+	module_usart_set_baudrate(&console, 921600);
 	hal_interface_set_name(&(console.iface.descriptor), "console");
 
 	/* Console is now initialized, set its stream to be used as u_log output. */
@@ -201,24 +246,67 @@ static void console_init(void) {
 }
 
 
+void usart1_isr(void) {
+	module_usart_interrupt_handler(&console);
+}
+
+
+struct module_usart lora_usart;
+static void rn2483_lora_init(void) {
+	/* LORA_PWR_EN */
+	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
+	port_lora_power(false);
+
+	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
+	gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
+
+	rcc_periph_clock_enable(RCC_USART2);
+
+	/* Allow waking up in stop mode. */
+	USART_CR1(USART2) |= USART_CR1_UESM;
+	USART_CR3(USART2) |= USART_CR3_WUS_RXNE;
+	RCC_CCIPR |= RCC_CCIPR_USARTxSEL_HSI16 << RCC_CCIPR_USART2SEL_SHIFT;
+
+	nvic_enable_irq(NVIC_USART2_IRQ);
+	nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
+	module_usart_init(&lora_usart, "lora-usart", USART2);
+	module_usart_set_baudrate(&lora_usart, 57600);
+	hal_interface_set_name(&(lora_usart.iface.descriptor), "lora_usart");
+
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&lora_usart.iface.descriptor, "lora-usart");
+}
+
+
+void usart2_isr(void) {
+	module_usart_interrupt_handler(&lora_usart);
+}
+
+
+void port_lora_power(bool en) {
+	if (en) {
+		gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
+		gpio_set(GPIOA, GPIO0);
+		vTaskDelay(100);
+	} else {
+		gpio_clear(GPIOA, GPIO0);
+		gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO3);
+	}
+}
+
+
 struct module_led led_status;
 struct module_led led_error;
 static void led_init(void) {
-	/* Allow reprogramming before disabling SWD. */
-	u_log(system_log, LOG_TYPE_INFO, "disabling SWD access");
-	vTaskDelay(5000);
-	
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO14);
 	module_led_init(&led_status, "led_status");
 	module_led_set_port(&led_status, GPIOA, GPIO14);
-	interface_led_loop(&led_status.iface, 0x11f1);
+	// interface_led_loop(&led_status.iface, 0x111f);
+	interface_led_loop(&led_status.iface, 0xf);
 	hal_interface_set_name(&(led_status.iface.descriptor), "led_status");
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_status.iface.descriptor, "led_status");
 
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13);
 	module_led_init(&led_error, "led_error");
 	module_led_set_port(&led_error, GPIOA, GPIO13);
-	// interface_led_loop(&led_error.iface, 0x11f1);
+	interface_led_loop(&led_error.iface, 0xf);
 	hal_interface_set_name(&(led_error.iface.descriptor), "led_error");
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_error.iface.descriptor, "led_error");
 }
@@ -475,10 +563,6 @@ int32_t port_init(void) {
 	/* USB_VBUS_DET */
 	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
 
-	/* LORA_PWR_EN */
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
-	gpio_clear(GPIOA, GPIO0);
-
 	/* MCU_USB_VBUS_DET */
 	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO4);
 
@@ -534,6 +618,7 @@ int32_t port_init(void) {
 	port_gps_power(false);
 	// port_gps_init();
 	port_sd_init();
+	rn2483_lora_init();
 
 	/* SPI1 with three accelerometers and a radio */
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
@@ -545,6 +630,11 @@ int32_t port_init(void) {
 
 	port_rfm_init();
 	port_accel2_init();
+
+	port_check_debug();
+	if (DBGMCU_CR & DBGMCU_CR_STOP) {
+		u_log(system_log, LOG_TYPE_WARN, "debugging in STOP mode");
+	}
 
 	return PORT_INIT_OK;
 }
@@ -585,11 +675,6 @@ void port_task_timer_init(void) {
 
 uint32_t port_task_timer_get_value(void) {
 	return lptim_get_extended();
-}
-
-
-void usart1_isr(void) {
-	module_usart_interrupt_handler(&console);
 }
 
 
