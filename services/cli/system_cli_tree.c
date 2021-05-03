@@ -86,6 +86,7 @@
 	#include "device_clock.h"
 #endif
 #include "config_export.h"
+#include "system_debug.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -531,7 +532,7 @@ const struct treecli_node *system_cli_tree = Node {
 							},
 						},
 						End
-					}
+					},
 				},
 				#endif
 				Node {
@@ -548,6 +549,27 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					},
 				},
+				Node {
+					Name "debug",
+					Subnodes {
+						Node {
+							Name "swd",
+							Commands {
+								End
+							},
+							Values {
+								Value {
+									Name "enabled",
+									.set = system_debug_swd_enabled_set,
+									Type TREECLI_VALUE_BOOL,
+								},
+								End,
+							}
+						},
+						End
+					}
+				},
+
 				End
 			},
 			Commands {
