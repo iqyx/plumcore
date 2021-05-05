@@ -1,28 +1,9 @@
-/*
+/* SPDX-License-Identifier: BSD-2-Clause
+ *
  * plog message queue router
  *
- * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
  * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <stdint.h>
@@ -37,24 +18,13 @@
 #include "u_log.h"
 #include "port.h"
 
-#include "interfaces/plog/descriptor.h"
-#include "interfaces/plog/client.h"
-#include "interfaces/servicelocator.h"
-#include "interfaces/clock/descriptor.h"
+#include <interfaces/mq.h>
+#include <interfaces/clock/descriptor.h>
+#include <interfaces/servicelocator.h>
 
 #include "plog_router.h"
 
-#ifdef MODULE_NAME
-#undef MODULE_NAME
-#endif
 #define MODULE_NAME "plog-router"
-
-
-/**
- * @todo doc
- * @todo coding style
- * @todo debug logging
-*/
 
 /* MQTT style topic matching.
  *
@@ -116,116 +86,195 @@ static bool plog_router_match_topic(const char *filter, const char *topic) {
 }
 
 
-static plog_router_ret_t plog_router_timestamp(PlogRouter *self, IPlogMessage *msg) {
-	(void)self;
-	if (msg == NULL) {
-		return PLOG_ROUTER_RET_BAD_ARG;
-	}
+/********************************* MqClient interface ***********************************/
 
-	/** @todo this is highly unoptimal. Query the service locator only
-	 *        at regular intervals. */
-	Interface *interface;
-	if (iservicelocator_query_name_type(locator, "main", ISERVICELOCATOR_TYPE_CLOCK, &interface) != ISERVICELOCATOR_RET_OK) {
-		return PLOG_ROUTER_RET_FAILED;
-	}
-	IClock *iclock = (IClock *)interface;
-	iclock_get(iclock, &msg->time);
 
-	return PLOG_ROUTER_RET_OK;
+
+static mq_ret_t plog_router_mq_client_subscribe(MqClient *self, const char *filter) {
+	if (u_assert(self != NULL) ||
+	    u_assert(filter != NULL)) {
+		return MQ_RET_FAILED;
+	}
+	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
+
+	/* We are implementing a single topic filter only. Overwrite the old one. */
+	strlcpy(c->topic_filter, filter, PLOG_ROUTER_TOPIC_LEN_MAX);
+
+	return MQ_RET_FAILED;
 }
 
 
-static plog_router_ret_t plog_router_process(PlogRouter *self, IPlogMessage *msg) {
-
-	/* Refuse to resend NULL messages. */
-	if (msg == NULL) {
-		return PLOG_ROUTER_RET_BAD_ARG;
+static mq_ret_t plog_router_mq_client_unsubscribe(MqClient *self, const char *filter) {
+	if (u_assert(self != NULL) ||
+	    u_assert(filter != NULL)) {
+		return MQ_RET_FAILED;
 	}
+	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
 
-	/** @todo lock while traversing the list! */
-	Plog *p = self->iplog.first_client;
-	while (p != NULL) {
-		if (plog_router_match_topic(p->topic_filter, msg->topic)) {
-			if (self->debug) {
-				u_log(
-					system_log,
-					LOG_TYPE_DEBUG,
-					U_LOG_MODULE_PREFIX("message '%s' delivered to a client, filter = %s"),
-					msg->topic,
-					p->topic_filter
-				);
-			}
+	c->topic_filter[0] = '\0';
 
-			uint8_t tmp = 0;
-			xQueueReceive(p->processed, &tmp, 0);
-
-			if (xQueueSend(p->txqueue, &msg, portMAX_DELAY) != pdTRUE) {
-				return PLOG_ROUTER_RET_FAILED;
-			}
-
-			/* Wait for the message to be processed. */
-			if (xQueueReceive(p->processed, &tmp, 1000) != pdTRUE) {
-				// if (self->debug) {
-					u_log(
-						system_log,
-						LOG_TYPE_DEBUG,
-						U_LOG_MODULE_PREFIX("message was not processed in time")
-					);
-				// }
-				return PLOG_ROUTER_RET_FAILED;
-			}
-			(void)tmp;
-		}
-		p = p->next;
-	}
-	return PLOG_ROUTER_RET_OK;
+	return MQ_RET_FAILED;
 }
 
 
-static void plog_router_task(void *p) {
-	PlogRouter *self = (PlogRouter *)p;
-
-	self->running = true;
-	while (self->can_run) {
-
-		IPlogMessage msg = {0};
-
-		/* The rxqueue is a single element long. Peek the message first without removing it
-		 * to prevent another client submitting a message until the current one is processed.
-		 * It is important because only a single queue is used to signal message delivery. */
-		if (xQueuePeek(self->iplog.rxqueue, &msg, portMAX_DELAY) != pdTRUE) {
-			/* Something went wrong. Repeating the step is the most reasonable
-			 * thing we can do now. */
-			continue;
-		}
-
-		if (plog_router_timestamp(self, &msg) != PLOG_ROUTER_RET_OK) {
-			/* Message timestamping failed. Do nothing. */
-		}
-
-		if (plog_router_process(self, &msg) != PLOG_ROUTER_RET_OK) {
-			/* Message cannot be processed. Ignore it and send delivery notification
-			 * to avoid blocking the sender. */
-			/** @todo find a way to pass a proper return code back to the sender */
-		}
-
-		/* Signal delivery first. Do not remove the message from the queue yet. */
-		/* Arbitrary number. */
-		uint8_t tmp = 1;
-		if (xQueueSend(self->iplog.delivered, &tmp, portMAX_DELAY) != pdTRUE) {
-			/* If delivery cannot be signaled, simply ignore it. The client
-			 * will time out waiting for it. */
-			continue;
-		}
-
-		/* Now it is the time to allow some other process to submit its message. */
-		xQueueReceive(self->iplog.rxqueue, &msg, 0);
-
+static mq_ret_t plog_router_mq_client_receive(MqClient *self, char *topic, size_t topic_size, struct ndarray *array, struct timespec *ts) {
+	if (u_assert(self != NULL) ||
+	    u_assert(topic != NULL) ||
+	    u_assert(array != NULL) ||
+	    u_assert(ts != NULL)) {
+		return MQ_RET_FAILED;
 	}
-	vTaskDelete(NULL);
-	self->running = false;
+	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
+
+	/* Wait for the message. It may already be delivered, the queue handles that. */
+	struct plog_router_msg_send msg_send = {0};
+	if (xQueueReceive(c->send_lock, &msg_send, pdMS_TO_TICKS(c->rx_timeout_ms)) == pdTRUE) {
+		struct plog_router_msg_recv msg_recv = {0};
+	
+		strlcpy(topic, msg_send.topic, topic_size);
+		memcpy(ts, msg_send.ts, sizeof(struct timespec));
+		memcpy(array, msg_send.array, sizeof(struct ndarray));
+
+		/* And pass the response back. */
+		xQueueSend(c->recv_lock, &msg_recv, 0);
+		return MQ_RET_OK;
+	}
+
+	return MQ_RET_TIMEOUT;
 }
 
+
+static mq_ret_t deliver_to_client(struct plog_router_mq_client *to, const char *topic, const struct ndarray *array, const struct timespec *ts) {
+	/* Only a single delivery can be made at a time. Lock the msg mutex.
+	 * Attempt delivery for a configurable time. */
+	if (xSemaphoreTake(to->msg_mutex, 100) == pdTRUE) {
+		/* Let the client know we have a message to deliver. */
+		struct plog_router_msg_send msg_send = {
+			.topic = topic,
+			.array = array,
+			.ts = ts
+		};
+		xQueueSend(to->send_lock, &msg_send, 100);
+
+		struct plog_router_msg_recv msg_recv = {0};
+		if (xQueueReceive(to->recv_lock, &msg_recv, 100) == pdTRUE) {
+			/** @todo handle the return value. */
+		}
+
+		/* Message was delivered successfully, let the others in. */
+		xSemaphoreGive(to->msg_mutex);
+		return MQ_RET_OK;
+	}
+	return MQ_RET_TIMEOUT;
+}
+
+
+static mq_ret_t plog_router_mq_client_publish(MqClient *self, const char *topic, const struct ndarray *array, const struct timespec *ts) {
+	if (u_assert(self != NULL) ||
+	    u_assert(topic != NULL) ||
+	    u_assert(array != NULL) ||
+	    u_assert(ts != NULL)) {
+		return MQ_RET_FAILED;
+	}
+	Mq *mq = self->parent;
+	PlogRouter *plog = (PlogRouter *)mq->parent;
+
+	/** @todo */
+	struct plog_router_mq_client *c = plog->first_client;
+	while (c) {
+		if (plog_router_match_topic(c->topic_filter, topic)) {
+			deliver_to_client(c, topic, array, ts);
+		}
+		c = (struct plog_router_mq_client *)c->client.next;
+	}
+
+	return MQ_RET_FAILED;
+}
+
+
+static mq_ret_t plog_router_mq_client_close(MqClient *self) {
+	if (u_assert(self != NULL)) {
+		return MQ_RET_FAILED;
+	}
+
+	/** @todo not implemented */
+	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
+	c->topic_filter[0] = '\0';
+
+	return MQ_RET_OK;
+}
+
+
+static mq_ret_t plog_router_mq_client_set_timeout(MqClient *self, uint32_t timeout_ms) {
+	if (u_assert(self != NULL)) {
+		return MQ_RET_FAILED;
+	}
+
+	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
+	c->rx_timeout_ms = timeout_ms;
+
+	return MQ_RET_OK;
+}
+
+
+static struct mq_client_vmt mq_client_vmt = {
+	.subscribe = &plog_router_mq_client_subscribe,
+	.unsubscribe = &plog_router_mq_client_unsubscribe,
+	.publish = &plog_router_mq_client_publish,
+	.receive = &plog_router_mq_client_receive,
+	.close = &plog_router_mq_client_close,
+	.set_timeout = &plog_router_mq_client_set_timeout,
+};
+
+
+/********************************* Mq interface ***********************************/
+
+static MqClient *plog_router_open(Mq *self) {
+	if (u_assert(self != NULL)) {
+		return NULL;
+	}
+	PlogRouter *plog = (PlogRouter *)self->parent;
+
+	/* Allocate some space for a structure holding the client instance. */
+	struct plog_router_mq_client *c = malloc(sizeof(struct plog_router_mq_client));
+	if (c == NULL) {
+		goto err;
+	}
+	memset(c, 0, sizeof(struct plog_router_mq_client));
+
+	/* Initialize parts needed by the implementing service (plog-router).
+	 * The client is not subscribed to anything yet. */
+	c->topic_filter[0] = '\0';
+
+	c->msg_mutex = xSemaphoreCreateMutex();
+	c->send_lock = xQueueCreate(1, sizeof(struct plog_router_msg_send));
+	c->recv_lock = xQueueCreate(1, sizeof(struct plog_router_msg_recv));
+	if (c->msg_mutex == NULL || c->send_lock == NULL || c->recv_lock == NULL) {
+		goto err;
+	}
+	c->rx_timeout_ms = PLOG_ROUTER_RX_TIMEOUT_MS_DEFAULT;
+
+	/* And finally initialize the MqClient interface and add the client to the list. */
+	mq_client_init(&c->client, self);
+	/** @todo add to the list, lock */
+	c->client.next = (MqClient *)plog->first_client;
+	c->client.vmt = &mq_client_vmt;
+	plog->first_client = c;
+	/** @todo unlock */
+	return &c->client;
+
+err:
+	free(c);
+	return NULL;
+}
+
+
+static struct mq_vmt mq_vmt = {
+	.open = plog_router_open,
+};
+
+
+/********************************* PlogRouter API ***********************************/
 
 plog_router_ret_t plog_router_init(PlogRouter *self) {
 	if (u_assert(self != NULL)) {
@@ -234,46 +283,44 @@ plog_router_ret_t plog_router_init(PlogRouter *self) {
 
 	memset(self, 0, sizeof(PlogRouter));
 
-	/* Initialize the PLog interface for clients. */
-	if (iplog_init(&self->iplog) != IPLOG_RET_OK) {
-		return PLOG_ROUTER_RET_FAILED;
+	if (mq_init(&self->mq) != MQ_RET_OK) {
+		goto ret;
 	}
-
-	/* Create the router main task. */
-	self->can_run = true;
-	xTaskCreate(plog_router_task, "plog-router", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->task));
-	if (self->task == NULL) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
-		return PLOG_ROUTER_RET_FAILED;
-	}
-
+	self->mq.parent = (void *)self;
+	self->mq.vmt = &mq_vmt;
+	
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("plog message router started"));
 	self->initialized = true;
 	return PLOG_ROUTER_RET_OK;
+
+ret:
+	plog_router_free(self);
+	return PLOG_ROUTER_RET_FAILED;
 }
 
 
 plog_router_ret_t plog_router_free(PlogRouter *self) {
-	if (self == NULL) {
+	if (u_assert(self != NULL) ||
+	    u_assert(self->initialized)) {
 		return PLOG_ROUTER_RET_NULL;
 	}
 
-	if (self->initialized == false) {
-		return PLOG_ROUTER_RET_FAILED;
-	}
-
-	self->can_run = false;
-	while (self->running) {
-		vTaskDelay(10);
-	}
-
-	/** @todo cannot free the interface descriptor if there are any clients connected */
-	iplog_free(&self->iplog);
+	mq_free(&self->mq);
 
 	self->initialized = false;
 	return PLOG_ROUTER_RET_OK;
 }
 
 
+plog_router_ret_t plog_router_set_clock(PlogRouter *self, Clock *rtc) {
+	if (u_assert(self != NULL) ||
+	    u_assert(clock != NULL)) {
+		return PLOG_ROUTER_RET_NULL;
+	}
+
+	self->rtc = rtc;
+	
+	return PLOG_ROUTER_RET_OK;
+}
 
 

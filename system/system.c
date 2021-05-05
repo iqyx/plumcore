@@ -97,9 +97,9 @@ static void system_plog_router_init(void) {
 	plog_router_init(&plog_router);
 	iservicelocator_add(
 		locator,
-		ISERVICELOCATOR_TYPE_PLOG_ROUTER,
-		(Interface *)&plog_router.iplog.interface,
-		"plog-router"
+		ISERVICELOCATOR_TYPE_MQ,
+		(Interface *)&plog_router.mq,
+		"plog-mq"
 	);
 }
 #endif

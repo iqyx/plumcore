@@ -47,97 +47,59 @@
 #include "services/interfaces/servicelocator.h"
 #include "port.h"
 
-/* Includes of the service itself. */
-#include "services/interfaces/plog/descriptor.h"
-#include "services/interfaces/plog/client.h"
+#include <interfaces/mq.h>
 
 #include "service_plog_router.h"
-
-
-static plog_ret_t service_plog_router_sniff_recv_handler(void *context, const IPlogMessage *msg) {
-	ServiceCli *cli = (ServiceCli *)context;
-
-	struct tm ts = {0};
-	localtime_r(&msg->time.tv_sec, &ts);
-	char tstr[30];
-	strftime(tstr, sizeof(tstr), "[%FT%TZ] ", &ts);
-
-	/* Time of the message reception by the router. */
-	module_cli_output(tstr, cli);
-	module_cli_output(msg->topic, cli);
-
-	char num[32] = {0};
-	const char *message_types[] = {
-		"NONE",
-		"LOG",
-		"INT32",
-		"UINT32",
-		"FLOAT",
-		"DATA"
-	};
-	module_cli_output(" ", cli);
-	module_cli_output(message_types[msg->type], cli);
-	module_cli_output(":", cli);
-
-	switch (msg->type) {
-		case IPLOG_MESSAGE_TYPE_FLOAT: {
-			float cfloat_int = 0.0;
-			float cfloat_frac = modff(msg->content.cfloat, &cfloat_int);
-
-			snprintf(num, sizeof(num), "%d.%03d", (int)cfloat_int, (int)(cfloat_frac * 1000.0));
-			module_cli_output(num, cli);
-			break;
-		}
-
-		case IPLOG_MESSAGE_TYPE_DATA:
-			for (size_t i = 0; i < msg->content.data.len; i++) {
-				snprintf(num, sizeof(num), "%02x", msg->content.data.buf[i]);
-				module_cli_output(num, cli);
-			}
-
-			snprintf(num, sizeof(num), " (size %dB)", msg->content.data.len);
-			module_cli_output(num, cli);
-			break;
-
-		default:
-			break;
-	}
-	module_cli_output("\r\n", cli);
-
-	return PLOG_RET_OK;
-}
 
 
 int32_t service_plog_router_sniff(struct treecli_parser *parser, void *exec_context) {
 	(void)exec_context;
 	ServiceCli *cli = (ServiceCli *)parser->context;
 
-	Interface *interface;
-	if (iservicelocator_query_name_type(locator, "plog-router", ISERVICELOCATOR_TYPE_PLOG_ROUTER, &interface) != ISERVICELOCATOR_RET_OK) {
+	Mq *mq = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_MQ, 0, (Interface **)&mq) != ISERVICELOCATOR_RET_OK) {
 		return 1;
 	}
-	IPlog *iplog = (IPlog *)interface;
 
-	Plog p;
-	if (plog_open(&p, iplog) != PLOG_RET_OK) {
-		module_cli_output("error: cannot open the plog-router interface\r\n", cli);
-		return 1;
+	MqClient *c = mq->vmt->open(mq);
+	if (c == NULL) {
+		module_cli_output("error: cannot open MqClient\r\n", cli);
+		return -2;
 	}
-	plog_set_recv_handler(&p, service_plog_router_sniff_recv_handler, (void *)cli);
-	plog_subscribe(&p, "#");
-
+	c->vmt->subscribe(c, "#");
+	c->vmt->set_timeout(c, 500);
+	
 	module_cli_output("plog-router sniffer started... (press any key to interrupt)\r\n", cli);
 	while (true) {
-		plog_receive(&p, 500);
+		/* Allocate a ndarray on the stack, do not assign any buffer space
+		 * because we are not interested in the data. */
+		struct ndarray ndarray = {0};
+		struct timespec ts = {0};
+		char topic[32];
+		mq_ret_t ret = c->vmt->receive(c, topic, sizeof(topic), &ndarray, &ts);
+		if (ret == MQ_RET_OK || ret == MQ_RET_OK_TRUNCATED) {
+			/* Format the time first. */
+			struct tm tm = {0};
+			localtime_r(&ts.tv_sec, &tm);
+			char tstr[35] = {0};
+			strftime(tstr, sizeof(tstr) - 1, "[%FT%TZ] ", &tm);
+			module_cli_output(tstr, cli);
 
+			module_cli_output(topic, cli);
+
+			snprintf(tstr, sizeof(tstr) - 1,  ": [data array_size = %u]\r\n", ndarray.array_size);
+			tstr[sizeof(tstr) - 1] = '\0';
+			module_cli_output(tstr, cli);
+		}
+
+		/* Check if a key was pressed. Interrupt if yes. */
 		uint8_t chr = 0;
 		int16_t read = interface_stream_read_timeout(cli->stream, &chr, 1, 0);
 		if (read != 0) {
 			break;
 		}
 	}
-
-	plog_close(&p);
+	c->vmt->close(c);
 
 	return 0;
 }

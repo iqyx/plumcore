@@ -230,6 +230,10 @@ menu "Communication server/client services"
 		config SERVICE_PLOG_RELAY
 			bool "Relay data from/to PLOG message router to/from various interfaces"
 			default y
+
+		config SERVICE_MQ_WS_SOURCE
+			bool "Service to relay data from a WaveformSource source"
+			default y
 	endmenu
 
 	menu "Services implemented over raw UDP/TCP protocols"
