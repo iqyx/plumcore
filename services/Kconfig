@@ -234,6 +234,21 @@ menu "Communication server/client services"
 		config SERVICE_MQ_WS_SOURCE
 			bool "Service to relay data from a WaveformSource source"
 			default y
+
+		if SERVICE_MQ_WS_SOURCE
+			config SERVICE_MQ_WS_SOURCE_MAX_TOPIC_LEN
+				int "Maximum length of the MQ topic"
+				default 32
+
+			config SERVICE_MQ_WS_SOURCE_RXBUF_SIZE
+				int "Number of samples to read from the WaveformSource at once"
+				default 32
+
+			config SERVICE_MQ_WS_SOURCE_READ_PERIOD_MS
+				int "Period of querying the WaveformSource for new data (ms)"
+				default 500
+		endif
+
 	endmenu
 
 	menu "Services implemented over raw UDP/TCP protocols"
