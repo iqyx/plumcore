@@ -11,35 +11,44 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define NDARRAY_MAX_DIM 3
 
-enum dtype_byteorder {
-	DTYPE_BYTEORDER_LITTLE = 0,
-	DTYPE_BYTEORDER_BIG,
-};
+typedef enum {
+	NDARRAY_RET_OK = 0,
+	NDARRAY_RET_FAILED,
+} ndarray_ret_t;
 
 enum dtype {
-	DTYPE_TYPE_CHAR,
-	DTYPE_TYPE_INT8,
-	DTYPE_TYPE_UINT8,
-	DTYPE_TYPE_INT16,
-	DTYPE_TYPE_UINT16,
-	DTYPE_TYPE_INT32,
-	DTYPE_TYPE_UINT32,
-	DTYPE_TYPE_INT64,
-	DTYPE_TYPE_UINT64,
-	DTYPE_TYPE_FLOAT,
-	DTYPE_TYPE_DOUBLE,
+	DTYPE_CHAR = 0,
+	DTYPE_INT8 = 1,
+	DTYPE_UINT8 = 2,
+	DTYPE_INT16 = 3,
+	DTYPE_UINT16 = 4,
+	DTYPE_INT32 = 5,
+	DTYPE_UINT32 = 6,
+	DTYPE_INT64 = 7,
+	DTYPE_UINT64 = 8,
+	DTYPE_FLOAT = 9,
+	DTYPE_DOUBLE = 10,
 };
 
-struct ndarray {
-	uint8_t dimensions;
+typedef struct ndarray {
 	enum dtype dtype;
-	enum dtype_byteorder byteorder;
-	uint8_t dtype_size;
-	size_t shape[NDARRAY_MAX_DIM];
-	size_t array_size;
-	void *buf;
-	size_t buf_size;
-};
+	size_t dsize;
 
+	size_t asize;
+
+	void *buf;
+	size_t bufsize;
+} NdArray;
+
+
+ndarray_ret_t ndarray_init_zero(NdArray *self, enum dtype dtype, size_t asize);
+ndarray_ret_t ndarray_init_empty(NdArray *self, enum dtype dtype, size_t asize_max);
+ndarray_ret_t ndarray_init_view(NdArray *self, enum dtype dtype, size_t asize, void *buf, size_t bufsize);
+ndarray_ret_t ndarray_free(NdArray *self);
+
+size_t ndarray_get_dsize(enum dtype dtype);
+ndarray_ret_t ndarray_to_str(NdArray *self, char *s, size_t max);
+ndarray_ret_t ndarray_value_to_str(NdArray *self, size_t i, char *s, size_t max);
+ndarray_ret_t ndarray_move(NdArray *self, size_t offset_to, size_t offset_from, size_t size);
+ndarray_ret_t ndarray_copy_from(NdArray *self, size_t offset_to, NdArray *from, size_t offset_from, size_t size);

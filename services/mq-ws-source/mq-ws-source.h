@@ -66,6 +66,7 @@ typedef struct {
 	 * When the source is available, note both. */
 	enum waveform_source_format source_format;
 	size_t source_format_size;
+	enum dtype source_dtype;
 
 	/* Number of channels in the source data stream. */
 	uint32_t source_channels;

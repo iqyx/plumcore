@@ -71,25 +71,23 @@ int32_t service_plog_router_sniff(struct treecli_parser *parser, void *exec_cont
 	
 	module_cli_output("plog-router sniffer started... (press any key to interrupt)\r\n", cli);
 	while (true) {
-		/* Allocate a ndarray on the stack, do not assign any buffer space
-		 * because we are not interested in the data. */
-		struct ndarray ndarray = {0};
+		NdArray array = {0};
 		struct timespec ts = {0};
 		char topic[32];
-		mq_ret_t ret = c->vmt->receive(c, topic, sizeof(topic), &ndarray, &ts);
+		mq_ret_t ret = c->vmt->receive(c, topic, sizeof(topic), &array, &ts);
 		if (ret == MQ_RET_OK || ret == MQ_RET_OK_TRUNCATED) {
 			/* Format the time first. */
 			struct tm tm = {0};
 			localtime_r(&ts.tv_sec, &tm);
-			char tstr[35] = {0};
+			char tstr[100] = {0};
 			strftime(tstr, sizeof(tstr) - 1, "[%FT%TZ] ", &tm);
 			module_cli_output(tstr, cli);
-
 			module_cli_output(topic, cli);
+			module_cli_output(": ", cli);
 
-			snprintf(tstr, sizeof(tstr) - 1,  ": [data array_size = %u]\r\n", ndarray.array_size);
-			tstr[sizeof(tstr) - 1] = '\0';
+			ndarray_to_str(&array, tstr, sizeof(tstr));
 			module_cli_output(tstr, cli);
+			module_cli_output("\r\n", cli);
 		}
 
 		/* Check if a key was pressed. Interrupt if yes. */

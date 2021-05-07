@@ -59,22 +59,31 @@ static void get_source_format(MqWsSource *self) {
 	self->source->get_format(self->source->parent, &self->source_format, &self->source_channels);
 	switch (self->source_format) {
 		case WAVEFORM_SOURCE_FORMAT_U8:
+			self->source_dtype = DTYPE_UINT8;
+			break;
 		case WAVEFORM_SOURCE_FORMAT_S8:
-			self->source_format_size = 1;
+			self->source_dtype = DTYPE_INT8;
 			break;
 		case WAVEFORM_SOURCE_FORMAT_U16:
+			self->source_dtype = DTYPE_UINT16;
+			break;
 		case WAVEFORM_SOURCE_FORMAT_S16:
-			self->source_format_size = 2;
+			self->source_dtype = DTYPE_INT16;
 			break;
 		case WAVEFORM_SOURCE_FORMAT_U32:
+			self->source_dtype = DTYPE_UINT32;
+			break;
 		case WAVEFORM_SOURCE_FORMAT_S32:
+			self->source_dtype = DTYPE_INT32;
+			break;
 		case WAVEFORM_SOURCE_FORMAT_FLOAT:
-			self->source_format_size = 4;
+			self->source_dtype = DTYPE_FLOAT;
 			break;
 		default:
 			self->source_format_size = 0;
 			break;
 	}
+	self->source_format_size = ndarray_get_dsize(self->source_dtype);
 }
 
 
@@ -119,9 +128,8 @@ static mq_ws_source_ret_t write_channels(MqWsSource *self, size_t samples) {
 		 * channels with full buffers. Publish their buffers to the MQ. */
 		if (ch->samples == ch->max_samples) {
 			/* Initialize the metadata first. */
-			struct ndarray array = {
-				.array_size = ch->samples
-			};
+			NdArray array;
+			ndarray_init_view(&array, DTYPE_INT16, ch->samples, ch->buf, ch->samples * self->source_format_size);
 
 			/** @todo get the exact sample time from somewhere */
 			struct timespec ts = {0};

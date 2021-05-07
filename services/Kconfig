@@ -249,6 +249,18 @@ menu "Communication server/client services"
 				default 500
 		endif
 
+		config SERVICE_MQ_BATCH
+			bool "MQ data batching service"
+			default y
+
+		config SERVICE_MQ_STATS
+			bool "MQ data statistics service"
+			default y
+
+		config SERVICE_MQ_PERIODOGRAM
+			bool "MQ periodogram computation using the Welch method"
+			default y
+
 	endmenu
 
 	menu "Services implemented over raw UDP/TCP protocols"
