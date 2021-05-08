@@ -34,6 +34,26 @@
 #define MODULE_NAME "mq-periodogram"
 
 
+static float get_window_coef(uint32_t i, uint32_t n, enum mq_periodogram_window window) {
+	switch (window) {
+		case MQ_PERIODOGRAM_WINDOW_HAMMING:
+			return 0.54f - 0.46f * cosf(2.0f * PI * (float)i / ((float)n - 1.0f));
+		default:
+			return 1.0f;
+	}
+}
+
+
+static const char *window_str(enum mq_periodogram_window window) {
+	switch (window) {
+		case MQ_PERIODOGRAM_WINDOW_HAMMING:
+			return "hamming";
+		default:
+			return "none";
+	}
+}
+
+
 /* There is a new data in the FIFO. Compute FFT of the FIFO
  * and update the periodogram. Publish the resulting periodogram
  * if enough passes were done. */
@@ -45,10 +65,10 @@ static void update_periodogram(MqPeriodogram *self) {
 	arm_rfft_fast_instance_f32 s;
 	arm_rfft_fast_init_f32(&s, self->fifo.asize);
 
-	/* Prepare the input buffer. Convert to float. */
+	/* Prepare the input buffer. Convert to float and apply a windowing function. */
 	self->tmp1.asize = self->fifo.asize;
 	for (size_t i = 0; i < self->fifo.asize; i++) {
-		((float *)self->tmp1.buf)[i] = ((int16_t *)self->fifo.buf)[i];
+		((float *)self->tmp1.buf)[i] = (float)((int16_t *)self->fifo.buf)[i] * get_window_coef(i, self->fifo.asize, self->window);
 	}
 
 	/* Compute FFT and convert the output. */
@@ -85,13 +105,20 @@ static void mq_periodogram_task(void *p) {
 				/* Message is bigger than the fifo itself. */
 				continue;
 			}
+			/* Shift the FIFO and append new data. */
 			ndarray_move(&self->fifo, 0, self->rxbuf.asize, self->fifo.asize - self->rxbuf.asize);
 			ndarray_copy_from(&self->fifo, self->fifo.asize - self->rxbuf.asize, &self->rxbuf, 0, self->rxbuf.asize);
+
+			/* Update the resulting periodogram data with a newly computed FFT. */
 			update_periodogram(self);
-			if (self->periodogram_count >= 2) {
+
+			/* If the period elapsed, finish the periodogram computation,
+			 * publish the result and start over. */
+			if (self->periodogram_count >= self->period) {
 				ndarray_sqrt(&self->periodogram);
 				self->mqc->vmt->publish(self->mqc, self->topic, &self->periodogram, &ts);
 				ndarray_zero(&self->periodogram);
+				self->periodogram_count = 0;
 			}
 		}
 	}
@@ -136,30 +163,23 @@ mq_periodogram_ret_t mq_periodogram_start(MqPeriodogram *self, const char *topic
 	self->mqc->vmt->subscribe(self->mqc, topic_sub);
 	strlcpy(self->topic, topic_pub, MQ_PERIODOGRAM_MAX_TOPIC_LEN);
 
-	if (ndarray_init_zero(&self->rxbuf, dtype, 512) != NDARRAY_RET_OK) {
+	/* Allocate working buffers. They are reused while the instance is runing. */
+	if ((ndarray_init_zero(&self->rxbuf, dtype, MQ_PERIODOGRAM_MAX_INPUT_BUF_LEN) != NDARRAY_RET_OK) ||
+	    (ndarray_init_zero(&self->fifo, dtype, asize) != NDARRAY_RET_OK) ||
+	    (ndarray_init_zero(&self->tmp1, DTYPE_FLOAT, asize) != NDARRAY_RET_OK) ||
+	    (ndarray_init_zero(&self->tmp2, DTYPE_FLOAT, asize) != NDARRAY_RET_OK) ||
+	    (ndarray_init_zero(&self->periodogram, DTYPE_FLOAT, asize / 2) != NDARRAY_RET_OK)) {
 		goto err;
 	}
-	if (ndarray_init_zero(&self->fifo, dtype, asize) != NDARRAY_RET_OK) {
-		goto err;
-	}
-	if (ndarray_init_zero(&self->tmp1, DTYPE_FLOAT, asize) != NDARRAY_RET_OK) {
-		goto err;
-	}
-	if (ndarray_init_zero(&self->tmp2, DTYPE_FLOAT, asize) != NDARRAY_RET_OK) {
-		goto err;
-	}
-	if (ndarray_init_zero(&self->periodogram, DTYPE_FLOAT, asize / 2) != NDARRAY_RET_OK) {
-		goto err;
-	}
-	self->periodogram_count = 0;
 
+	self->periodogram_count = 0;
 	xTaskCreate(mq_periodogram_task, "mq-periodogram", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		goto err;
 	}
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("'%s' -> '%s', periodogram size = %lu"), topic_sub, topic_pub, asize);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("'%s' -> '%s', periodogram size = %lu, window = %s, period = %u"), topic_sub, topic_pub, asize, window_str(self->window), self->period);
 	return MQ_PERIODOGRAM_RET_OK;
 err:
 	/* Not fully started, stop everything. */
@@ -191,6 +211,29 @@ mq_periodogram_ret_t mq_periodogram_stop(MqPeriodogram *self) {
 	ndarray_free(&self->tmp2);
 	ndarray_free(&self->periodogram);
 
+	return MQ_PERIODOGRAM_RET_OK;
+}
+
+
+mq_periodogram_ret_t mq_periodogram_set_period(MqPeriodogram *self, uint32_t period) {
+	if (u_assert(self != NULL)) {
+		return MQ_PERIODOGRAM_RET_FAILED;
+	}
+
+	/* Live update the period. */
+	self->period = period;
+	
+	return MQ_PERIODOGRAM_RET_OK;
+}
+
+
+mq_periodogram_ret_t mq_periodogram_set_window(MqPeriodogram *self, enum mq_periodogram_window window) {
+	if (u_assert(self != NULL)) {
+		return MQ_PERIODOGRAM_RET_FAILED;
+	}
+
+	self->window = window;
+	
 	return MQ_PERIODOGRAM_RET_OK;
 }
 
