@@ -38,11 +38,8 @@ typedef struct {
 
 	char sub_topic[MQ_BATCH_MAX_TOPIC_LEN];
 	char pub_topic[MQ_BATCH_MAX_TOPIC_LEN];
-	size_t batch_size;
-	size_t dtype_size;
-	enum dtype dtype;
-	void *buf;
-	size_t buf_samples;
+	NdArray rxbuf;
+	NdArray batch;
 
 	TaskHandle_t task;
 } MqBatch;
@@ -50,5 +47,5 @@ typedef struct {
 
 mq_batch_ret_t mq_batch_init(MqBatch *self, Mq *mq);
 mq_batch_ret_t mq_batch_free(MqBatch *self);
-mq_batch_ret_t mq_batch_start(MqBatch *self, size_t batch_size, const char *sub_topic, const char *pub_topic);
+mq_batch_ret_t mq_batch_start(MqBatch *self, enum dtype dtype, size_t asize, const char *sub_topic, const char *pub_topic);
 mq_batch_ret_t mq_batch_stop(MqBatch *self);

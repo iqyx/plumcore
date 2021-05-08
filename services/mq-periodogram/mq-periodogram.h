@@ -38,10 +38,16 @@ typedef struct {
 	volatile bool running;
 
 	char topic[MQ_PERIODOGRAM_MAX_TOPIC_LEN];
+	uint32_t avg_count;
 
 	TaskHandle_t task;
 
+	NdArray rxbuf;
 	NdArray fifo;
+	NdArray tmp1;
+	NdArray tmp2;
+	NdArray periodogram;
+	uint32_t periodogram_count;
 	
 } MqPeriodogram;
 

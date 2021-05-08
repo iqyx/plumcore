@@ -31,39 +31,14 @@ static void mq_batch_task(void *p) {
 	self->can_run = true;
 	self->running = true;
 	while (self->can_run) {
-		NdArray array = {0};
 		struct timespec ts = {0};
 		char topic[MQ_BATCH_MAX_TOPIC_LEN] = {0};
-		if (self->mqc->vmt->receive(self->mqc, topic, MQ_BATCH_MAX_TOPIC_LEN, &array, &ts) == MQ_RET_OK) {
-			self->dtype_size = array.dsize;
-			self->dtype = array.dtype;
-			if (self->buf == NULL) {
-				self->buf = malloc(self->dtype_size * self->batch_size);
-				if (self->buf == NULL) {
-					continue;
-				}
-			}
-
-			size_t remaining = self->batch_size - self->buf_samples;
-			if (array.asize > remaining) {
-				continue;
-			}
-
-			if (array.buf != NULL && array.bufsize >= (array.asize * array.dsize)) {
-				memcpy(
-					(uint8_t *)self->buf + self->buf_samples * self->dtype_size,
-					array.buf,
-					array.asize * array.dsize
-				);
-			}
-			self->buf_samples += array.asize;
-
-			// u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("buf_samples = %u"), self->buf_samples);
-			if (self->buf_samples == self->batch_size) {
-				/* Reuse the same ndarray */
-				ndarray_init_view(&array, self->dtype, self->batch_size, self->buf, self->dtype_size * self->batch_size);
-				self->mqc->vmt->publish(self->mqc, self->pub_topic, &array, &ts);
-				self->buf_samples = 0;
+		if (self->mqc->vmt->receive(self->mqc, topic, MQ_BATCH_MAX_TOPIC_LEN, &self->rxbuf, &ts) == MQ_RET_OK) {
+			ndarray_append(&self->batch, &self->rxbuf);
+			// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("received %lu, batch size %lu"), self->rxbuf.asize, self->batch.asize);
+			if ((self->batch.asize * self->batch.dsize) >= self->batch.bufsize) {
+				self->mqc->vmt->publish(self->mqc, self->pub_topic, &self->batch, &ts);
+				self->batch.asize = 0;
 			}
 		}
 	}
@@ -93,9 +68,9 @@ mq_batch_ret_t mq_batch_free(MqBatch *self) {
 }
 
 
-mq_batch_ret_t mq_batch_start(MqBatch *self, size_t batch_size, const char *sub_topic, const char *pub_topic) {
+mq_batch_ret_t mq_batch_start(MqBatch *self, enum dtype dtype, size_t asize, const char *sub_topic, const char *pub_topic) {
 	if (u_assert(self != NULL) ||
-	    u_assert(batch_size > 0) ||
+	    u_assert(asize > 0) ||
 	    u_assert(sub_topic != NULL) ||
 	    u_assert(pub_topic != NULL)) {
 		return MQ_BATCH_RET_FAILED;
@@ -103,7 +78,6 @@ mq_batch_ret_t mq_batch_start(MqBatch *self, size_t batch_size, const char *sub_
 
 	strlcpy(self->sub_topic, sub_topic, MQ_BATCH_MAX_TOPIC_LEN);
 	strlcpy(self->pub_topic, pub_topic, MQ_BATCH_MAX_TOPIC_LEN);
-	self->batch_size = batch_size;
 
 	/* Create a new MQ client instance we will use to publish messages */
 	self->mqc = self->mq->vmt->open(self->mq);
@@ -112,13 +86,20 @@ mq_batch_ret_t mq_batch_start(MqBatch *self, size_t batch_size, const char *sub_
 	}
 	self->mqc->vmt->subscribe(self->mqc, sub_topic);
 
+	if (ndarray_init_empty(&self->batch, dtype, asize) != NDARRAY_RET_OK) {
+		goto err;
+	}
+	if (ndarray_init_empty(&self->rxbuf, dtype, 32) != NDARRAY_RET_OK) {
+		goto err;
+	}
+
 	xTaskCreate(mq_batch_task, "mq-batch", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		goto err;
 	}
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("'%s' -> '%s', batching %lu values"), sub_topic, pub_topic, batch_size);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("'%s' -> '%s', batching %lu values"), sub_topic, pub_topic, self->batch.bufsize / self->batch.dsize);
 	return MQ_BATCH_RET_OK;
 err:
 	/* Not fully started, stop everything. */
@@ -144,7 +125,8 @@ mq_batch_ret_t mq_batch_stop(MqBatch *self) {
 		self->mqc->vmt->close(self->mqc);
 	}
 
-	free(self->buf);
+	ndarray_free(&self->rxbuf);
+	ndarray_free(&self->batch);
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("stopped"));
 	return MQ_BATCH_RET_OK;

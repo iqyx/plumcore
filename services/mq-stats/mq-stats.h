@@ -16,6 +16,7 @@
 #include "task.h"
 
 #include <interfaces/mq.h>
+#include <types/ndarray.h>
 
 #define MQ_STATS_MAX_TOPIC_LEN 32
 
@@ -48,6 +49,7 @@ typedef struct {
 
 	char topic[MQ_STATS_MAX_TOPIC_LEN];
 	enum mq_stats_enabled e;
+	NdArray buf;
 
 	TaskHandle_t task;
 	
@@ -56,6 +58,6 @@ typedef struct {
 
 mq_stats_ret_t mq_stats_init(MqStats *self, Mq *mq);
 mq_stats_ret_t mq_stats_free(MqStats *self);
-mq_stats_ret_t mq_stats_start(MqStats *self, const char *topic);
+mq_stats_ret_t mq_stats_start(MqStats *self, const char *topic, enum dtype dtype, size_t asize);
 mq_stats_ret_t mq_stats_stop(MqStats *self);
 mq_stats_ret_t mq_stats_enable(MqStats *self, enum mq_stats_enabled e);

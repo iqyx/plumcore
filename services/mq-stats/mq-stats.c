@@ -19,6 +19,7 @@
 #include "u_assert.h"
 
 #include <interfaces/mq.h>
+#include <types/ndarray.h>
 
 #include "mq-stats.h"
 
@@ -87,25 +88,21 @@ static void mq_stats_task(void *p) {
 	self->running = true;
 	while (self->can_run) {
 		/* Receive the message */
-		NdArray array = {0};
 		struct timespec ts = {0};
 		char topic[MQ_STATS_MAX_TOPIC_LEN] = {0};
-		if (self->mqc->vmt->receive(self->mqc, topic, MQ_STATS_MAX_TOPIC_LEN, &array, &ts) == MQ_RET_OK) {
+		if (self->mqc->vmt->receive(self->mqc, topic, MQ_STATS_MAX_TOPIC_LEN, &self->buf, &ts) == MQ_RET_OK) {
 			char new_topic[MQ_STATS_MAX_TOPIC_LEN] = {0};
 			/* Compute the requested statistics. Manually.
 			 * Use ndarray functions instead once they become available. */
-			if (array.dtype == DTYPE_INT16) {
-				int16_t *data = (int16_t *)array.buf;
-				size_t data_len = array.asize;
-
+			if (self->buf.dtype == DTYPE_INT16) {
 				if (self->e & MQ_STATS_RMS) {
-					float f = rms(data, data_len);
+					float f = rms((int16_t *)self->buf.buf, self->buf.asize);
 					strlcpy(new_topic, topic, MQ_STATS_MAX_TOPIC_LEN);
 					strlcat(new_topic, "/rms", MQ_STATS_MAX_TOPIC_LEN);
 					publish_float(self->mqc, new_topic, f);
 				}
 				if (self->e & MQ_STATS_MEAN) {
-					float f = rms(data, data_len);
+					float f = mean((int16_t *)self->buf.buf, self->buf.asize);
 					strlcpy(new_topic, topic, MQ_STATS_MAX_TOPIC_LEN);
 					strlcat(new_topic, "/mean", MQ_STATS_MAX_TOPIC_LEN);
 					publish_float(self->mqc, new_topic, f);
@@ -139,7 +136,7 @@ mq_stats_ret_t mq_stats_free(MqStats *self) {
 }
 
 
-mq_stats_ret_t mq_stats_start(MqStats *self, const char *topic) {
+mq_stats_ret_t mq_stats_start(MqStats *self, const char *topic, enum dtype dtype, size_t asize) {
 	if (u_assert(self != NULL) ||
 	    u_assert(topic != NULL)) {
 		return MQ_STATS_RET_FAILED;
@@ -153,6 +150,10 @@ mq_stats_ret_t mq_stats_start(MqStats *self, const char *topic) {
 		goto err;
 	}
 	self->mqc->vmt->subscribe(self->mqc, topic);
+
+	if (ndarray_init_empty(&self->buf, dtype, asize) != NDARRAY_RET_OK) {
+		goto err;
+	}
 
 	xTaskCreate(mq_stats_task, "mq-stats", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
@@ -184,6 +185,8 @@ mq_stats_ret_t mq_stats_stop(MqStats *self) {
 	if (self->mqc) {
 		self->mqc->vmt->close(self->mqc);
 	}
+
+	ndarray_free(&self->buf);
 
 	return MQ_STATS_RET_OK;
 // err:

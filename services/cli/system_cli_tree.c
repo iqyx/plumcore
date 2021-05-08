@@ -317,6 +317,19 @@ const struct treecli_node *system_cli_tree = Node {
 							Exec service_plog_router_sniff,
 						},
 						End
+					},
+					Values {
+						Value {
+							Name "filter",
+							.set = service_plog_router_filter_set,
+							Type TREECLI_VALUE_STR,
+						},
+						Value {
+							Name "format",
+							.set = service_plog_router_format_set,
+							Type TREECLI_VALUE_STR,
+						},
+						End
 					}
 				},
 				#endif

@@ -133,7 +133,12 @@ static mq_ret_t plog_router_mq_client_receive(MqClient *self, char *topic, size_
 	
 		strlcpy(topic, msg_send.topic, topic_size);
 		memcpy(ts, msg_send.ts, sizeof(struct timespec));
-		memcpy(array, msg_send.array, sizeof(struct ndarray));
+
+		/* Copy the array metadata, but keep the buffer. */
+		array->dtype = msg_send.array->dtype;
+		array->dsize = msg_send.array->dsize;
+		array->asize = 0;
+		ndarray_append(array,msg_send.array);
 
 		/* And pass the response back. */
 		xQueueSend(c->recv_lock, &msg_recv, 0);
@@ -147,17 +152,17 @@ static mq_ret_t plog_router_mq_client_receive(MqClient *self, char *topic, size_
 static mq_ret_t deliver_to_client(struct plog_router_mq_client *to, const char *topic, const struct ndarray *array, const struct timespec *ts) {
 	/* Only a single delivery can be made at a time. Lock the msg mutex.
 	 * Attempt delivery for a configurable time. */
-	if (xSemaphoreTake(to->msg_mutex, 100) == pdTRUE) {
+	if (xSemaphoreTake(to->msg_mutex, portMAX_DELAY) == pdTRUE) {
 		/* Let the client know we have a message to deliver. */
 		struct plog_router_msg_send msg_send = {
 			.topic = topic,
 			.array = array,
 			.ts = ts
 		};
-		xQueueSend(to->send_lock, &msg_send, 100);
+		xQueueSend(to->send_lock, &msg_send, portMAX_DELAY);
 
 		struct plog_router_msg_recv msg_recv = {0};
-		if (xQueueReceive(to->recv_lock, &msg_recv, 100) == pdTRUE) {
+		if (xQueueReceive(to->recv_lock, &msg_recv, portMAX_DELAY) == pdTRUE) {
 			/** @todo handle the return value. */
 		}
 
