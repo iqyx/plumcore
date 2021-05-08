@@ -19,16 +19,17 @@ typedef enum {
 
 enum dtype {
 	DTYPE_CHAR = 0,
-	DTYPE_INT8 = 1,
-	DTYPE_UINT8 = 2,
-	DTYPE_INT16 = 3,
-	DTYPE_UINT16 = 4,
-	DTYPE_INT32 = 5,
-	DTYPE_UINT32 = 6,
-	DTYPE_INT64 = 7,
-	DTYPE_UINT64 = 8,
-	DTYPE_FLOAT = 9,
-	DTYPE_DOUBLE = 10,
+	DTYPE_BYTE = 1,
+	DTYPE_INT8 = 2,
+	DTYPE_UINT8 = 3,
+	DTYPE_INT16 = 4,
+	DTYPE_UINT16 = 5,
+	DTYPE_INT32 = 6,
+	DTYPE_UINT32 = 7,
+	DTYPE_INT64 = 8,
+	DTYPE_UINT64 = 9,
+	DTYPE_FLOAT = 10,
+	DTYPE_DOUBLE = 11,
 };
 
 typedef struct ndarray {
@@ -51,4 +52,9 @@ size_t ndarray_get_dsize(enum dtype dtype);
 ndarray_ret_t ndarray_to_str(NdArray *self, char *s, size_t max);
 ndarray_ret_t ndarray_value_to_str(NdArray *self, size_t i, char *s, size_t max);
 ndarray_ret_t ndarray_move(NdArray *self, size_t offset_to, size_t offset_from, size_t size);
-ndarray_ret_t ndarray_copy_from(NdArray *self, size_t offset_to, NdArray *from, size_t offset_from, size_t size);
+ndarray_ret_t ndarray_copy_from(NdArray *self, size_t offset_to, const NdArray *from, size_t offset_from, size_t size);
+ndarray_ret_t ndarray_zero(NdArray *self);
+ndarray_ret_t ndarray_sqrt(NdArray *self);
+ndarray_ret_t ndarray_append(NdArray *self, const NdArray *from);
+const char *ndarray_dtype_str(NdArray *self);
+
