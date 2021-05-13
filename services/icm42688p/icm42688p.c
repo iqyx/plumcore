@@ -85,46 +85,77 @@ waveform_source_ret_t icm42688p_read(Icm42688p *self, void *data, size_t sample_
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 0);
 	int16_t *data16 = (int16_t *)data;
 	*read = 0;
+	int32_t data32[8] = {0};
+
+	uint32_t oversample_count = 8;
+	uint8_t oversample_bits = 4;
 
 	/* Avoid reading of an empty FIFO. It gives unpredictable results. */
 	uint16_t fifo_count = icm42688p_fifo_count(self);
-	if (sample_count > fifo_count) {
-		sample_count = fifo_count;
+	if ((sample_count * oversample_count) > fifo_count) {
+		sample_count = fifo_count / oversample_count;
 	}
 
 	while (sample_count--) {
-		uint8_t header = read8(self->spidev, ICM42688P_REG_FIFO_DATA);
-		//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("header = 0x%02x"), header);
+		memset(data32, 0, sizeof(data32));
+		for (size_t ovs = 0; ovs < oversample_count; ovs++) {
+			uint8_t header = read8(self->spidev, ICM42688P_REG_FIFO_DATA);
+			//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("header = 0x%02x"), header);
 
-		if (header & 0x80) {
-			/* FIFO is empty. */
-			u_log(system_log, LOG_TYPE_DEBUG, "som narazil");
-			return WAVEFORM_SOURCE_RET_OK;
+			if (header & 0x80) {
+				/* FIFO is empty. */
+				u_log(system_log, LOG_TYPE_DEBUG, "som narazil");
+				return WAVEFORM_SOURCE_RET_OK;
+			}
+			if (header & 0x40) {
+				/* Read accelerometer data. */
+				int16_t buf[3] = {0};
+				readn(self->spidev, (uint8_t *)&buf, ICM42688P_REG_FIFO_DATA, sizeof(int16_t) * 3);
+				data32[0] += buf[0];
+				data32[1] += buf[1];
+				data32[2] += buf[2];
+			}
+			if (header & 0x20) {
+				/* Read gyroscope data. */
+				int16_t buf[3] = {0};
+				readn(self->spidev, (uint8_t *)&buf, ICM42688P_REG_FIFO_DATA, sizeof(int16_t) * 3);
+				data32[3] += buf[3];
+				data32[4] += buf[4];
+				data32[5] += buf[5];
+			} else {
+			}
+			if (header & 0x10) {
+				/* Temperature (16 bit for 20 bit extended record). */
+				int16_t buf = 0;
+				readn(self->spidev, (uint8_t *)&buf, ICM42688P_REG_FIFO_DATA, sizeof(int16_t));
+				data32[6] += buf;
+			} else {
+				/* Temperature (8 bit). */
+				data32[6] += read8(self->spidev, ICM42688P_REG_FIFO_DATA);
+			}
+			//if (header & 0x08) {
+				/* Read timestamp value. */
+				int16_t buf = 0;
+				readn(self->spidev, (uint8_t *)&buf, ICM42688P_REG_FIFO_DATA, sizeof(int16_t));
+				/** @todo Fix the timestamp */
+				data32[7] += buf;
+				//data16[7] = 0;
+			//}
+			//data16[7] = header;
+
+			if (header & 0x10) {
+				/* Read the 3 byte extension. */
+				uint8_t ext[3] = {0};
+				readn(self->spidev, ext, ICM42688P_REG_FIFO_DATA, sizeof(ext));
+
+				data32[0] = (data32[0] * 4) | (ext[0] >> 6);
+				data32[1] = (data32[1] * 4) | (ext[1] >> 6);
+				data32[2] = (data32[2] * 4) | (ext[2] >> 6);
+			}
 		}
-		if (header & 0x40) {
-			/* Read accelerometer data. */
-			readn(self->spidev, (uint8_t *)&(data16[0]), ICM42688P_REG_FIFO_DATA, sizeof(int16_t) * 3);
-		} else {
-			data16[0] = 0;
-			data16[1] = 0;
-			data16[2] = 0;
+		for (size_t i = 0; i < 8; i++) {
+			data16[i] = data32[i] >> oversample_bits;
 		}
-		if (header & 0x20) {
-			/* Read gyroscope data. */
-			readn(self->spidev, (uint8_t *)&(data16[3]), ICM42688P_REG_FIFO_DATA, sizeof(int16_t) * 3);
-		} else {
-			data16[3] = 0;
-			data16[4] = 0;
-			data16[5] = 0;
-		}
-		/* Temperature (8 bit). */
-		data16[6] = read8(self->spidev, ICM42688P_REG_FIFO_DATA);
-		//if (header & 0x08) {
-			/* Read timestamp value. */
-			readn(self->spidev, (uint8_t *)&(data16[7]), ICM42688P_REG_FIFO_DATA, sizeof(int16_t));
-			//data16[7] = 0;
-		//}
-		//data16[7] = header;
 		data16 += 8;
 		(*read)++;
 	}
@@ -162,7 +193,7 @@ icm42688p_ret_t icm42688p_init_defaults(Icm42688p *self) {
 	write8(self->spidev, ICM42688P_REG_FIFO_CONFIG, 0x80);
 	write8(self->spidev, ICM42688P_REG_GYRO_CONFIG0, 0xc8);
 	/* 25 Hz ODR */
-	write8(self->spidev, ICM42688P_REG_ACCEL_CONFIG0, 0x6a);
+	write8(self->spidev, ICM42688P_REG_ACCEL_CONFIG0, 0x67);
 	write8(self->spidev, ICM42688P_REG_GYRO_ACCEL_CONFIG0, 0x71);
 
 	/* Enable partial read, include accel, gyro and FSYNC data in the FIFO. */
@@ -177,6 +208,8 @@ icm42688p_ret_t icm42688p_init_defaults(Icm42688p *self) {
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 1);
 	/* Enable FSYNC pin 9 function */
 	write8(self->spidev, ICM42688P_REG_INTF_CONFIG5, 0x02);
+
+	write8(self->spidev, ICM42688P_REG_ACCEL_UI_FILT_ORD, 0x15);
 	
 	return ICM42688P_RET_OK;
 }

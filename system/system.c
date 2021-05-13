@@ -42,7 +42,7 @@
 
 
 /**
- * Discover the first stream interface in the system, it should be the system console.
+ * Discover a stream interface called "cosole", it should be the system console.
  * Use it to initialize a login manager service which then runs a command line interface.
  */
 #if defined(CONFIG_DEFAULT_CONSOLE_CLI)
@@ -51,7 +51,7 @@
 #include "services/cli/system_cli_tree.h"
 static void main_console_init(void) {
 	Interface *console;
-	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_STREAM, 0, &console) != ISERVICELOCATOR_RET_OK) {
+	if (iservicelocator_query_name(locator, "console", &console) != ISERVICELOCATOR_RET_OK) {
 		return;
 	}
 
@@ -97,9 +97,9 @@ static void system_plog_router_init(void) {
 	plog_router_init(&plog_router);
 	iservicelocator_add(
 		locator,
-		ISERVICELOCATOR_TYPE_PLOG_ROUTER,
-		(Interface *)&plog_router.iplog.interface,
-		"plog-router"
+		ISERVICELOCATOR_TYPE_MQ,
+		(Interface *)&plog_router.mq,
+		"plog-mq"
 	);
 }
 #endif

@@ -39,20 +39,13 @@ Export("env")
 # Some helpers to make the build looks pretty
 SConscript("pretty.SConscript")
 
-# Now load the Kconfig configuration
-kconf = kconfiglib.Kconfig("Kconfig")
-try:
-	kconf.load_config(".config")
-except kconfiglib._KconfigIOError:
-	print("Error: no configuration found in the .config file. Run menuconfig or alldefconfig to create one.")
-	exit(1)
+objs = []
+Export("objs")
 
 conf = {}
-for n in kconf.node_iter():
-	if isinstance(n.item, kconfiglib.Symbol):
-		conf[n.item.name] = n.item.str_value;
-
 Export("conf")
+SConscript("kconfig.SConscript")
+env.LoadKconfig("Kconfig", ".config")
 
 # And generate the corresponding config.h file for inclusion in sources
 env.Command(
@@ -94,13 +87,10 @@ if conf["OUTPUT_FILE_VERSION_SUFFIX"] == "y":
 	env["PORTFILE"] += "-" + env["VERSION"]
 
 
-objs = []
-Export("objs")
-
-SConscript("kconfig.SConscript")
 SConscript("platforms/SConscript")
 SConscript("ports/SConscript")
 SConscript("doc.SConscript")
+SConscript("applications/SConscript")
 
 
 env["CC"] = "%s-gcc" % env["TOOLCHAIN"]
@@ -108,6 +98,7 @@ env["CXX"] = "%s-g++" % env["TOOLCHAIN"]
 env["AR"] = "%s-ar" % env["TOOLCHAIN"]
 env["AS"] = "%s-as" % env["TOOLCHAIN"]
 env["LD"] = "%s-gcc" % env["TOOLCHAIN"]
+env["GDB"] = "%s-gdb" % env["TOOLCHAIN"]
 env["OBJCOPY"] = "%s-objcopy" % env["TOOLCHAIN"]
 env["OBJDUMP"] = "%s-objdump" % env["TOOLCHAIN"]
 env["SIZE"] = "%s-size" % env["TOOLCHAIN"]
@@ -142,6 +133,7 @@ env.Append(LINKFLAGS = [
 	"--static",
 	"-nostartfiles",
 	"--specs=nano.specs",
+	"-Wl,-u_printf_float",
 	"-T", env["LDSCRIPT"],
 	"-Wl,-Map=%s.map" % env["PORTFILE"],
 	"-Wl,--gc-sections",
@@ -161,8 +153,8 @@ env.Append(LINKFLAGS = [
 	"-Wl,--defsym=LOAD_ADDRESS=%s" % env["LOAD_ADDRESS"],
 ])
 
-
 env.Append(CFLAGS = [
+
 	"-Os",
 	"-g3",
 	"-gdwarf-4",
@@ -195,6 +187,7 @@ env.Append(CFLAGS = [
 	"-Wmissing-prototypes",
 	"-Wstrict-prototypes",
 	"-Wno-expansion-to-defined",
+	"-Wno-unused-function",
 ])
 
 env.Append(LIBS = [

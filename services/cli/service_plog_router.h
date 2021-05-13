@@ -36,4 +36,6 @@
 #define DNODE_INDEX(p, i) p->pos.levels[p->pos.depth + i].dnode_index
 
 int32_t service_plog_router_sniff(struct treecli_parser *parser, void *exec_context);
+int32_t service_plog_router_filter_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
+int32_t service_plog_router_format_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
 

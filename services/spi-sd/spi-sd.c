@@ -17,10 +17,14 @@
 #include "u_assert.h"
 
 #include <interface_spidev.h>
+#include <interfaces/block.h>
 #include "spi-sd.h"
 
 #define MODULE_NAME "spi-sd"
 #define DEBUG 1
+
+
+static block_vmt_t block_vmt;
 
 static spi_sd_ret_t spi_sd_wait_idle(SpiSd *self, uint32_t timeout_ms) {
 	uint8_t dummy = 0xff;
@@ -90,10 +94,11 @@ static spi_sd_ret_t spi_sd_send_raw_cmd_arg(SpiSd *self, sdmmc_cmd_t cmd, uint32
 		/* Correct response is the first non-0xff byte read. */
 		uint8_t dummy = 0xff;
 		interface_spidev_exchange(self->spidev, &dummy, &status, sizeof(status));
-		if (status != 0xff) {
+		if (!(status & 0x80)) {
 			break;
 		}
 	}
+
 	if (self->debug) {
 		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("status = 0x%02x"), status);
 	}
@@ -102,6 +107,11 @@ static spi_sd_ret_t spi_sd_send_raw_cmd_arg(SpiSd *self, sdmmc_cmd_t cmd, uint32
 
 
 static spi_sd_ret_t spi_sd_send_cmd(SpiSd *self, sdmmc_cmd_t cmd, uint32_t arg, uint8_t *response, size_t resp_len, uint32_t timeout) {
+	for (uint32_t i = 0; i < 4; i++) {
+		uint8_t dummy = 0xff;
+		interface_spidev_send(self->spidev, &dummy, sizeof(dummy));
+	}
+
 	interface_spidev_select(self->spidev);
 
 	/* Wait for the card and send the first part. */
@@ -110,6 +120,7 @@ static spi_sd_ret_t spi_sd_send_cmd(SpiSd *self, sdmmc_cmd_t cmd, uint32_t arg, 
 	}
 
 	spi_sd_ret_t ret = spi_sd_send_raw_cmd_arg(self, (uint8_t)cmd, arg, timeout);
+	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("som tu 0x%02x ret 0x%02x"), cmd, ret);
 	if (ret != SPI_SD_RET_OK && ret != SPI_SD_RET_IDLE) {
 		goto ret;
 	}
@@ -189,7 +200,7 @@ static spi_sd_ret_t spi_sd_send_cmd(SpiSd *self, sdmmc_cmd_t cmd, uint32_t arg, 
 			uint8_t resp = 0;
 			interface_spidev_receive(self->spidev, &resp, sizeof(resp));
 			if ((resp & 0x1f) != 0x05) {
-				//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("resp 0x%02x"), resp);
+				// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("resp 0x%02x"), resp);
 				ret = SPI_SD_RET_FAILED;
 				goto ret;
 			}
@@ -202,6 +213,7 @@ static spi_sd_ret_t spi_sd_send_cmd(SpiSd *self, sdmmc_cmd_t cmd, uint32_t arg, 
 		const uint8_t token = 0xfd;
 		interface_spidev_send(self->spidev, &token, sizeof(token));
 		interface_spidev_send(self->spidev, &dummy, sizeof(dummy));
+		goto ret;
 	}
 
 ret:
@@ -230,8 +242,6 @@ spi_sd_ret_t spi_sd_write_data(SpiSd *self, uint32_t block, const uint8_t buf[51
 
 
 static spi_sd_ret_t spi_sd_init_card(SpiSd *self, uint32_t timeout) {
-	sdmmc_type_t type = 0;
-
 	/* Release the chip select first and output some dummy clocks to switch to SPI mode. */
 	interface_spidev_deselect(self->spidev);
 	for (uint32_t i = 0; i < 10; i++) {
@@ -240,65 +250,82 @@ static spi_sd_ret_t spi_sd_init_card(SpiSd *self, uint32_t timeout) {
 	}
 	vTaskDelay(10);
 
+	/* Reset the card in SPI mode */
 	if (spi_sd_send_cmd(self, SDMMC_CMD_GO_IDLE_STATE, 0, NULL, 0, timeout) != SPI_SD_RET_IDLE) {
-		goto ret;
+		/* The card is not responding. Keep type NONE and return. */
+		return SPI_SD_RET_NO_CARD;
 	}
 
-	uint8_t ret[4] = {0};
-	if (spi_sd_send_cmd(self, SDMMC_CMD_SEND_IF_COND, 0x1aa, ret, sizeof(ret), timeout) == SPI_SD_RET_IDLE) {
-		type = SDMMC_TYPE_SDC2;
-		if (ret[2] != 0x01 || ret[3] != 0xaa) {
-			goto ret;
+	/* Check the voltage range */
+	uint8_t read[4] = {0};
+	if (spi_sd_send_cmd(self, SDMMC_CMD_SEND_IF_COND, 0x1aa, read, sizeof(read), timeout) == SPI_SD_RET_IDLE) {
+		if (read[2] != 0x01 || read[3] != 0xaa) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("invalid voltage range"));
+			return SPI_SD_RET_NOT_COMPATIBLE;
 		}
-	} else {
-		goto ret;
 	}
 
-	uint32_t i = timeout;
+	/* Try to left the idle state using CMD1 first. */
+	bool retry = false;
+	uint32_t i = SDMMC_SEND_OP_COND_TIMEOUT;
 	while (i--) {
 		if (!i) {
-			type = SDMMC_TYPE_NONE;
-			goto ret;
+			retry = true;
 		}
-		if (spi_sd_send_cmd(self, SDMMC_CMD_SEND_OP_COND, 1UL << 30, NULL, 0, timeout) == SPI_SD_RET_OK) {
+		if (spi_sd_send_cmd(self, SDMMC_CMD_SEND_OP_COND_MMC, 1UL << 30, NULL, 0, timeout) == SPI_SD_RET_OK) {
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("MMC3 initialization succeeded"));
 			break;
 		}
-		vTaskDelay(1000);
+		vTaskDelay(SDMMC_SEND_OP_COND_WAIT_MS);
+	}
+	if (retry) {
+		/* If it fails, try ACMD41 */
+		i = SDMMC_SEND_OP_COND_TIMEOUT;
+		while (i--) {
+			if (!i) {
+				u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot left idle state"));
+				return SPI_SD_RET_TIMEOUT;
+			}
+			if (spi_sd_send_cmd(self, SDMMC_CMD_SEND_OP_COND, 1UL << 30, NULL, 0, timeout) == SPI_SD_RET_OK) {
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("SDCv2 initialization succeeded"));
+				break;
+			}
+			vTaskDelay(SDMMC_SEND_OP_COND_WAIT_MS);
+		}
 	}
 
-	if (spi_sd_send_cmd(self, SDMMC_CMD_READ_OCR, 0, ret, sizeof(ret), timeout) == SPI_SD_RET_OK) {
+	if (spi_sd_send_cmd(self, SDMMC_CMD_READ_OCR, 0, read, sizeof(read), timeout) == SPI_SD_RET_OK) {
 		/* Check if 2.8-2.9 V range is supported. */
-		if ((ret[1] & 0x01) == 0) {
-			type = SDMMC_TYPE_NONE;
-			goto ret;
+		if ((read[1] & 0x01) == 0) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("invalid voltage range"));
+			return SPI_SD_RET_NOT_COMPATIBLE;
 		}
-		if (ret[0] & 0x40) {
-			/* SDHC */
-			type |= SDMMC_TYPE_BLOCK;
+		if (read[0] & 0x40) {
+			/* SDHC, block addressing */
+			self->addr_divider_bits = 9;
+		} else {
+			/* byte addressing */
+			self->addr_divider_bits = 0;
 		}
+	} else {
+		return SPI_SD_RET_FAILED;
 	}
 
-	if (spi_sd_send_cmd(self, SDMMC_CMD_SEND_CID, 0, self->cid, 16, timeout) != SPI_SD_RET_OK) {
-		if (self->debug) {
-			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("cannot read CID"));
-		}
-		goto ret;
+	if (spi_sd_send_cmd(self, SDMMC_CMD_SET_BLOCKLEN, 512, NULL, 0, timeout) != SPI_SD_RET_OK) {
+		return SPI_SD_RET_FAILED;
 	}
 
 	if (spi_sd_send_cmd(self, SDMMC_CMD_SEND_CSD, 0, self->csd, 16, timeout) != SPI_SD_RET_OK) {
-		if (self->debug) {
-			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("cannot read CSD"));
-		}
-		goto ret;
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot read CSD"));
+		return SPI_SD_RET_FAILED;
 	}
 
-ret:
-	if (type == SDMMC_TYPE_NONE) {
+	if (spi_sd_send_cmd(self, SDMMC_CMD_SEND_CID, 0, self->cid, 16, timeout) != SPI_SD_RET_OK) {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot read CID"));
 		return SPI_SD_RET_FAILED;
-	} else {
-		self->type = type;
-		return SPI_SD_RET_OK;
 	}
+
+	return SPI_SD_RET_OK;
 }
 
 
@@ -330,13 +357,12 @@ spi_sd_ret_t spi_sd_init(SpiSd *self, struct interface_spidev *spidev) {
 	memset(self, 0, sizeof(SpiSd));
 	self->spidev = spidev;
 
-	if (spi_sd_init_card(self, 100) != SPI_SD_RET_OK) {
+	if (spi_sd_init_card(self, 10000) != SPI_SD_RET_OK) {
 		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("SD card detection failed"));
 		return SPI_SD_RET_FAILED;
 	}
 
 	self->product_info = (struct spi_sd_product_info *)self->cid;
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("SD card detected, type %s"), type_to_str(self->type));
 	char name[6] = {0};
 	strncpy(name, self->product_info->product_name, 5);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("manufacturer 0x%02x, app 0x%04x, name '%s'"),
@@ -354,20 +380,67 @@ spi_sd_ret_t spi_sd_init(SpiSd *self, struct interface_spidev *spidev) {
 	);
 
 	if ((self->csd[0] & 0xc0) == 0x40) {
-		uint32_t size = (((self->csd[7] << 16) | (self->csd[8] << 8) | self->csd[9]) & ((1UL << 22) - 1)) / 2;
-		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("CSD v2: size %lu MB"),
-			size
+		self->size_blocks = (((self->csd[7] << 16) | (self->csd[8] << 8) | self->csd[9]) & ((1UL << 22) - 1)) << 10;
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("CSD v2: size %lu blocks, %lu MB"),
+			self->size_blocks,
+			self->size_blocks >> 11
 		);
-
-
 	}
+
+	/* Block device interface implementation */
+	block_init(&self->block, &block_vmt);
+	self->block.parent = self;
 
 	return SPI_SD_RET_OK;
 }
 
 
 spi_sd_ret_t spi_sd_free(SpiSd *self) {
-	(void)self;
+	block_free(&self->block);
 	return SPI_SD_RET_OK;
 }
+
+/*********************************************************************************
+  Block device interface implementation
+*********************************************************************************/
+
+/** @todo lock the SD card on access! */
+
+static block_vmt_t block_vmt = {
+	.get_block_size = spi_sd_get_block_size,
+	.set_block_size = NULL,
+	.get_size = spi_sd_get_size,
+	.read = spi_sd_read,
+	.write = spi_sd_write,
+	.flush = NULL,
+};
+
+
+block_ret_t spi_sd_get_block_size(SpiSd *self, size_t *block_size) {
+	*block_size = 512;
+	return BLOCK_RET_OK;
+}
+
+
+block_ret_t spi_sd_get_size(SpiSd *self, size_t *block_size) {
+	*block_size = self->size_blocks;
+	return BLOCK_RET_OK;
+}
+
+
+block_ret_t spi_sd_read(SpiSd *self, size_t block, uint8_t *buf) {
+	if (spi_sd_read_data(self, block, buf, 512, 1000) == SPI_SD_RET_OK) {
+		return BLOCK_RET_OK;
+	}
+	return BLOCK_RET_FAILED;
+}
+
+
+block_ret_t spi_sd_write(SpiSd *self, size_t block, const uint8_t *buf) {
+	if (spi_sd_write_data(self, block, buf, 512, 10000) == SPI_SD_RET_OK) {
+		return BLOCK_RET_OK;
+	}
+	return BLOCK_RET_FAILED;
+}
+
 

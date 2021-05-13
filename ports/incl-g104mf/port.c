@@ -1,15 +1,24 @@
+/* SPDX-License-Identifier: BSD-2-Clause
+ *
+ * incl-g104mf accelerometer/inclinometer port specific code
+ *
+ * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
+ * All rights reserved.
+ */
+
 #include <stdint.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include <libopencm3/cm3/scb.h>
+#include <libopencm3/cm3/nvic.h>
+#include <libopencm3/cm3/scs.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/spi.h>
-#include <libopencm3/cm3/scb.h>
-#include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/adc.h>
 #include <libopencm3/stm32/i2c.h>
 #include <libopencm3/stm32/exti.h>
@@ -24,20 +33,30 @@
 #include "u_log.h"
 
 #include "port.h"
+
+/** @todo redo module and interface, keep the init here. */
 #include "module_led.h"
 #include "interface_led.h"
+
+/** @todo redo module and interface, keep the init here. */
 #include "module_usart.h"
 #include "interface_stream.h"
+
+/** @todo redo the whole SPI layer and flash driver */
 #include "interface_spibus.h"
 #include "module_spibus_locm3.h"
 #include "interface_flash.h"
 #include "module_spi_flash.h"
 #include "interface_spidev.h"
 #include "module_spidev_locm3.h"
+
+/** @todo deprecated, remove */
 #include "interface_rtc.h"
 #include "module_rtc_locm3.h"
+
 #include "interface_rng.h"
 #include "module_prng_simple.h"
+
 #include "interfaces/adc.h"
 #include "interface_mac.h"
 #include "interface_profiling.h"
@@ -47,7 +66,6 @@
 #include "interfaces/sensor.h"
 #include "interfaces/cellular.h"
 #include "interfaces/servicelocator.h"
-#include "services/plocator/plocator.h"
 #include "services/cli/system_cli_tree.h"
 #include "services/stm32-system-clock/clock.h"
 #include "services/stm32-rtc/rtc.h"
@@ -57,7 +75,7 @@
 #include "services/bq35100/bq35100.h"
 #include "services/spi-sd/spi-sd.h"
 #include "services/gps-ublox/gps-ublox.h"
-
+#include "services/lora-rn2483/lora-rn2483.h"
 
 /**
  * Port specific global variables and singleton instances.
@@ -65,16 +83,11 @@
 
 /* Old-style HAL */
 uint32_t SystemCoreClock;
-struct module_led led_stat;
-struct module_usart console;
 struct module_rtc_locm3 rtc1;
 struct module_prng_simple prng;
 struct module_fifo_profiler profiler;
 struct module_spibus_locm3 spi1;
 struct module_spidev_locm3 spi1_accel2;
-struct module_spidev_locm3 spi1_rfm;
-struct module_spibus_locm3 spi2;
-struct module_spidev_locm3 spi2_sd;
 
 #define USART_CR3_UCESM (1 << 23)
 #define USART_CR3_WUS_START (2 << 20)
@@ -85,21 +98,16 @@ struct module_spidev_locm3 spi2_sd;
 	Watchdog watchdog;
 #endif
 
-PLocator plocator;
-IServiceLocator *locator;
 SystemClock system_clock;
 Stm32Rtc rtc;
 Icm42688p accel2;
 Stm32I2c i2c1;
 Bq35100 bq35100;
-SpiSd sd;
 GpsUblox gps;
 
 #define RCC_CCIPR_LPTIM1SEL_LSE (3 << 18)
 volatile uint16_t last_tick;
 volatile uint16_t lptim1_ext;
-
-int16_t accel2_data[8 * 32];
 
 void vPortSetupTimerInterrupt(void);
 void port_sleep(TickType_t idle_time);
@@ -110,24 +118,25 @@ int32_t port_early_init(void) {
 		SCB_VTOR = CONFIG_VECTOR_TABLE_ADDRESS;
 	#endif
 
-	rcc_osc_on(RCC_HSI16);
-	rcc_wait_for_osc_ready(RCC_HSI16);
+	#if defined(CONFIG_INCL_G104MF_CLOCK_HSI16)
+		rcc_osc_on(RCC_HSI16);
+		rcc_wait_for_osc_ready(RCC_HSI16);
 
-	#if defined(CONFIG_INCL_G104MF_CLOCK_80MHZ)
-		/* placeholder */
-	#elif defined(CONFIG_INCL_G104MF_CLOCK_DEFAULT)
-		/* Do not intiialize anything, keep MSI clock running. */
+		/* Set HSI16 to be wakeup clock source and the system clock source. */
 		RCC_CFGR |= RCC_CFGR_STOPWUCK_HSI16;
 		rcc_set_sysclk_source(RCC_HSI16);
 		SystemCoreClock = 16e6;
+
+		/* We can disable the default MSI clock to save power. */
+		rcc_osc_off(RCC_MSI);
 	#else
 		#error "no clock speed defined"
 	#endif
 
-	rcc_osc_off(RCC_MSI);
-
-	/* Leave SWD running in STOP1 mode for development. */
-	DBGMCU_CR |= DBGMCU_CR_STOP;
+	#if defined(CONFIG_STM32_DEBUG_IN_STOP)
+		/* Leave SWD running in STOP1 mode for development. */
+		DBGMCU_CR |= DBGMCU_CR_STOP;
+	#endif
 
 	rcc_apb1_frequency = SystemCoreClock;
 	rcc_apb2_frequency = SystemCoreClock;
@@ -137,12 +146,11 @@ int32_t port_early_init(void) {
 	/* PWR peripheral for setting sleep/stop modes. */
 	rcc_periph_clock_enable(RCC_PWR);
 	PWR_CR1 |= PWR_CR1_DBP;
+
+
 	RCC_BDCR |= RCC_BDCR_LSEBYP;
 	rcc_osc_on(RCC_LSE);
 	rcc_wait_for_osc_ready(RCC_LSE);
-
-	/* Adjust MSI freq using LSE. */
-	RCC_CR |= RCC_CR_MSIPLLEN;
 
 	/* Enable low power timer for systick and configure it to use LSE (TCXO). */
 	RCC_CCIPR |= RCC_CCIPR_LPTIM1SEL_LSE;
@@ -160,11 +168,47 @@ int32_t port_early_init(void) {
 	RCC_AHB1SMENR = 0;
 	RCC_AHB2SMENR = 0;
 	RCC_AHB3SMENR = 0;
-	RCC_APB1SMENR1 = RCC_APB1SMENR1_LPTIM1SMEN;
+	RCC_APB1SMENR1 = RCC_APB1SMENR1_LPTIM1SMEN | RCC_APB1SMENR1_USART2SMEN;
 	RCC_APB1SMENR2 = 0;
 	RCC_APB2SMENR = RCC_APB2SMENR_USART1SMEN;
 
 	return PORT_EARLY_INIT_OK;
+}
+
+
+void port_check_debug(void) {
+/*
+	if (SCS_DHCSR & SCS_DHCSR_C_DEBUGEN) {
+		u_log(system_log, LOG_TYPE_DEBUG, "debugger connected");
+	} else {
+		u_log(system_log, LOG_TYPE_INFO, "debugger not connected");
+	}
+*/
+	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO13 | GPIO14);
+	vTaskDelay(10);
+	if (gpio_get(GPIOA, GPIO13)) {
+		u_log(system_log, LOG_TYPE_INFO, "debugger not connected, disabling debug features");
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13 | GPIO14);
+		DBGMCU_CR &= ~DBGMCU_CR_STOP;
+		DBGMCU_CR &= ~DBGMCU_CR_SLEEP;
+	} else {
+		u_log(system_log, LOG_TYPE_DEBUG, "debugger connected");
+		gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14);
+	}
+
+}
+
+
+void port_enable_swd(bool e) {
+	if (e) {
+		gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO13 | GPIO14);
+		#if defined(CONFIG_STM32_DEBUG_IN_STOP)
+			DBGMCU_CR |= DBGMCU_CR_STOP;
+		#endif
+	} else {
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13 | GPIO14);
+		DBGMCU_CR &= ~DBGMCU_CR_STOP;
+	}
 }
 
 
@@ -173,47 +217,9 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 	     - (time2->tv_sec * 1000000000UL + time2->tv_nsec);
 }
 
-int32_t port_init(void) {
-	/* ADXL power off, GPS power off. */
-	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0 | GPIO1);
-	gpio_clear(GPIOH, GPIO0 | GPIO1);
 
-	/* ACCEL1_CS */
-	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13);
-	gpio_set(GPIOC, GPIO13);
-
-	/* RFM_CS */
-	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
-	gpio_set(GPIOC, GPIO15);
-
-	/*USB_VBUS_DET */
-	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
-
-	/* LORA_PWR_EN */
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
-	gpio_clear(GPIOA, GPIO0);
-
-	/* MCU_USB_VBUS_DET */
-	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO4);
-
-	/* QSPI_BK1_NCS */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
-	gpio_set(GPIOB, GPIO11);
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
-	gpio_set_af(GPIOB, GPIO_AF5, GPIO3 | GPIO4 | GPIO5);
-
-	/* USB pins */
-	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO11 | GPIO12);
-
-	/* I2C */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO6 | GPIO9);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO6 | GPIO9);
-	gpio_set(GPIOB, GPIO6 | GPIO9);
-
-	/* ACCEL_INT */	
-	gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO7);
-
-	/* Serial console. */
+struct module_usart console;
+static void console_init(void) {
 	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO9 | GPIO10);
 	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO9 | GPIO10);
 	gpio_set_af(GPIOA, GPIO_AF7, GPIO9 | GPIO10);
@@ -224,107 +230,140 @@ int32_t port_init(void) {
 
 	/* Allow waking up in stop mode. */
 	USART_CR1(USART1) |= USART_CR1_UESM;
-	//USART_CR3(USART1) |= USART_CR3_UCESM;
 	USART_CR3(USART1) |= USART_CR3_WUS_RXNE;
 	RCC_CCIPR |= RCC_CCIPR_USART1SEL_HSI16;
 
 	nvic_enable_irq(NVIC_USART1_IRQ);
 	nvic_set_priority(NVIC_USART1_IRQ, 6 * 16);
 	module_usart_init(&console, "console", USART1);
-	module_usart_set_baudrate(&console, 115200);
+	module_usart_set_baudrate(&console, 921600);
 	hal_interface_set_name(&(console.iface.descriptor), "console");
 
 	/* Console is now initialized, set its stream to be used as u_log output. */
 	u_log_set_stream(&(console.iface));
 
-	/* First, initialize the service locator service. It is required to
-	 * advertise any port-specific devices and interfaces. */
-	if (plocator_init(&plocator) == PLOCATOR_RET_OK) {
-		locator = plocator_iface(&plocator);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&console.iface.descriptor, "console");
+}
+
+
+void usart1_isr(void) {
+	module_usart_interrupt_handler(&console);
+}
+
+
+struct module_usart lora_usart;
+static void rn2483_lora_init(void) {
+	/* LORA_PWR_EN */
+	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
+	port_lora_power(false);
+
+	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
+	gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
+
+	rcc_periph_clock_enable(RCC_USART2);
+
+	/* Allow waking up in stop mode. */
+	USART_CR1(USART2) |= USART_CR1_UESM;
+	USART_CR3(USART2) |= USART_CR3_WUS_RXNE;
+	RCC_CCIPR |= RCC_CCIPR_USARTxSEL_HSI16 << RCC_CCIPR_USART2SEL_SHIFT;
+
+	nvic_enable_irq(NVIC_USART2_IRQ);
+	nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
+	module_usart_init(&lora_usart, "lora-usart", USART2);
+	module_usart_set_baudrate(&lora_usart, 57600);
+	hal_interface_set_name(&(lora_usart.iface.descriptor), "lora_usart");
+
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&lora_usart.iface.descriptor, "lora-usart");
+}
+
+
+void usart2_isr(void) {
+	module_usart_interrupt_handler(&lora_usart);
+}
+
+
+void port_lora_power(bool en) {
+	if (en) {
+		gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
+		gpio_set(GPIOA, GPIO0);
+		vTaskDelay(100);
+	} else {
+		gpio_clear(GPIOA, GPIO0);
+		gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO3);
 	}
-
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_STREAM,
-		(Interface *)&console.iface.descriptor,
-		"console"
-	);
-
-	/** @deprecated
-	 * Old real-time clock service will be removed. There is
-	 * a new clock interface and services providing system and RTC clocks. */
-	/* Initialize the Real-time clock. */
-	module_rtc_locm3_init(&rtc1, "rtc1");
-	hal_interface_set_name(&(rtc1.iface.descriptor), "rtc1");
-	u_log_set_rtc(&(rtc1.iface));
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_RTC,
-		(Interface *)&rtc1.iface.descriptor,
-		"rtc1"
-	);
-
-	#if defined(CONFIG_INCL_G104MF_ENABLE_LEDS)
-		/* Allow reprogramming before disabling SWD. */
-		vTaskDelay(3000);
-		
-		/* Status LEDs. */
-		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO14);
-		module_led_init(&led_stat, "led_stat");
-		module_led_set_port(&led_stat, GPIOA, GPIO14);
-		interface_led_loop(&(led_stat.iface), 0x11f1);
-		hal_interface_set_name(&(led_stat.iface.descriptor), "led_stat");
-		iservicelocator_add(
-			locator,
-			ISERVICELOCATOR_TYPE_LED,
-			(Interface *)&led_stat.iface.descriptor,
-			"led_stat"
-		);
-	#endif
-
-	#if defined(CONFIG_INCL_G104MF_ENABLE_WATCHDOG)
-		watchdog_init(&watchdog, 20000, 0);
-	#endif
-
-	rcc_periph_clock_enable(RCC_TIM2);
-	rcc_periph_reset_pulse(RST_TIM2);
-	nvic_enable_irq(NVIC_TIM2_IRQ);
-
-	system_clock_init(&system_clock, TIM2, SystemCoreClock / 1000000 - 1, UINT32_MAX);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_CLOCK,
-		&system_clock.iface.interface,
-		"main"
-	);
-
-	stm32_rtc_init(&rtc);
-	iservicelocator_add(
-		locator,
-		ISERVICELOCATOR_TYPE_CLOCK,
-		&rtc.iface.interface,
-		"rtc"
-	);
-
-	gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO6 | GPIO9);
-#if 1
-	rcc_periph_clock_enable(RCC_I2C1);
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6 | GPIO9);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO6 | GPIO9);
-	gpio_set_af(GPIOB, GPIO_AF4, GPIO6 | GPIO9);
-	stm32_i2c_init(&i2c1, I2C1);
-
-	/* BQ35100 test */
-	bq35100_init(&bq35100, &i2c1.bus);
-	while (false) {
-		u_log(system_log, LOG_TYPE_DEBUG, "bat U = %u mV, I = %d mA", bq35100_voltage(&bq35100), bq35100_current(&bq35100));
-		vTaskDelay(1000);
-	}
+}
 
 
-#endif
+struct module_led led_status;
+struct module_led led_error;
+static void led_init(void) {
+	module_led_init(&led_status, "led_status");
+	module_led_set_port(&led_status, GPIOA, GPIO14);
+	// interface_led_loop(&led_status.iface, 0x111f);
+	interface_led_loop(&led_status.iface, 0xf);
+	hal_interface_set_name(&(led_status.iface.descriptor), "led_status");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_status.iface.descriptor, "led_status");
 
-#if 1
+	module_led_init(&led_error, "led_error");
+	module_led_set_port(&led_error, GPIOA, GPIO13);
+	interface_led_loop(&led_error.iface, 0xf);
+	hal_interface_set_name(&(led_error.iface.descriptor), "led_error");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_error.iface.descriptor, "led_error");
+}
+
+
+struct module_spidev_locm3 spi1_rfm;
+void port_rfm_init(void) {
+	/* SX127x on SPI1 bus */
+	gpio_set(GPIOC, GPIO15);
+	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
+	gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO15);
+	module_spidev_locm3_init(&spi1_rfm, "spi1_rfm", &(spi1.iface), GPIOC, GPIO15);
+	hal_interface_set_name(&(spi1_rfm.iface.descriptor), "spi1_rfm");
+
+	/* Put the SX127x to idle sleep. */
+	vTaskDelay(2);
+	uint8_t rfm_seq_idle[] = {0x80 | 0x36, 0x20};
+	interface_spidev_select(&spi1_rfm.iface);
+	interface_spidev_send(&spi1_rfm.iface, rfm_seq_idle, sizeof(rfm_seq_idle));
+	interface_spidev_deselect(&spi1_rfm.iface);
+
+	vTaskDelay(2);
+	uint8_t rfm_standby[] = {0x81, 0x00};
+	interface_spidev_select(&spi1_rfm.iface);
+	interface_spidev_send(&spi1_rfm.iface, rfm_standby, sizeof(rfm_standby));
+	interface_spidev_deselect(&spi1_rfm.iface);
+}
+
+
+void port_accel2_init(void) {
+	/* ICM42688P on SPI1 bus */
+	gpio_set(GPIOB, GPIO8);
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO8);
+	module_spidev_locm3_init(&spi1_accel2, "spi1_accel2", &(spi1.iface), GPIOB, GPIO8);
+	hal_interface_set_name(&(spi1_accel2.iface.descriptor), "spi1_accel2");
+
+	/* SYNC32 output */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
+
+	icm42688p_init(&accel2, &spi1_accel2.iface);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel2.source, "accel2");
+}
+
+
+
+/*****************************************************************************************************
+ * u-blox MAX-M8Q initialization & ISR
+ *****************************************************************************************************/
+
+void exti9_5_isr(void) {
+	exti_reset_request(EXTI8);
+	gps_ublox_timepulse_handler(&gps);
+}
+
+
+void port_gps_init(void) {
 	gps_ublox_init(&gps);
 	gps_ublox_set_i2c_transport(&gps, &i2c1.bus, 0x42);
 	gps.measure_clock = &rtc.clock;
@@ -431,133 +470,6 @@ int32_t port_init(void) {
 		// u_log(system_log, LOG_TYPE_DEBUG, "cas %lu", gps.last_ns);
 		// vTaskDelay(1000);
 	}
-
-#endif
-
-	/* SD_SEL */
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO5);
-	gpio_clear(GPIOA, GPIO5);
-	/* SD_PWR_EN */
-	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO3);
-	gpio_clear(GPIOH, GPIO3);
-
-#if 0
-	/* SPI2 */
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
-	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
-	rcc_periph_clock_enable(RCC_SPI2);
-	module_spibus_locm3_init(&spi2, "spi2", SPI2);
-	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
-
-	gpio_set(GPIOB, GPIO12);
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
-	module_spidev_locm3_init(&spi2_sd, "spi2_sd", &(spi2.iface), GPIOB, GPIO12);
-	hal_interface_set_name(&(spi2_sd.iface.descriptor), "spi2_sd");
-
-	while (true) {
-		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
-		gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO13 | GPIO14 | GPIO15);
-		/* SD_SEL */
-		gpio_clear(GPIOA, GPIO5);
-		/* SD_PWR_EN */
-		gpio_set(GPIOH, GPIO3);
-
-		/* Give the card some time and intialize it. */
-		vTaskDelay(100);
-		spi_sd_init(&sd, &spi2_sd.iface);
-
-		/* Write some random stuff. */
-		#if 1
-		for (size_t i = 0; i < 4; i++) {
-			u_log(system_log, LOG_TYPE_DEBUG, "wr block %d", i);
-			vTaskDelay(10);
-			//if (spi_sd_read_data(&sd, 1, sd_buf, 512, 1000) != SPI_SD_RET_OK) {
-			if (spi_sd_write_data(&sd, i, 0x08000000, 65536*4, 50000) != SPI_SD_RET_OK) {
-				u_log(system_log, LOG_TYPE_DEBUG, "error");
-			}
-		}
-		#endif
-		/* Wait for the SD card to finish all tasks (hopefully). */
-		vTaskDelay(1000);
-
-		/* Power off the card. */
-		spi_sd_free(&sd);
-		gpio_clear(GPIOH, GPIO3);
-		gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO13 | GPIO14 | GPIO15);
-
-		vTaskDelay(5000);
-	}
-#endif
-
-	/* SPI1 */
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO3 | GPIO4 | GPIO5);
-	gpio_set_af(GPIOB, GPIO_AF5, GPIO3 | GPIO4 | GPIO5);
-	rcc_periph_clock_enable(RCC_SPI1);
-	module_spibus_locm3_init(&spi1, "spi1", SPI1);
-	hal_interface_set_name(&(spi1.iface.descriptor), "spi1");
-
-	/* ICM42688P on SPI1 bus */
-	gpio_set(GPIOB, GPIO8);
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO8);
-	module_spidev_locm3_init(&spi1_accel2, "spi1_accel2", &(spi1.iface), GPIOB, GPIO8);
-	hal_interface_set_name(&(spi1_accel2.iface.descriptor), "spi1_accel2");
-
-	/* SYNC32 output */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
-
-	/* SX127x on SPI1 bus */
-	gpio_set(GPIOC, GPIO15);
-	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
-	gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO15);
-	module_spidev_locm3_init(&spi1_rfm, "spi1_rfm", &(spi1.iface), GPIOC, GPIO15);
-	hal_interface_set_name(&(spi1_rfm.iface.descriptor), "spi1_rfm");
-
-	/* Put the SX127x to idle sleep. */
-	vTaskDelay(2);
-	uint8_t rfm_seq_idle[] = {0x80 | 0x36, 0x20};
-	interface_spidev_select(&spi1_rfm.iface);
-	interface_spidev_send(&spi1_rfm.iface, rfm_seq_idle, sizeof(rfm_seq_idle));
-	interface_spidev_deselect(&spi1_rfm.iface);
-
-	vTaskDelay(2);
-	uint8_t rfm_standby[] = {0x81, 0x00};
-	interface_spidev_select(&spi1_rfm.iface);
-	interface_spidev_send(&spi1_rfm.iface, rfm_standby, sizeof(rfm_standby));
-	interface_spidev_deselect(&spi1_rfm.iface);
-
-#if 0
-	/* ICM-42688-P test code */
-	icm42688p_init(&accel2, &spi1_accel2.iface);
-	WaveformSource *source = &accel2.source;
-	source->start(source->parent);
-	uint32_t sample_counter = 0;
-	uint16_t last_fsync = 0;
-	while (1) {
-		size_t read = 0;
-		source->read(source->parent, accel2_data, 32, &read);
-		interface_stream_write(&(console.iface), " ", 1);
-
-		for (size_t i = 0; i < read; i++) {
-			if (accel2_data[i * 8 + 7] != 0) {
-				u_log(system_log, LOG_TYPE_DEBUG, "last_fsync = %u, sample_counter = %u", last_fsync, sample_counter);
-				last_fsync = accel2_data[i * 8 + 7];
-				sample_counter = 0;
-			}
-			sample_counter++;
-			#if 0
-				char s[40] = {0};
-				snprintf(s, sizeof(s), "%5d %5d %5d %5u\r\n", accel2_data[i * 8 + 0], accel2_data[i * 8 + 1], accel2_data[i * 8 + 2], (uint32_t)((uint16_t)accel2_data[i * 8 + 7]));
-				interface_stream_write(&(console.iface), s, strlen(s));
-			#endif
-		}
-		vTaskDelay(50);
-	}
-#endif
-
-	return PORT_INIT_OK;
 }
 
 
@@ -571,6 +483,163 @@ void port_gps_power(bool en) {
 }
 
 
+/*****************************************************************************************************
+ * micro-SD card initialization and support functions
+ *****************************************************************************************************/
+
+struct module_spibus_locm3 spi2;
+struct module_spidev_locm3 spi2_sd;
+
+void port_sd_power(bool power) {
+	if (power) {
+		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
+		gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO13 | GPIO14 | GPIO15);
+		/* SD_SEL */
+		gpio_clear(GPIOA, GPIO5);
+		/* SD_PWR_EN */
+		gpio_set(GPIOH, GPIO3);
+	} else {
+		gpio_clear(GPIOH, GPIO3);
+		gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO13 | GPIO14 | GPIO15);
+	}
+}
+
+
+void port_sd_init(void) {
+	/* SD_SEL */
+	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO5);
+	gpio_clear(GPIOA, GPIO5);
+
+	/* SD_PWR_EN, default powered off */
+	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO3);
+	gpio_clear(GPIOH, GPIO3);
+
+	/* SPI2 */
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO13 | GPIO14 | GPIO15);
+	gpio_set_af(GPIOB, GPIO_AF5, GPIO13 | GPIO14 | GPIO15);
+	rcc_periph_clock_enable(RCC_SPI2);
+	module_spibus_locm3_init(&spi2, "spi2", SPI2);
+	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
+
+	gpio_set(GPIOB, GPIO12);
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO12);
+	module_spidev_locm3_init(&spi2_sd, "spi2_sd", &(spi2.iface), GPIOB, GPIO12);
+	hal_interface_set_name(&(spi2_sd.iface.descriptor), "spi2_sd");
+
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SPIDEV, (Interface *)&spi2_sd.iface.descriptor, "spi-sd");
+}
+
+
+void port_battery_gauge_init(void) {
+	rcc_periph_clock_enable(RCC_I2C1);
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6 | GPIO9);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO6 | GPIO9);
+	gpio_set_af(GPIOB, GPIO_AF4, GPIO6 | GPIO9);
+	stm32_i2c_init(&i2c1, I2C1);
+
+	/* BQ35100 test */
+	bq35100_init(&bq35100, &i2c1.bus);
+	while (false) {
+		u_log(system_log, LOG_TYPE_DEBUG, "bat U = %u mV, I = %d mA", bq35100_voltage(&bq35100), bq35100_current(&bq35100));
+		vTaskDelay(1000);
+	}
+}
+
+
+int32_t port_init(void) {
+	/* ADXL power off, GPS power off. */
+	gpio_mode_setup(GPIOH, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0 | GPIO1);
+	gpio_clear(GPIOH, GPIO0 | GPIO1);
+
+	/* ACCEL1_CS */
+	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13);
+	gpio_set(GPIOC, GPIO13);
+
+	/* RFM_CS */
+	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
+	gpio_set(GPIOC, GPIO15);
+
+	/* USB_VBUS_DET */
+	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
+
+	/* MCU_USB_VBUS_DET */
+	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO4);
+
+	/* QSPI_BK1_NCS */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
+	gpio_set(GPIOB, GPIO11);
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
+	gpio_set_af(GPIOB, GPIO_AF5, GPIO3 | GPIO4 | GPIO5);
+
+	/* USB pins */
+	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO11 | GPIO12);
+
+	/* I2C */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO6 | GPIO9);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO6 | GPIO9);
+	gpio_set(GPIOB, GPIO6 | GPIO9);
+
+	/* ACCEL_INT */	
+	gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO7);
+
+	console_init();
+
+	/** @deprecated
+	 * Old real-time clock service will be removed. There is
+	 * a new clock interface and services providing system and RTC clocks. */
+	/* Initialize the Real-time clock. */
+	module_rtc_locm3_init(&rtc1, "rtc1");
+	hal_interface_set_name(&(rtc1.iface.descriptor), "rtc1");
+	u_log_set_rtc(&(rtc1.iface));
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_RTC, (Interface *)&rtc1.iface.descriptor, "rtc1");
+
+	#if defined(CONFIG_INCL_G104MF_ENABLE_LEDS)
+		led_init();
+	#endif
+
+	#if defined(CONFIG_INCL_G104MF_ENABLE_WATCHDOG)
+		watchdog_init(&watchdog, 20000, 0);
+	#endif
+
+	rcc_periph_clock_enable(RCC_TIM2);
+	rcc_periph_reset_pulse(RST_TIM2);
+	nvic_enable_irq(NVIC_TIM2_IRQ);
+
+	/* 1 MHz main monotonic clock */
+	system_clock_init(&system_clock, TIM2, SystemCoreClock / 1e6 - 1, UINT32_MAX);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CLOCK, &system_clock.iface.interface, "main");
+
+	/* New-style RTC driver and interface */
+	stm32_rtc_init(&rtc);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CLOCK, &rtc.iface.interface, "rtc");
+
+	port_battery_gauge_init();
+	port_gps_power(false);
+	// port_gps_init();
+	port_sd_init();
+	rn2483_lora_init();
+
+	/* SPI1 with three accelerometers and a radio */
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO3 | GPIO4 | GPIO5);
+	gpio_set_af(GPIOB, GPIO_AF5, GPIO3 | GPIO4 | GPIO5);
+	rcc_periph_clock_enable(RCC_SPI1);
+	module_spibus_locm3_init(&spi1, "spi1", SPI1);
+	hal_interface_set_name(&(spi1.iface.descriptor), "spi1");
+
+	port_rfm_init();
+	port_accel2_init();
+
+	port_check_debug();
+	if (DBGMCU_CR & DBGMCU_CR_STOP) {
+		u_log(system_log, LOG_TYPE_WARN, "debugging in STOP mode");
+	}
+
+	return PORT_INIT_OK;
+}
+
+
 void tim2_isr(void) {
 	if (TIM_SR(TIM2) & TIM_SR_UIF) {
 		timer_clear_flag(TIM2, TIM_SR_UIF);
@@ -578,6 +647,10 @@ void tim2_isr(void) {
 	}
 }
 
+
+/*****************************************************************************************************
+ * Low power timer (LPTIM) for FreeRTOS timing
+ *****************************************************************************************************/
 
 #define PORT_LPTIM_ARR (0x8000)
 void vPortSetupTimerInterrupt(void) {
@@ -605,15 +678,8 @@ uint32_t port_task_timer_get_value(void) {
 }
 
 
-void usart1_isr(void) {
-	module_usart_interrupt_handler(&console);
-}
-
-
 void vApplicationIdleHook(void);
 void vApplicationIdleHook(void) {
-
-
 }
 
 
@@ -722,19 +788,4 @@ void port_sleep(TickType_t idle_time) {
 	systick_enabled = true;
 }
 
-
-void exti9_5_isr(void) {
-	exti_reset_request(EXTI8);
-
-#if 0
-	/* Interrupt occurs at the rising edge, however the time instant
-	 * is alighed to the falling edge (see ublox configuration).
-	 * Interrupt latency in STOP1 mode is somehow variable, we wait
-	 * for the falling edge in a loop instead. */
-	while (gpio_get(GPIOA, GPIO8)) {
-		;
-	}
-#endif
-	gps_ublox_timepulse_handler(&gps);
-}
 

@@ -9,6 +9,7 @@ if conf["SERVICE_CLI"] == "y":
 		File("cli.c"),
 		File("cli_table_helper.c"),
 		File("cli_progressbar_helper.c"),
+		File("system_debug.c"),
 	]))
 	if conf["SERVICE_UXB_MASTER"] == "y":
 		objs.append(env.Object(File("device_uxb.c")))

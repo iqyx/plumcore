@@ -64,6 +64,7 @@ typedef enum {
 
 #define BQ35100_CONTROL_STATUS_CAL_MODE (1 << 12)
 #define BQ35100_CONTROL_STATUS_CCA (1 << 10)
+#define BQ35100_CONTROL_STATUS_BCA (1 << 11)
 
 
 typedef struct {

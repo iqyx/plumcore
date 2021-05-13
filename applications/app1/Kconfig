@@ -4,6 +4,10 @@ config APP1
 menu "App1 application configuration"
  	depends on APP1
 
+	config APP_NAME
+		string
+		default "app1"
+
 	config APP1_VAR1
 		bool "app1 variable"
 

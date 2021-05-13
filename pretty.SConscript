@@ -24,6 +24,6 @@ env['CREATEUBFCOMSTR'] = cformat("{c.blue}{c.bold}Creating uBLoad firmware image
 env['CREATEKEYCOMSTR'] = cformat("{c.blue}{c.bold}Generating  new firmware signing key{c.white} $TARGET{c.default}")
 env['CREATEBINCOMSTR'] = cformat("{c.blue}{c.bold}Creating binary firmware{c.white} $TARGET{c.default}")
 env['GENIFACECOMSTR'] = cformat("{c.blue}{c.bold}Generating interface files{c.white} $TARGET{c.default}")
-env['GENCONFIGCOMSTR'] = cformat("{c.blue}{c.bold}Generating configuration headers{c.white} $TARGET{c.default}")
+env['GENCONFIGCOMSTR'] = cformat("{c.blue}{c.bold}Generating configuration headers{c.white} $SOURCE -> $TARGET{c.default}")
 env['IMAGEELFSIZECOMSTR'] = cformat("{c.blue}{c.bold}Generated ELF image info:{c.default}")
 env['PROTOCCOMSTR'] = cformat("{c.bold}{c.blue}Compiling proto{c.white} $SOURCE{c.default}")

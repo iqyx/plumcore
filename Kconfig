@@ -63,10 +63,7 @@ choice
 
 	menu "External application configuration"
 		depends on APP_EXTERNAL
-		config APP_EXTERNAL_DIR
-			depends on APP_EXTERNAL
-			string "Environment variable containing path to the application"
-			default "PLUMCORE_EXT_APP"
+		source "$(PLUMCORE_EXT_APP)/Kconfig"
 	endmenu
 
 	source "applications/*/Kconfig"
@@ -101,3 +98,10 @@ menu "Build artifacts (firmware images)"
 	source "scripts/build_artifacts/Kconfig"
 endmenu
 
+
+menu "Communication settings"
+	config GDB_REMOTE_TARGET
+		string "Remote target configuration when using GDB to flash the device"
+		default "tcp:localhost:3333"
+
+endmenu

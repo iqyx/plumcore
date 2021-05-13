@@ -19,6 +19,15 @@
 [submodule "lib/script/duktape"]
 	path = lib/script/duktape
 	url = https://github.com/svaarala/duktape
+	ignore = dirty
 [submodule "lib/filesystem/spiffs"]
 	path = lib/filesystem/spiffs
 	url = https://github.com/pellepl/spiffs
+	ignore = dirty
+[submodule "lib/other/cmsis"]
+	path = lib/other/cmsis
+	url = https://github.com/ARM-software/CMSIS_5
+	ignore = dirty
+[submodule "lib/other/zfp"]
+	path = lib/other/zfp
+	url = https://github.com/LLNL/zfp
