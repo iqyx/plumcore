@@ -32,8 +32,8 @@
 #include <stdbool.h>
 
 #include "spiffs.h"
-#include "interfaces/flash.h"
-#include "interfaces/fs.h"
+#include <interfaces/flash.h>
+#include <interfaces/fs.h>
 
 
 #define LOG_PAGE_SIZE 256
@@ -64,7 +64,7 @@ typedef struct fs_spiffs {
 	u8_t spiffs_fds[32 * 4];
 	u8_t spiffs_cache_buf[(LOG_PAGE_SIZE + 32) * 4];
 
-	IFlash *flash;
+	Flash *flash;
 	IFs iface;
 
 	fs_spiffs_state_t state;
@@ -74,9 +74,9 @@ typedef struct fs_spiffs {
 
 fs_spiffs_ret_t fs_spiffs_init(FsSpiffs *self);
 fs_spiffs_ret_t fs_spiffs_free(FsSpiffs *self);
-fs_spiffs_ret_t fs_spiffs_mount(FsSpiffs *self, IFlash *flash);
+fs_spiffs_ret_t fs_spiffs_mount(FsSpiffs *self, Flash *flash);
 fs_spiffs_ret_t fs_spiffs_unmount(FsSpiffs *self);
-fs_spiffs_ret_t fs_spiffs_format(FsSpiffs *self, IFlash *flash);
+fs_spiffs_ret_t fs_spiffs_format(FsSpiffs *self, Flash *flash);
 fs_spiffs_ret_t fs_spiffs_check(FsSpiffs *self);
 IFs *fs_spiffs_interface(FsSpiffs *self);
 

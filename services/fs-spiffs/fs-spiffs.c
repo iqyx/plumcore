@@ -51,7 +51,7 @@
 
 static s32_t fs_spiffs_read(struct spiffs_t *context, u32_t addr, u32_t size, u8_t *dst) {
 	FsSpiffs *self = (FsSpiffs *)context;
-	iflash_read(self->flash, addr, dst, size);
+	self->flash->vmt->read(self->flash, addr, (void *)dst, size);
 	/** @todo check iflash_read return value */
 	return SPIFFS_OK;
 }
@@ -59,7 +59,7 @@ static s32_t fs_spiffs_read(struct spiffs_t *context, u32_t addr, u32_t size, u8
 
 static s32_t fs_spiffs_write(struct spiffs_t *context, u32_t addr, u32_t size, u8_t *src) {
 	FsSpiffs *self = (FsSpiffs *)context;
-	iflash_write(self->flash, addr, src, size);
+	self->flash->vmt->write(self->flash, addr, src, size);
 	return SPIFFS_OK;
 }
 
@@ -68,13 +68,12 @@ static s32_t fs_spiffs_erase(struct spiffs_t *context, u32_t addr, u32_t size) {
 	/** @todo check if size == sector_size */
 	(void)size;
 	FsSpiffs *self = (FsSpiffs *)context;
-	iflash_erase(self->flash, addr, 2);
+	self->flash->vmt->erase(self->flash, addr, size);
 	return SPIFFS_OK;
 }
 
 
 static void fs_spiffs_check_callback(struct spiffs_t *context, spiffs_check_type type, spiffs_check_report report, u32_t arg1, u32_t arg2) {
-	FsSpiffs *self = (FsSpiffs *)context;
 	if (report != SPIFFS_CHECK_PROGRESS) {
 		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("check type=%u report=%u arg1=%u arg2=%u"), type, report, arg1, arg2);
 	}
@@ -87,7 +86,7 @@ static void fs_spiffs_check_callback(struct spiffs_t *context, spiffs_check_type
 static ifs_ret_t fs_spiffs_ifs_open(void *context, IFsFile *f, const char *filename, uint32_t mode) {
 	FsSpiffs *self = (FsSpiffs *)context;
 	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return FS_SPIFFS_RET_BAD_STATE;
+		return IFS_RET_FAILED;
 	}
 
 	uint32_t smode = 0;
@@ -112,7 +111,7 @@ static ifs_ret_t fs_spiffs_ifs_open(void *context, IFsFile *f, const char *filen
 static ifs_ret_t fs_spiffs_ifs_close(void *context, IFsFile f) {
 	FsSpiffs *self = (FsSpiffs *)context;
 	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return FS_SPIFFS_RET_BAD_STATE;
+		return IFS_RET_FAILED;
 	}
 
 	SPIFFS_clearerr(&self->spiffs);
@@ -127,7 +126,7 @@ static ifs_ret_t fs_spiffs_ifs_close(void *context, IFsFile f) {
 static ifs_ret_t fs_spiffs_ifs_remove(void *context, const char *filename) {
 	FsSpiffs *self = (FsSpiffs *)context;
 	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return FS_SPIFFS_RET_BAD_STATE;
+		return IFS_RET_FAILED;
 	}
 
 	SPIFFS_clearerr(&self->spiffs);
@@ -142,7 +141,7 @@ static ifs_ret_t fs_spiffs_ifs_remove(void *context, const char *filename) {
 static ifs_ret_t fs_spiffs_ifs_rename(void *context, const char *old_fn, const char *new_fn) {
 	FsSpiffs *self = (FsSpiffs *)context;
 	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return FS_SPIFFS_RET_BAD_STATE;
+		return IFS_RET_FAILED;
 	}
 
 	SPIFFS_clearerr(&self->spiffs);
@@ -157,7 +156,7 @@ static ifs_ret_t fs_spiffs_ifs_rename(void *context, const char *old_fn, const c
 static ifs_ret_t fs_spiffs_ifs_read(void *context, IFsFile f, uint8_t *buf, size_t len, size_t *read) {
 	FsSpiffs *self = (FsSpiffs *)context;
 	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return FS_SPIFFS_RET_BAD_STATE;
+		return IFS_RET_FAILED;
 	}
 
 	SPIFFS_clearerr(&self->spiffs);
@@ -176,7 +175,7 @@ static ifs_ret_t fs_spiffs_ifs_read(void *context, IFsFile f, uint8_t *buf, size
 static ifs_ret_t fs_spiffs_ifs_write(void *context, IFsFile f, const uint8_t *buf, size_t len, size_t *written) {
 	FsSpiffs *self = (FsSpiffs *)context;
 	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return FS_SPIFFS_RET_BAD_STATE;
+		return IFS_RET_FAILED;
 	}
 
 	SPIFFS_clearerr(&self->spiffs);
@@ -195,7 +194,7 @@ static ifs_ret_t fs_spiffs_ifs_write(void *context, IFsFile f, const uint8_t *bu
 static ifs_ret_t fs_spiffs_ifs_flush(void *context, IFsFile f) {
 	FsSpiffs *self = (FsSpiffs *)context;
 	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return FS_SPIFFS_RET_BAD_STATE;
+		return IFS_RET_FAILED;
 	}
 
 	SPIFFS_fflush(&self->spiffs, (spiffs_file)f);
@@ -243,7 +242,7 @@ fs_spiffs_ret_t fs_spiffs_free(FsSpiffs *self) {
 }
 
 
-fs_spiffs_ret_t fs_spiffs_mount(FsSpiffs *self, IFlash *flash) {
+fs_spiffs_ret_t fs_spiffs_mount(FsSpiffs *self, Flash *flash) {
 	if (u_assert(self != NULL)) {
 		return FS_SPIFFS_RET_NULL;
 	}
@@ -256,15 +255,19 @@ fs_spiffs_ret_t fs_spiffs_mount(FsSpiffs *self, IFlash *flash) {
 
 	self->flash = flash;
 
-	/* Get Flash size, suitable erase sector size and page size. */
-	struct iflash_info info = {0};
-	iflash_get_info(self->flash, &info);
+	size_t flash_size = 0;
+	flash_block_ops_t ops = 0;
+	self->flash->vmt->get_size(self->flash, 0, &flash_size, &ops);
+
+	/** @todo get suitable erase block size */
+	size_t erase_size = 0;
+	self->flash->vmt->get_size(self->flash, 2, &erase_size, &ops);
 
 	/* SPIFFS configuration structure. */
-	self->cfg.phys_size = info.size_bytes;
+	self->cfg.phys_size = flash_size;
 	self->cfg.phys_addr = 0;
-	self->cfg.phys_erase_block = info.sector_size_bytes[2];
-	self->cfg.log_block_size = info.sector_size_bytes[2];
+	self->cfg.phys_erase_block = erase_size;
+	self->cfg.log_block_size = erase_size;
 	self->cfg.log_page_size = LOG_PAGE_SIZE;
 
 	self->cfg.hal_read_f = fs_spiffs_read;
@@ -319,7 +322,7 @@ fs_spiffs_ret_t fs_spiffs_unmount(FsSpiffs *self) {
 }
 
 
-fs_spiffs_ret_t fs_spiffs_format(FsSpiffs *self, IFlash *flash) {
+fs_spiffs_ret_t fs_spiffs_format(FsSpiffs *self, Flash *flash) {
 	if (u_assert(self != NULL)) {
 		return FS_SPIFFS_RET_NULL;
 	}
