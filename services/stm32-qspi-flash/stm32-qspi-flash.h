@@ -64,6 +64,3 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_write_page(Stm32QspiFlash *self, size_t 
 stm32_qspi_flash_ret_t stm32_qspi_flash_erase_sector(Stm32QspiFlash *self, size_t addr);
 stm32_qspi_flash_ret_t stm32_qspi_flash_erase_block(Stm32QspiFlash *self, size_t addr);
 stm32_qspi_flash_ret_t stm32_qspi_flash_erase_chip(Stm32QspiFlash *self);
-stm32_qspi_flash_ret_t stm32_qspi_flash_page_write_test(Stm32QspiFlash *self, size_t page);
-stm32_qspi_flash_ret_t stm32_qspi_flash_page_read_test(Stm32QspiFlash *self, size_t page);
-stm32_qspi_flash_ret_t stm32_qspi_flash_page_speed_test(Stm32QspiFlash *self, size_t page, size_t pages, Clock *rtc);
