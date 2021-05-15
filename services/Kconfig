@@ -308,3 +308,9 @@ menu "Language interpreters"
 		select LIB_DUKTAPE
 
 endmenu
+
+menu "Test suites"
+	config SERVICE_FLASH_TEST
+		bool "Flash memory test suite (integrity and speed tests)"
+		default y
+endmenu
