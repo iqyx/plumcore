@@ -115,7 +115,12 @@ void port_sleep(TickType_t idle_time);
 
 #if defined(CONFIG_SERVICE_STM32_QSPI_FLASH)
 #include <services/stm32-qspi-flash/stm32-qspi-flash.h>
+#include <services/flash-vol-static/flash-vol-static.h>
+#include <services/fs-spiffs/fs-spiffs.h>
 Stm32QspiFlash qspi_flash;
+FlashVolStatic lvs;
+Flash *lv_system;
+FsSpiffs spiffs_system;
 static void port_qspi_init(void) {
 	rcc_periph_clock_enable(RCC_QSPI);
 	rcc_periph_reset_pulse(RST_QSPI);
@@ -130,7 +135,27 @@ static void port_qspi_init(void) {
 	/* Port specific setting. */
 	QUADSPI_CR = (0 << QUADSPI_CR_PRESCALE_SHIFT);
 	stm32_qspi_flash_init(&qspi_flash);
-	stm32_qspi_flash_page_speed_test(&qspi_flash, 1024, 1024, &rtc);
+	// stm32_qspi_flash_page_speed_test(&qspi_flash, 1024, 1024, &rtc.clock);
+
+	flash_vol_static_init(&lvs, &qspi_flash.iface);
+	flash_vol_static_create(&lvs, "system", 0x0, 0x10000, &lv_system);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_system, "system");
+
+	fs_spiffs_init(&spiffs_system);
+	// fs_spiffs_format(&spiffs_system, lv_system);
+	if (fs_spiffs_mount(&spiffs_system, lv_system) == FS_SPIFFS_RET_OK) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, &(fs_spiffs_interface(&spiffs_system)->interface), "system");
+	}
+}
+#endif
+
+#if 1
+#include <services/flash-test/flash-test.h>
+FlashTest flash_test;
+static void port_flash_test(void) {
+	flash_test_init(&flash_test, &rtc.clock);
+	flash_test_dev(&flash_test, lv_system, qspi_flash.info->type);
+	flash_test_free(&flash_test);
 }
 #endif
 
@@ -655,6 +680,7 @@ int32_t port_init(void) {
 	port_accel2_init();
 	#if defined(CONFIG_SERVICE_STM32_QSPI_FLASH)
 		port_qspi_init();
+		// port_flash_test();
 	#endif
 
 	port_check_debug();
