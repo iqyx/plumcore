@@ -123,6 +123,10 @@ menu "Filesystem and memory management services"
 	config SERVICE_WORN_LOG_BLOCK
 		bool "WORN (write-once, read-never) log on a block device storage"
 		default n
+
+	config SERVICE_FLASH_VOL_STATIC
+		bool "Flash volumes service (static configuration)"
+		default y
 endmenu
 
 menu "System services"
