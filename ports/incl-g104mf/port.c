@@ -117,10 +117,13 @@ void port_sleep(TickType_t idle_time);
 #include <services/stm32-qspi-flash/stm32-qspi-flash.h>
 #include <services/flash-vol-static/flash-vol-static.h>
 #include <services/fs-spiffs/fs-spiffs.h>
+#include <services/flash-fifo/flash-fifo.h>
 Stm32QspiFlash qspi_flash;
 FlashVolStatic lvs;
 Flash *lv_system;
+Flash *lv_fifo;
 FsSpiffs spiffs_system;
+FlashFifo fifo;
 static void port_qspi_init(void) {
 	rcc_periph_clock_enable(RCC_QSPI);
 	rcc_periph_reset_pulse(RST_QSPI);
@@ -138,14 +141,19 @@ static void port_qspi_init(void) {
 	// stm32_qspi_flash_page_speed_test(&qspi_flash, 1024, 1024, &rtc.clock);
 
 	flash_vol_static_init(&lvs, &qspi_flash.iface);
-	flash_vol_static_create(&lvs, "system", 0x0, 0x10000, &lv_system);
+	flash_vol_static_create(&lvs, "system", 0x0, 0x100000, &lv_system);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_system, "system");
+
+	flash_vol_static_create(&lvs, "fifo", 0x100000, 0x400000, &lv_fifo);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_fifo, "fifo");
 
 	fs_spiffs_init(&spiffs_system);
 	// fs_spiffs_format(&spiffs_system, lv_system);
 	if (fs_spiffs_mount(&spiffs_system, lv_system) == FS_SPIFFS_RET_OK) {
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, &(fs_spiffs_interface(&spiffs_system)->interface), "system");
 	}
+
+	flash_fifo_init(&fifo, lv_fifo);
 }
 #endif
 
