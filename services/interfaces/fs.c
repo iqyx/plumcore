@@ -155,3 +155,17 @@ ifs_ret_t ifs_rename(IFs *self, const char *old_fn, const char *new_fn) {
 
 	return IFS_RET_FAILED;
 }
+
+ifs_ret_t ifs_stats(IFs *self, size_t *total, size_t *used) {
+	if (u_assert(self != NULL) ||
+	    u_assert(total != NULL) ||
+	    u_assert(used != NULL)) {
+		return IFS_RET_FAILED;
+	}
+
+	if (self->vmt.stats != NULL) {
+		return self->vmt.stats(self->vmt.context, total, used);
+	}
+
+	return IFS_RET_FAILED;
+}

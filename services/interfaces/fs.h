@@ -53,6 +53,7 @@ struct ifs_vmt {
 	ifs_ret_t (*read)(void *context, IFsFile f, uint8_t *buf, size_t len, size_t *read);
 	ifs_ret_t (*write)(void *context, IFsFile f, const uint8_t *buf, size_t len, size_t *written);
 	ifs_ret_t (*flush)(void *context, IFsFile f);
+	ifs_ret_t (*stats)(void *context, size_t *total, size_t *used);
 
 	void *context;
 };
@@ -75,3 +76,4 @@ ifs_ret_t ifs_fclose(IFs *self, IFsFile f);
 ifs_ret_t ifs_open(IFs *self, IFsFile *f, const char *filename, uint32_t mode);
 ifs_ret_t ifs_remove(IFs *self, const char *filename);
 ifs_ret_t ifs_rename(IFs *self, const char *old_fn, const char *new_fn);
+ifs_ret_t ifs_stats(IFs *self, size_t *total, size_t *used);
