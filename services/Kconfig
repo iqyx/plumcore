@@ -127,6 +127,10 @@ menu "Filesystem and memory management services"
 	config SERVICE_FLASH_VOL_STATIC
 		bool "Flash volumes service (static configuration)"
 		default y
+
+	config SERVICE_FLASH_FIFO
+		bool "FIFO in a flash device"
+		default y
 endmenu
 
 menu "System services"
