@@ -58,28 +58,6 @@ env.Command(
 # Examine the Git repository and build the version string
 SConscript("version.SConscript")
 
-## @todo Check for the nanopb installation. Request download and build of the library
-##       if it is not properly initialized.
-def build_proto(target, source, env):
-	for s in source:
-		d = os.path.dirname(str(s))
-		os.system("protoc --plugin=lib/other/nanopb/generator/protoc-gen-nanopb --proto_path=%s --nanopb_out=%s --proto_path=lib/other/nanopb/generator/proto %s" % (d, d, s))
-
-def modify_proto_targets(target, source, env):
-	target = []
-	for s in source:
-		b = os.path.splitext(str(s))[0]
-		target.append(File(b + ".pb.h"))
-		target.append(File(b + ".pb.c"))
-	return target, source
-
-proto_builder = Builder(
-	action = Action(build_proto, env["PROTOCCOMSTR"]),
-	emitter = modify_proto_targets,
-)
-env.Append(BUILDERS = {'Proto' : proto_builder})
-
-
 env["PORTFILE"] = "bin/%s" % conf["OUTPUT_FILE_PREFIX"];
 if conf["OUTPUT_FILE_PORT_PREFIX"] == "y":
 	env["PORTFILE"] += "-" + conf["PORT_NAME"]
@@ -120,8 +98,8 @@ objs.append(env.Object(source = [
 
 objs.append(SConscript("uhal/SConscript"))
 objs.append(SConscript("system/SConscript"))
-SConscript("protocols/SConscript")
 SConscript("lib/SConscript")
+SConscript("protocols/SConscript")
 objs.append(SConscript("services/SConscript"))
 
 
@@ -200,14 +178,4 @@ env.Append(LIBS = [
 
 SConscript("firmware.SConscript")
 
-# proto = env.Command(
-	# source = [
-		# File(Glob("protocols/umesh/proto/*.proto")),
-		# File(Glob("protocols/uxb/*.proto")),
-	# ],
-	# target = "protoc",
-	# action = build_proto
-# )
-
-# env.Alias("proto", proto);
 Default("firmware")
