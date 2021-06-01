@@ -1,0 +1,56 @@
+syntax = "proto2";
+
+message Time {
+	required uint32 s = 1;
+	optional uint32 ms = 2;
+	optional uint32 us = 3;
+	optional uint32 ns = 4;
+}
+
+message Msg {
+	enum Type {
+		CHAR = 0;
+		BYTE = 1;
+		INT8 = 2;
+		UINT8 = 3;
+		INT16 = 4;
+		UINT16 = 5;
+		INT32 = 6;
+		UINT32 = 7;
+		INT64 = 8;
+		UINT64 = 9;
+		FLOAT = 10;
+		DOUBLE = 11;
+	}
+
+	optional Type type = 1;
+	optional Time time = 2;
+	optional bytes buf = 3;
+	optional string topic = 4;
+}
+
+message RawData {
+	repeated Msg msg = 1;
+}
+
+message HeatshrinkData {
+	required uint32 window_size = 1;
+	required uint32 lookahead_size = 2;
+	required bytes msg = 3;
+}
+
+message PackageData {
+	optional uint32 pkg_index = 1;
+	optional bytes nonce = 2;
+	optional uint32 msg_count = 3;
+	oneof encoding {
+		RawData raw = 4;
+		HeatshrinkData heatshrink = 5;
+	}
+}
+
+message Package {
+	optional bytes blake2s_mac = 1;
+	optional bytes blake2s_siv = 2;
+	optional bytes data = 3;
+}

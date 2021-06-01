@@ -1,28 +1,9 @@
-/*
- * plog message packager/serializer
+/* SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
+ * FIFO in a flash device
+ *
+ * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
  * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <stdint.h>
@@ -30,28 +11,28 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "config.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "port.h"
 
 #include "sha3.h"
 #include "chacha20.h"
 #include "poly1305.h"
 
-#include "interfaces/plog/descriptor.h"
-#include "interfaces/plog/client.h"
+#include <interfaces/mq.h>
+#include <types/ndarray.h>
 #include "heatshrink_encoder.h"
 #include "heatshrink_decoder.h"
 
 #include "plog_packager.h"
+#include "pkg.pb.h"
+#include <pb_encode.h>
 
-#ifdef MODULE_NAME
-#undef MODULE_NAME
-#endif
 #define MODULE_NAME "plog-packager"
 
+#define HERE u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("at " __FILE__ ":%u") , __LINE__);
 
 static plog_packager_ret_t package_init(struct plog_packager_package *self, PlogPackager *parent, size_t data_size, size_t header_size) {
 	if (self == NULL) {
@@ -98,7 +79,7 @@ static plog_packager_ret_t package_poll_compress_data(struct plog_packager_packa
 	}
 
 	size_t poll_size = 0;
-	HSD_poll_res pres = 0;
+	HSE_poll_res pres = 0;
 	do {
 		if (self->data_used >= self->data_size) {
 			return PLOG_PACKAGER_RET_FAILED;
@@ -109,11 +90,12 @@ static plog_packager_ret_t package_poll_compress_data(struct plog_packager_packa
 			self->data_size - self->data_used,
 			&poll_size
 		);
+		// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("encoder_poll size = %u, pres = %u, 0x%02x"), poll_size, pres, self->data[self->data_used]);
 		if (pres < 0) {
 			return PLOG_PACKAGER_RET_FAILED;
 		}
 		self->data_used += poll_size;
-	} while (pres == HSDR_POLL_MORE);
+	} while (pres == HSER_POLL_MORE);
 
 	return PLOG_PACKAGER_RET_OK;
 }
@@ -131,12 +113,14 @@ static plog_packager_ret_t package_append_compress_data(struct plog_packager_pac
 		if (sres < 0) {
 			return PLOG_PACKAGER_RET_FAILED;
 		}
+		// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("encoder_sink = %u"), sink_size);
 		len -= sink_size;
 		buf += sink_size;
 
 		if (package_poll_compress_data(self) != PLOG_PACKAGER_RET_OK) {
 			return PLOG_PACKAGER_RET_FAILED;
 		}
+		self->data_used_raw += len;
 	}
 
 	return PLOG_PACKAGER_RET_OK;
@@ -151,6 +135,7 @@ static plog_packager_ret_t package_prepend_raw_data(struct plog_packager_package
 	if (len <= (self->header_size - self->header_used)) {
 		memcpy(self->data - self->header_used - len, buf, len);
 		self->header_used += len;
+		self->data_used_raw += len;
 		return PLOG_PACKAGER_RET_OK;
 	}
 
@@ -166,6 +151,7 @@ static plog_packager_ret_t package_append_raw_data(struct plog_packager_package 
 	if (len <= (self->data_size - self->data_used)) {
 		memcpy(self->data + self->data_used, buf, len);
 		self->data_used += len;
+		self->data_used_raw += len;
 		return PLOG_PACKAGER_RET_OK;
 	}
 
@@ -188,74 +174,11 @@ static plog_packager_ret_t package_prepare(struct plog_packager_package *self) {
 
 	self->message_count = 0;
 	self->data_used = 0;
+	self->data_used_raw = 0;
 	self->header_used = 0;
 
 	return PLOG_PACKAGER_RET_OK;
 }
-
-
-static plog_packager_ret_t package_compute_key(struct plog_packager_package *self, uint8_t key[32]) {
-	if (self == NULL) {
-		return PLOG_PACKAGER_RET_NULL;
-	}
-
-	if (key == NULL) {
-		return PLOG_PACKAGER_RET_NULL;
-	}
-
-	/* Compute package key as a SHA3-256 hashed concatenation
-	 * of a packager nonce, packager key and a package index. */
-	sha3_ctx sha3;
-	rhash_sha3_256_init(&sha3);
-	rhash_sha3_update(&sha3, self->parent->nonce, PLOG_PACKAGER_NONCE_SIZE);
-	rhash_sha3_update(&sha3, self->parent->key, self->parent->key_size);
-	rhash_sha3_update(&sha3, self->parent->nonce, PLOG_PACKAGER_NONCE_SIZE);
-	uint8_t tmp[4] = {
-		0,
-		0,
-		self->index / 256,
-		self->index % 256
-	};
-	rhash_sha3_update(&sha3, tmp, sizeof(tmp));
-	rhash_sha3_final(&sha3, key);
-
-	return PLOG_PACKAGER_RET_OK;
-}
-
-
-static plog_packager_ret_t package_add_mac_tag(struct plog_packager_package *self) {
-	if (self == NULL) {
-		return PLOG_PACKAGER_RET_NULL;
-	}
-
-	chacha20_context chacha;
-
-	/* Ok, compute the package key first. We will use it to compute the MAC. */
-	uint8_t key[32] = {0};
-	if (package_compute_key(self, key) != PLOG_PACKAGER_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	/* Now use the chacha20 primitive with a NULL nonce and a zero counter
-	 * to derive a key for poly1305. */
-	chacha20_keysetup(&chacha, key, 256);
-	uint8_t nonce[8] = {0};
-	chacha20_nonce(&chacha, nonce);
-	chacha20_counter(&chacha, 0);
-
-	uint8_t polykey[64] = {0};
-	chacha20_keystream(&chacha, polykey);
-
-	uint8_t tag[16] = {0};
-	/* Only the first part of the key is used. */
-	poly1305(tag, self->data, self->data_used, polykey);
-
-	package_append_raw_data(self, PLOG_PACKAGER_MAC_POLY1305_HEADER, 4);
-	package_append_raw_data(self, tag, 16);
-
-	return PLOG_PACKAGER_RET_OK;
-}
-
 
 
 static plog_packager_ret_t package_compress_finish(struct plog_packager_package *self) {
@@ -279,68 +202,6 @@ static plog_packager_ret_t package_compress_finish(struct plog_packager_package 
 }
 
 
-static plog_packager_ret_t package_add_package_header(struct plog_packager_package *self) {
-	if (self == NULL) {
-		return PLOG_PACKAGER_RET_NULL;
-	}
-
-	/* Prepend the package index. */
-	uint8_t tmp[4] = {
-		0,
-		0,
-		self->index / 256,
-		self->index % 256
-	};
-	if (package_prepend_raw_data(self, tmp, sizeof(tmp)) != PLOG_PACKAGER_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	/* Nonce of the packager process. */
-	if (package_prepend_raw_data(self, self->parent->nonce, PLOG_PACKAGER_NONCE_SIZE) != PLOG_PACKAGER_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	/* And finally the package header. It is the first one in the serialized stream. */
-	if (package_prepend_raw_data(self, PLOG_PACKAGER_PACKAGE_HEADER, 4) != PLOG_PACKAGER_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	return PLOG_PACKAGER_RET_OK;
-}
-
-
-static plog_packager_ret_t package_add_package_trailer(struct plog_packager_package *self) {
-	if (self == NULL) {
-		return PLOG_PACKAGER_RET_NULL;
-	}
-
-	return package_append_raw_data(self, PLOG_PACKAGER_PACKAGE_TRAILER, 4);
-}
-
-
-static plog_packager_ret_t package_add_message_list_header(struct plog_packager_package *self) {
-	if (self == NULL) {
-		return PLOG_PACKAGER_RET_NULL;
-	}
-
-	uint8_t tmp[4] = {
-		self->message_count / 256,
-		self->message_count % 256,
-		self->data_used / 256,
-		self->data_used % 256
-	};
-	if (package_prepend_raw_data(self, tmp, sizeof(tmp)) != PLOG_PACKAGER_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	if (package_prepend_raw_data(self, PLOG_PACKAGER_MLIST_HEADER1, 4) != PLOG_PACKAGER_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	return PLOG_PACKAGER_RET_FAILED;
-}
-
-
 static plog_packager_ret_t package_finish(struct plog_packager_package *self) {
 	if (self == NULL) {
 		return PLOG_PACKAGER_RET_NULL;
@@ -349,22 +210,43 @@ static plog_packager_ret_t package_finish(struct plog_packager_package *self) {
 	if (self->finished) {
 		return PLOG_PACKAGER_RET_FAILED;
 	}
+	uint8_t buf[64];
 
-	/* Finish LZSS compression and write the rest of the pending data. Append a message
-	 * list header when the compressed size is known. */
+	/* Finish LZSS compression and write the rest of the pending data. Now the data
+	 * part of the package is completed. */
 	package_compress_finish(self);
-	package_add_message_list_header(self);
-	/** @todo encrypt here and add different header if requested */
 
-	/* Prepend package headers. */
-	package_add_package_header(self);
+	/* We may encode the header. Complete HeatshrinkData msg. */
+	pb_ostream_t stream = pb_ostream_from_buffer(buf, sizeof(buf));
+	pb_encode_tag(&stream, PB_WT_VARINT, HeatshrinkData_lookahead_size_tag);
+	pb_encode_varint(&stream, self->parent->hs_lookahead_size);
+	pb_encode_tag(&stream, PB_WT_VARINT, HeatshrinkData_window_size_tag);
+	pb_encode_varint(&stream, self->parent->hs_window_size);
+	pb_encode_tag(&stream, PB_WT_STRING, HeatshrinkData_msg_tag);
+	pb_encode_varint(&stream, self->data_used);
+	package_prepend_raw_data(self, buf, stream.bytes_written);
 
-	/* And append package trailers. */
-	package_add_mac_tag(self);
-	package_add_package_trailer(self);
+	stream = pb_ostream_from_buffer(buf, sizeof(buf));
+	pb_encode_tag(&stream, PB_WT_VARINT, PackageData_pkg_index_tag);
+	pb_encode_varint(&stream, self->index);
+	pb_encode_tag(&stream, PB_WT_VARINT, PackageData_msg_count_tag);
+	pb_encode_varint(&stream, self->message_count);
+	pb_encode_tag(&stream, PB_WT_STRING, PackageData_heatshrink_tag);
+	pb_encode_varint(&stream, self->data_used + self->header_used);
+	package_prepend_raw_data(self, buf, stream.bytes_written);
+
+	/** @todo compute MAC here */
+
+	stream = pb_ostream_from_buffer(buf, sizeof(buf));
+	pb_encode_tag(&stream, PB_WT_STRING, Package_data_tag);
+	pb_encode_varint(&stream, self->data_used + self->header_used);
+	package_prepend_raw_data(self, buf, stream.bytes_written);
+
+	/** @todo prepend MAC here */
+
+	package_prepend_raw_data(self, PLOG_PACKAGER_PACKAGE_MAGIC, PLOG_PACKAGER_PACKAGE_MAGIC_SIZE);
 
 	self->finished = true;
-
 	return PLOG_PACKAGER_RET_OK;
 }
 
@@ -374,7 +256,15 @@ static plog_packager_ret_t package_publish(struct plog_packager_package *self) {
 		return PLOG_PACKAGER_RET_NULL;
 	}
 
-	if (plog_publish_data(&self->parent->plog, self->parent->dest_topic, self->data - self->header_used, self->data_used + self->header_used) != PLOG_RET_OK) {
+	const char *topic = self->parent->dst_topic;
+	if (strlen(topic) == 0) {
+		topic = "package";
+	}
+
+	struct timespec ts = {0};
+	NdArray array;
+	ndarray_init_view(&array, DTYPE_BYTE, self->data_used + self->header_used, self->data - self->header_used, self->data_used + self->header_used);
+	if (self->parent->mqc->vmt->publish(self->parent->mqc, self->parent->dst_topic, &array, &ts) != MQ_RET_OK) {
 		return PLOG_PACKAGER_RET_FAILED;
 	}
 
@@ -382,174 +272,189 @@ static plog_packager_ret_t package_publish(struct plog_packager_package *self) {
 }
 
 
+static bool nanopb_write_callback_compressed(pb_ostream_t *stream, const uint8_t *buf, size_t count) {
+	struct plog_packager_package *self = (struct plog_packager_package *)stream->state;
+	return package_append_compress_data(self, buf, count) == PLOG_PACKAGER_RET_OK;
+}
 
-static plog_packager_ret_t package_add_message(struct plog_packager_package *self, const IPlogMessage *msg) {
+
+static void encode_message(pb_ostream_t *stream, NdArray *msg, const char *topic) {
+	/* Write the message type. Proto file Msg Type enum is the same as ndarray.dtype */
+	pb_encode_tag(stream, PB_WT_VARINT, Msg_type_tag);
+	pb_encode_varint(stream, msg->dtype);
+	/** @todo add time here */
+
+	/* Encode the topic */
+	pb_encode_tag(stream, PB_WT_STRING, Msg_topic_tag);
+	pb_encode_varint(stream, strlen(topic));
+	pb_write(stream, (const uint8_t *)topic, strlen(topic));
+
+	/* Encode the message data */
+	pb_encode_tag(stream, PB_WT_STRING, Msg_buf_tag);
+	pb_encode_varint(stream, msg->asize * msg->dsize);
+	pb_write(stream, msg->buf, msg->asize * msg->dsize);
+	// pb_write(stream, test_vector, 32);
+
+}
+
+static plog_packager_ret_t package_add_message(struct plog_packager_package *self, NdArray *msg, const char *topic) {
 	if (self == NULL) {
 		return PLOG_PACKAGER_RET_NULL;
 	}
 
-	if (self->data_used >= PLOG_PACKAGER_DATA_SIZE_THR) {
+	pb_ostream_t len_stream = {0};
+	encode_message(&len_stream, msg, topic);
+	size_t msg_len = len_stream.bytes_written;
+
+	size_t remaining = self->data_size - self->data_used;
+	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("remaining %u"), remaining);
+	if ((msg_len + self->data_used) > (self->data_size / 2)) {
 		package_finish(self);
-
-	} else {
-		package_append_compress_data(self, (const uint8_t *)"time", 4);
-		uint8_t topic_len_bytes[2] = {
-			strlen(msg->topic) / 256,
-			strlen(msg->topic) % 256
-		};
-		package_append_compress_data(self, topic_len_bytes, sizeof(topic_len_bytes));
-
-		switch (msg->type) {
-			case IPLOG_MESSAGE_TYPE_FLOAT: {
-				uint8_t tmp[4];
-				memcpy(tmp, &msg->content.cfloat, 4);
-				package_append_compress_data(self, PLOG_PACKAGER_M_FLOAT_HEADER, 2);
-				package_append_compress_data(self, tmp, sizeof(float));
-				break;
-			}
-
-			default:
-				package_append_compress_data(self, PLOG_PACKAGER_M_NONE_HEADER, 2);
-				break;
-		}
-		self->message_count++;
+		package_publish(self);
+		package_prepare(self);
 	}
+	
+	pb_ostream_t stream = {nanopb_write_callback_compressed, self, self->data_size - self->data_used, 0};
+
+	/* Message header */
+	pb_encode_tag(&stream, PB_WT_STRING, RawData_msg_tag);
+	pb_encode_varint(&stream, msg_len);
+	encode_message(&stream, msg, topic);
+
+	self->message_count++;
 
 	return PLOG_PACKAGER_RET_OK;
-}
-
-
-static plog_ret_t plog_packager_recv_event_handler(void *context, const IPlogMessage *msg) {
-	PlogPackager *self = (PlogPackager *)context;
-	package_add_message(&self->package, msg);
-
-	return PLOG_RET_OK;
 }
 
 
 static void plog_packager_task(void *p) {
 	PlogPackager *self = (PlogPackager *)p;
 
+	self->can_run = true;
 	self->running = true;
 	while (self->can_run) {
-		plog_receive(&self->plog, 1000);
+		struct timespec ts = {0};
+		char topic[PLOG_PACKAGER_TOPIC_FILTER_SIZE] = {0};
+		if (self->mqc->vmt->receive(self->mqc, topic, PLOG_PACKAGER_TOPIC_FILTER_SIZE, &self->rxbuf, &ts) == MQ_RET_OK) {
+			package_add_message(&self->package, &self->rxbuf, topic);
+		}
 	}
 	vTaskDelete(NULL);
 	self->running = false;
 }
 
 
-static void plog_packager_sender_task(void *p) {
-	PlogPackager *self = (PlogPackager *)p;
-
-	self->sender_running = true;
-	while (self->sender_can_run) {
-		if (self->package.finished) {
-			package_publish(&self->package);
-			package_prepare(&self->package);
-		}
-		vTaskDelay(100);
-	}
-	vTaskDelete(NULL);
-	self->sender_running = false;
-}
-
-
-plog_packager_ret_t plog_packager_init(PlogPackager *self, const char *topic_filter, const char *dest_topic) {
+plog_packager_ret_t plog_packager_init(PlogPackager *self, Mq *mq) {
 	if (u_assert(self != NULL)) {
 		return PLOG_PACKAGER_RET_NULL;
 	}
 
 	memset(self, 0, sizeof(PlogPackager));
+	self->mq = mq;
 
-	/* Initialize the plog client and set reception callbacks. */
-	strlcpy(self->topic_filter, topic_filter, PLOG_PACKAGER_TOPIC_FILTER_SIZE);
-	strlcpy(self->dest_topic, dest_topic, PLOG_PACKAGER_TOPIC_FILTER_SIZE);
-	Interface *interface;
-	if (iservicelocator_query_name_type(locator, "plog-router", ISERVICELOCATOR_TYPE_PLOG_ROUTER, &interface) != ISERVICELOCATOR_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-	IPlog *iplog = (IPlog *)interface;
-	if (plog_open(&self->plog, iplog) != PLOG_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-	if (plog_set_recv_handler(&self->plog, plog_packager_recv_event_handler, (void *)self) != PLOG_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	/* We counting packages from the start. Init and prepare the first one. */
-	self->package_counter = 0;
-	package_init(&self->package, self, PLOG_PACKAGER_DATA_SIZE, PLOG_PACKAGER_HEADER_SIZE);
-	package_prepare(&self->package);
-
-	self->hs_encoder = heatshrink_encoder_alloc(6, 5);
-	if (self->hs_encoder == NULL) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot allocate compression encoder"));
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	/* Generate package nonce. It is done every time the packager is started. */
-	/** @todo */
-	memcpy(&self->nonce, "asdfasdfasdfasdf", PLOG_PACKAGER_NONCE_SIZE);
-
-	/* Until a key is set, use the default one. */
-	memcpy(self->key, "sample-key", 10);
-	self->key_size = 10;
-
-	/* Run the packager main thread. Messages are being received inside. */
-	self->can_run = true;
-	xTaskCreate(plog_packager_task, "plog-packager", configMINIMAL_STACK_SIZE + 512, (void *)self, 1, &(self->task));
-	if (self->task == NULL) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create main task"));
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	/* Run the packager sending thread. */
-	self->sender_can_run = true;
-	xTaskCreate(plog_packager_sender_task, "plog-packager-s", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->sender_task));
-	if (self->sender_task == NULL) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create sender task"));
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	/* We can subscribe to the selected messages now. */
-	if (plog_subscribe(&self->plog, self->topic_filter) != PLOG_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
-	}
-
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("service started, packing '%s' to '%s'"), self->topic_filter, self->dest_topic);
-	self->initialized = true;
 	return PLOG_PACKAGER_RET_OK;
 }
 
 
 plog_packager_ret_t plog_packager_free(PlogPackager *self) {
-	if (self == NULL) {
-		return PLOG_PACKAGER_RET_NULL;
+	package_free(&self->package);
+	heatshrink_encoder_free(self->hs_encoder);
+	self->mq = NULL;
+
+	return PLOG_PACKAGER_RET_OK;
+}
+
+
+plog_packager_ret_t plog_packager_start(PlogPackager *self, size_t msg_size, size_t package_size) {
+	if (u_assert(self->mq != NULL)) {
+		return PLOG_PACKAGER_RET_FAILED;
 	}
 
-	if (self->initialized == false) {
+	/* We are counting packages from the start of the process. Init and prepare the first one. */
+	self->package_counter = 0;
+	if (package_init(&self->package, self, package_size, PLOG_PACKAGER_HEADER_SIZE) != PLOG_PACKAGER_RET_OK) {
+		goto err;
+	}
+	package_prepare(&self->package);
+
+	/* Create a new MQ client instance we will use to publish messages */
+	self->mqc = self->mq->vmt->open(self->mq);
+	if (self->mqc == NULL) {
+		goto err;
+	}
+	self->mqc->vmt->subscribe(self->mqc, self->topic_filter);
+
+	/* Using heatshrink to compress data */
+	self->hs_window_size = 8;
+	self->hs_lookahead_size = 5;
+	self->hs_encoder = heatshrink_encoder_alloc(self->hs_window_size, self->hs_lookahead_size);
+	
+	if (self->hs_encoder == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot allocate compression encoder"));
+		return PLOG_PACKAGER_RET_FAILED;
+	}
+
+	if (ndarray_init_empty(&self->rxbuf, DTYPE_BYTE, msg_size) != NDARRAY_RET_OK) {
+		goto err;
+	}
+
+	/* Run the packager main thread. Messages are being received inside. */
+	xTaskCreate(plog_packager_task, "plog-packager", configMINIMAL_STACK_SIZE + 512, (void *)self, 1, &(self->task));
+	if (self->task == NULL) {
+		goto err;
+	}
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("packaging '%s' -> '%s', max pkg size %u B"), self->topic_filter, self->dst_topic, package_size);
+	return PLOG_PACKAGER_RET_OK;
+err:
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start"));
+	return PLOG_PACKAGER_RET_FAILED;
+}
+
+
+plog_packager_ret_t plog_packager_stop(PlogPackager *self) {
+	if (u_assert(self->running == true)) {
 		return PLOG_PACKAGER_RET_FAILED;
 	}
 
 	self->can_run = false;
 	while (self->running) {
-		vTaskDelay(10);
+		vTaskDelay(100);
 	}
 
-	self->sender_can_run = false;
-	while (self->sender_running) {
-		vTaskDelay(10);
+	if (self->mqc) {
+		self->mqc->vmt->close(self->mqc);
 	}
 
-	package_free(&self->package);
-	heatshrink_encoder_free(self->hs_encoder);
+	ndarray_free(&self->rxbuf);
 
-	self->initialized = false;
 	return PLOG_PACKAGER_RET_OK;
 }
 
 
+plog_packager_ret_t plog_packager_add_filter(PlogPackager *self, const char *topic_filter, const char *dst_topic) {
+	strlcpy(self->topic_filter, topic_filter, PLOG_PACKAGER_TOPIC_FILTER_SIZE);
+	strlcpy(self->dst_topic, dst_topic, PLOG_PACKAGER_TOPIC_FILTER_SIZE);
+	return PLOG_PACKAGER_RET_OK;
+}
 
 
+plog_packager_ret_t plog_packager_set_nonce(PlogPackager *self, const uint8_t *nonce, size_t len) {
+	if (len > PLOG_PACKAGER_NONCE_SIZE) {
+		len = PLOG_PACKAGER_NONCE_SIZE;
+	}
+	memcpy(self->nonce, nonce, len);
+	self->nonce_size = len;
+	return PLOG_PACKAGER_RET_OK;
+}
+
+
+plog_packager_ret_t plog_packager_set_key(PlogPackager *self, const uint8_t *key, size_t len) {
+	if (len > PLOG_PACKAGER_MAX_KEY_SIZE) {
+		len = PLOG_PACKAGER_MAX_KEY_SIZE;
+	}
+	memcpy(self->key, key, len);
+	self->key_size = len;
+	return PLOG_PACKAGER_RET_OK;
+}
 
