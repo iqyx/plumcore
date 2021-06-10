@@ -25,6 +25,7 @@
 #include <libopencm3/stm32/pwr.h>
 #include <libopencm3/stm32/lptimer.h>
 #include <libopencm3/stm32/dbgmcu.h>
+#include <libopencm3/stm32/quadspi.h>
 
 #include "config.h"
 #include "FreeRTOS.h"
@@ -112,6 +113,61 @@ volatile uint16_t lptim1_ext;
 void vPortSetupTimerInterrupt(void);
 void port_sleep(TickType_t idle_time);
 
+#if defined(CONFIG_SERVICE_STM32_QSPI_FLASH)
+#include <services/stm32-qspi-flash/stm32-qspi-flash.h>
+#include <services/flash-vol-static/flash-vol-static.h>
+#include <services/fs-spiffs/fs-spiffs.h>
+#include <services/flash-fifo/flash-fifo.h>
+Stm32QspiFlash qspi_flash;
+FlashVolStatic lvs;
+Flash *lv_system;
+Flash *lv_fifo;
+FsSpiffs spiffs_system;
+FlashFifo fifo;
+static void port_qspi_init(void) {
+	rcc_periph_clock_enable(RCC_QSPI);
+	rcc_periph_reset_pulse(RST_QSPI);
+
+	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6 | GPIO7);
+	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO6 | GPIO7);
+	gpio_set_af(GPIOA, GPIO_AF10, GPIO6 | GPIO7);
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO0 | GPIO1 | GPIO10 | GPIO11);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO0 | GPIO1 | GPIO10 | GPIO11);
+	gpio_set_af(GPIOB, GPIO_AF10, GPIO0 | GPIO1 | GPIO10 | GPIO11);
+
+	/* Port specific setting. */
+	QUADSPI_CR = (0 << QUADSPI_CR_PRESCALE_SHIFT);
+	stm32_qspi_flash_init(&qspi_flash);
+	// stm32_qspi_flash_page_speed_test(&qspi_flash, 1024, 1024, &rtc.clock);
+
+	flash_vol_static_init(&lvs, &qspi_flash.iface);
+	flash_vol_static_create(&lvs, "system", 0x0, 0x100000, &lv_system);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_system, "system");
+
+	flash_vol_static_create(&lvs, "fifo", 0x100000, 0x400000, &lv_fifo);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_fifo, "fifo");
+
+	fs_spiffs_init(&spiffs_system);
+	// fs_spiffs_format(&spiffs_system, lv_system);
+	if (fs_spiffs_mount(&spiffs_system, lv_system) == FS_SPIFFS_RET_OK) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, &(fs_spiffs_interface(&spiffs_system)->interface), "system");
+	}
+
+	flash_fifo_init(&fifo, lv_fifo);
+}
+#endif
+
+#if 1
+#include <services/flash-test/flash-test.h>
+FlashTest flash_test;
+static void port_flash_test(void) {
+	flash_test_init(&flash_test, &rtc.clock);
+	flash_test_dev(&flash_test, lv_system, qspi_flash.info->type);
+	flash_test_free(&flash_test);
+}
+#endif
+
+
 int32_t port_early_init(void) {
 	/* Relocate the vector table first if required. */
 	#if defined(CONFIG_RELOCATE_VECTOR_TABLE)
@@ -176,7 +232,7 @@ int32_t port_early_init(void) {
 }
 
 
-void port_check_debug(void) {
+static void port_check_debug(void) {
 /*
 	if (SCS_DHCSR & SCS_DHCSR_C_DEBUGEN) {
 		u_log(system_log, LOG_TYPE_DEBUG, "debugger connected");
@@ -630,6 +686,10 @@ int32_t port_init(void) {
 
 	port_rfm_init();
 	port_accel2_init();
+	#if defined(CONFIG_SERVICE_STM32_QSPI_FLASH)
+		port_qspi_init();
+		// port_flash_test();
+	#endif
 
 	port_check_debug();
 	if (DBGMCU_CR & DBGMCU_CR_STOP) {

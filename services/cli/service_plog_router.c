@@ -64,6 +64,10 @@ enum sniff_format {
 static char base85chars[85 + 1] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#";
 
 static void cli_print_base85(ServiceCli *self, const uint8_t *buf, size_t len) {
+	while ((len % 4) != 0) {
+		len++;
+	}
+
 	uint32_t acc = 0;
 	for (size_t i = 0; i < len; i++) {
 		acc = acc << 8 | buf[i];
@@ -158,7 +162,7 @@ int32_t service_plog_router_sniff(struct treecli_parser *parser, void *exec_cont
 	
 	module_cli_output("plog-router sniffer started... (press any key to interrupt)\r\n", cli);
 	NdArray array;
-	ndarray_init_empty(&array, DTYPE_INT8, 256);
+	ndarray_init_empty(&array, DTYPE_INT8, 4096 + 128);
 	while (true) {
 		struct timespec ts = {0};
 		char topic[32];
@@ -168,15 +172,15 @@ int32_t service_plog_router_sniff(struct treecli_parser *parser, void *exec_cont
 				struct tm tm = {0};
 				localtime_r(&ts.tv_sec, &tm);
 				char tstr[150] = {0};
-				strftime(tstr, sizeof(tstr) - 1, "{ts: \"%FT%TZ\", topic: \"", &tm);
+				strftime(tstr, sizeof(tstr) - 1, "{\"ts\": \"%FT%TZ\", \"topic\": \"", &tm);
 				module_cli_output(tstr, cli);
 				module_cli_output(topic, cli);
-				module_cli_output("\", type: \"", cli);
+				module_cli_output("\", \"type\": \"", cli);
 				module_cli_output(ndarray_dtype_str(&array), cli);
-				module_cli_output("\", size: ", cli);
+				module_cli_output("\", \"size\": ", cli);
 				snprintf(tstr, sizeof(tstr), "%u", array.asize);
 				module_cli_output(tstr, cli);
-				module_cli_output(", data: ", cli);
+				module_cli_output(", \"data\": ", cli);
 				cli_print_array_data(cli, &array);
 				module_cli_output("}\r\n", cli);
 

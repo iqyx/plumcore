@@ -34,6 +34,10 @@ menu "Low-level platform drivers"
 		config SERVICE_STM32_I2C_MASTER
 			bool "STM32 I2C bus driver in master mode"
 			default y
+
+		config SERVICE_STM32_QSPI_FLASH
+			bool "STM32 QSPI flash memory driver"
+			default y
 	endmenu
 endmenu
 
@@ -119,6 +123,14 @@ menu "Filesystem and memory management services"
 	config SERVICE_WORN_LOG_BLOCK
 		bool "WORN (write-once, read-never) log on a block device storage"
 		default n
+
+	config SERVICE_FLASH_VOL_STATIC
+		bool "Flash volumes service (static configuration)"
+		default y
+
+	config SERVICE_FLASH_FIFO
+		bool "FIFO in a flash device"
+		default y
 endmenu
 
 menu "System services"
@@ -303,4 +315,10 @@ menu "Language interpreters"
 		default n
 		select LIB_DUKTAPE
 
+endmenu
+
+menu "Test suites"
+	config SERVICE_FLASH_TEST
+		bool "Flash memory test suite (integrity and speed tests)"
+		default y
 endmenu

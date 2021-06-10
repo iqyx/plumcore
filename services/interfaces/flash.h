@@ -1,80 +1,87 @@
-/*
+/* SPDX-License-Identifier: BSD-2-Clause
+ *
  * plumCore flash memory interface
  *
- * Copyright (C) 2018, Marek Koza, qyx@krtko.org
- *
- * This file is part of uMesh node firmware (http://qyx.krtko.org/projects/umesh)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
+ * All rights reserved.
  */
 
 #pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "interface.h"
-
-#define IFLASH_SECTOR_SIZES 4
 
 typedef enum {
-	IFLASH_RET_OK = 0,
-	IFLASH_RET_FAILED,
-	IFLASH_RET_UNKNOWN,
-	IFLASH_RET_NULL,
-	IFLASH_RET_TIMEOUT,
-} iflash_ret_t;
+	FLASH_RET_OK = 0,
+	FLASH_RET_FAILED,
+	FLASH_RET_BAD_ARG,
+} flash_ret_t;
 
-struct iflash_info {
+typedef enum {
+	FLASH_BLOCK_OPS_READ = (1 << 0),
+	FLASH_BLOCK_OPS_WRITE = (1 << 1),
+	FLASH_BLOCK_OPS_ERASE = (1 << 2),
+} flash_block_ops_t;
 
-	/* Size of the flash memory/partition is defined in Bytes. */
-	uint64_t size_bytes;
+typedef struct flash Flash;
 
-	/* Flash page is a memory block which can be read or written at once. */
-	uint32_t page_size_bytes;
+struct flash_vmt {
+	/**
+	 * @brief Get size of a flash block
+	 *
+	 * Function returns the size of an individually erasable block.
+	 *
+	 * @param self Flash interface instance
+	 * @param i Level of the block size, 0 is the whole memory array
+	 * @param size Size of the block
+	 * @param ops Operations supported on the reported block size
+	 * @return FLASH_RET_BAD_ARG if the @p i is invalid (no smaller sizes),
+	 *         FLASH_RET_FAILED on error or FLASH_RET_OK otherwise.
+	 */
+	flash_ret_t (*get_size)(Flash *self, uint32_t i, size_t *size, flash_block_ops_t *ops);
 
-	/* Flash memories have different erase sector sizes. */
-	uint32_t sector_size_bytes[IFLASH_SECTOR_SIZES];
+	/**
+	 * @brief Erase a block of flash
+	 *
+	 * Erase a block starting with an address @p addr with a size @p len.
+	 * If the requested erase range is not aligned on the smalles erase
+	 * block boundary, fail. The function may optimize the erase process
+	 * using commands to erase different block sizes.
+	 *
+	 * @param self Flash interface instance
+	 * @param addr Starting address of the range to be erased
+	 * @param len Length of the range to be erased
+	 * @return FLASH_RET_BAD_ARG if @p addr or @p len is not aligned on the
+	 *         smallest erase block boundary, FLASH_RET_FAILED on error or
+	 *         FLASH_RET_OK otherwise.
+	 */
+	flash_ret_t (*erase)(Flash *self, const size_t addr, size_t len);
 
-	/* JEDEC flash ID. */
-	uint32_t id;
+	/**
+	 * @brief Write block of data
+	 *
+	 * @param self Flash interface instance
+	 * @param addr Address in the memory to write data to
+	 * @param buf Buffer containing the data to be written
+	 * @param len Size of the buffer (= length of the data to write)
+	 * @return FLASH_RET_FAILED on error or FLASH_RET_OK otherwise.
+	 */
+	flash_ret_t (*write)(Flash *self, const size_t addr, const void *buf, size_t len);
 
-	/* String information about the flash manufacturer and part number. */
-	char *manufacturer;
-	char *part;
+	/**
+	 * @brief Read block of data
+	 *
+	 * @param self Flash interface instance
+	 * @param addr Address in the memory to read data from
+	 * @param buf Buffer where the data will be saved
+	 * @param len Size of the buffer (= length of the data to read)
+	 *
+	 * @return FLASH_RET_FAILED on error or FLASH_RET_OK otherwise.
+	 */
+	flash_ret_t (*read)(Flash *self, const size_t addr, void *buf, size_t len);
 };
 
-struct iflash_vmt {
-	iflash_ret_t (*get_info)(void *context, struct iflash_info *info);
-	iflash_ret_t (*erase)(void *context, const uint64_t addr, uint32_t sector_size_index);
-	iflash_ret_t (*write)(void *context, const uint64_t addr, const uint8_t *buf, size_t len);
-	iflash_ret_t (*read)(void *context, const uint64_t addr, uint8_t *buf, size_t len);
-
-	void *context;
-};
-
-typedef struct {
-	Interface interface;
-
-	struct iflash_vmt vmt;
-} IFlash;
-
-
-iflash_ret_t iflash_init(IFlash *self);
-iflash_ret_t iflash_free(IFlash *self);
-iflash_ret_t iflash_get_info(IFlash *self, struct iflash_info *info);
-iflash_ret_t iflash_erase(IFlash *self, const uint64_t addr, uint32_t sector_size_index);
-iflash_ret_t iflash_write(IFlash *self, const uint64_t addr, const uint8_t *data, size_t len);
-iflash_ret_t iflash_read(IFlash *self, const uint64_t addr, uint8_t *data, size_t len);
-
-
+typedef struct flash {
+	const struct flash_vmt *vmt;
+	void *parent;
+} Flash;
