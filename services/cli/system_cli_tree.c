@@ -54,7 +54,6 @@
 #include "ucli_system_memory.c"
 #include "ucli_system_processes.c"
 #include "ucli_system.c"
-#include "ucli_files.c"
 #if defined(CONFIG_SERVICE_CLI_DEVICE_SENSOR)
 	#include "device_sensor.c"
 #endif
@@ -87,6 +86,7 @@
 #endif
 #include "config_export.h"
 #include "system_debug.h"
+#include "fs.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -96,11 +96,17 @@ const struct treecli_node *system_cli_tree = Node {
 			Name "files",
 			Commands {
 				Command {
-					Name "copy",
-					.exec = ucli_files_copy,
+					Name "print",
+					.exec = fs_print,
 				},
 				End
 			},
+			DSubnodes {
+				DNode {
+					Name "fsN",
+					.create = files_fsN_create,
+				}
+			}
 		},
 /*
 		&(struct treecli_node) {

@@ -27,7 +27,7 @@
 #include "interface_stream.h"
 #include "treecli_shell.h"
 
-#include "interfaces/fs.h"
+#include <interfaces/fs.h>
 
 
 typedef enum {
@@ -39,8 +39,8 @@ typedef enum {
 typedef struct {
 	struct interface_stream *stream;
 	struct treecli_shell sh;
-	IFs *fs;
-	IFsFile log_file;
+	Fs *fs;
+	File log_file;
 	bool log_file_opened;
 } ServiceCli;
 
@@ -52,7 +52,7 @@ service_cli_ret_t service_cli_init(ServiceCli *self, struct interface_stream *st
 service_cli_ret_t service_cli_start(ServiceCli *self);
 service_cli_ret_t service_cli_stop(ServiceCli *self);
 service_cli_ret_t service_cli_free(ServiceCli *self);
-service_cli_ret_t service_cli_start_out_logging(ServiceCli *self, IFs *fs, const char *filename);
+service_cli_ret_t service_cli_start_out_logging(ServiceCli *self, Fs *fs, const char *filename);
 service_cli_ret_t service_cli_stop_out_logging(ServiceCli *self);
-service_cli_ret_t service_cli_load_file(ServiceCli *self, IFs *fs, const char *filename);
+service_cli_ret_t service_cli_load_file(ServiceCli *self, Fs *fs, const char *filename);
 
