@@ -216,6 +216,12 @@ menu "User interface services"
 endmenu
 
 menu "Communication server/client services"
+	menu "LoRaWAN services"
+		config SERVICE_LORA_FS
+			bool "Service for accessing filesystems over LoRaWAN"
+			default y
+	endmenu
+
 	menu "MQTT client/server services"
 		config SERVICE_MQTT_FILE_SERVER
 			bool "MQTT File server service"
