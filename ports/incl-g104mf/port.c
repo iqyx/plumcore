@@ -150,10 +150,12 @@ static void port_qspi_init(void) {
 	fs_spiffs_init(&spiffs_system);
 	// fs_spiffs_format(&spiffs_system, lv_system);
 	if (fs_spiffs_mount(&spiffs_system, lv_system) == FS_SPIFFS_RET_OK) {
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, &(fs_spiffs_interface(&spiffs_system)->interface), "system");
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, (Interface *)&spiffs_system.iface, "system");
 	}
 
-	flash_fifo_init(&fifo, lv_fifo);
+	if (flash_fifo_init(&fifo, lv_fifo) == FLASH_FIFO_RET_OK) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, (Interface *)&fifo.fs, "fifo");
+	}
 }
 #endif
 
