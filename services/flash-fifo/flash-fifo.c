@@ -374,114 +374,121 @@ static flash_fifo_ret_t flash_fifo_gc_single(FlashFifo *self) {
  * IFs filesystem interface implementation
  *************************************************************************************************/
 
-static ifs_ret_t fs_open(void *context, IFsFile *f, const char *filename, uint32_t mode) {
+static fs_ret_t fs_open(Fs *self, File *f, const char *path, enum fs_mode mode) {
 	if (u_assert(f != NULL) ||
-	    u_assert(filename != NULL) ||
-	    u_assert(context != NULL)) {
-		return IFS_RET_FAILED;
+	    u_assert(path != NULL) ||
+	    u_assert(self != NULL)) {
+		return FS_RET_FAILED;
 	}
-	FlashFifo *self = (FlashFifo *)context;
+	FlashFifo *ff = (FlashFifo *)self->parent;
 
-	if (!strcmp(filename, "fifo") && mode == IFS_MODE_READONLY) {
-		*f = IFS_FILE_READING;
-		self->read_offset = 0;
-		return IFS_RET_OK;
+	if (!strcmp(path, "fifo") && (mode & FS_MODE_READONLY)) {
+		f->handle = FS_FILE_READING;
+		ff->read_offset = 0;
+		return FS_RET_OK;
 	}
-	if (!strcmp(filename, "fifo") && mode == IFS_MODE_WRITEONLY) {
-		*f = IFS_FILE_WRITING;
-		self->read_offset = 0;
-		return IFS_RET_OK;
+	if (!strcmp(path, "fifo") && (mode & FS_MODE_WRITEONLY)) {
+		f->handle = FS_FILE_WRITING;
+		ff->read_offset = 0;
+		return FS_RET_OK;
 	}
-	return IFS_RET_FAILED;
+	return FS_RET_FAILED;
 }
 
 
-static ifs_ret_t fs_close(void *context, IFsFile f) {
-	if (u_assert(context != NULL) &&
-	    u_assert(f == 0 || f == 1)) {
-		return IFS_RET_FAILED;
+static fs_ret_t fs_close(Fs *self, File *f) {
+	if (u_assert(self != NULL) &&
+	    u_assert(f->handle == FS_FILE_READING || f->handle == FS_FILE_WRITING)) {
+		return FS_RET_FAILED;
 	}
-	return IFS_RET_OK;
+	return FS_RET_OK;
 }
 
 
-static ifs_ret_t fs_remove(void *context, const char *filename) {
-	if (u_assert(context != NULL) &&
-	    u_assert(filename != NULL)) {
-		return IFS_RET_FAILED;
+static fs_ret_t fs_remove(Fs *self, const char *path) {
+	if (u_assert(self != NULL) &&
+	    u_assert(path != NULL)) {
+		return FS_RET_FAILED;
 	}
-	FlashFifo *self = (FlashFifo *)context;
+	FlashFifo *ff = (FlashFifo *)self->parent;
 
-	if (!strcmp(filename, "fifo")) {
+	if (!strcmp(path, "fifo")) {
 		struct flash_fifo_header h = {0};
-		read_header(self, self->last, &h);
+		read_header(ff, ff->last, &h);
 		if (h.magic != FLASH_FIFO_MAGIC_FIFO) {
 			/* Nothing to remove yet. */
-			return IFS_RET_FAILED;
+			return FS_RET_FAILED;
 		}
 		h.magic = FLASH_FIFO_MAGIC_TAIL;
-		write_header(self, self->last, &h);
-		self->last++;
-		log_fifo(self, "removed");
-		return IFS_RET_OK;
+		write_header(ff, ff->last, &h);
+		ff->last++;
+		log_fifo(ff, "removed");
+		return FS_RET_OK;
 	}
-	return IFS_RET_FAILED;
+	return FS_RET_FAILED;
 }
 
 
-static ifs_ret_t fs_read(void *context, IFsFile f, uint8_t *buf, size_t len, size_t *read) {
-	FlashFifo *self = (FlashFifo *)context;
-	if (f != IFS_FILE_READING) {
-		return IFS_RET_FAILED;
+static fs_ret_t fs_read(Fs *self, File *f, void *buf, size_t len, size_t *read) {
+	FlashFifo *ff = (FlashFifo *)self->parent;
+	if (f->handle != FS_FILE_READING) {
+		return FS_RET_FAILED;
 	}
 	size_t r = 0;
 	size_t rem = len;
 	flash_fifo_ret_t ret = 0;
-	while (rem > 0 && (ret = flash_fifo_read(self, buf, rem, &r)) == FLASH_FIFO_RET_OK) {
-		buf += r;
+	while (rem > 0 && (ret = flash_fifo_read(ff, buf, rem, &r)) == FLASH_FIFO_RET_OK) {
+		buf = (uint8_t *)buf + r;
 		rem -= r;
 	}
 	if (ret == FLASH_FIFO_RET_OK) {
 		if (read != NULL) {
 			*read = len - rem;
 		}
-		return IFS_RET_OK;
+		return FS_RET_OK;
 	}
-	return IFS_RET_FAILED;
+	return FS_RET_FAILED;
 }
 
 
-static ifs_ret_t fs_write(void *context, IFsFile f, const uint8_t *buf, size_t len, size_t *written) {
-	FlashFifo *self = (FlashFifo *)context;
-	if (f != IFS_FILE_WRITING) {
-		return IFS_RET_FAILED;
+static fs_ret_t fs_write(Fs *self, File *f, const void *buf, size_t len, size_t *written) {
+	FlashFifo *ff = (FlashFifo *)self->parent;
+	if (f->handle != FS_FILE_WRITING) {
+		return FS_RET_FAILED;
 	}
 
-	flash_fifo_ret_t ret = flash_fifo_write(self, buf, len, written);
+	flash_fifo_ret_t ret = flash_fifo_write(ff, buf, len, written);
 	if (ret == FLASH_FIFO_RET_OK) {
-		return IFS_RET_OK;
+		log_fifo(ff, "written");
+		return FS_RET_OK;
 	}
 
-	return IFS_RET_FAILED;
+	return FS_RET_FAILED;
 }
 
 
-static ifs_ret_t fs_stats(void *context, size_t *total, size_t *used) {
-	if (u_assert(context != NULL)) {
-		return IFS_RET_FAILED;
+static fs_ret_t fs_info(Fs *self, struct fs_info *info) {
+	if (u_assert(self != NULL)) {
+		return FS_RET_FAILED;
 	}
-	FlashFifo *self = (FlashFifo *)context;
+	FlashFifo *ff = (FlashFifo *)self->parent;
 
-	if (total != NULL) {
-		*total = self->blocks * (self->block_size - self->page_size);
-	}
-	if (used != NULL) {
-		/** @todo better computation */
-		*used = (self->head - self->tail) * (self->block_size - self->page_size);
-	}
+	info->size_total = ff->blocks * (ff->block_size - ff->page_size);
+	/** @todo better computation */
+	info->size_used = (ff->head - ff->tail) * (ff->block_size - ff->page_size);
 
-	return IFS_RET_OK;
+	return FS_RET_OK;
 }
+
+
+static const struct fs_vmt vmt = {
+	.open = fs_open,
+	.close = fs_close,
+	.read = fs_read,
+	.write = fs_write,
+	.remove = fs_remove,
+	.info = fs_info
+};
 
 
 flash_fifo_ret_t flash_fifo_init(FlashFifo *self, Flash *flash) {
@@ -516,48 +523,8 @@ flash_fifo_ret_t flash_fifo_init(FlashFifo *self, Flash *flash) {
 	log_fifo(self, "init");
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("blocks %u, head %u, last %u, tail %u"), self->blocks, (self->head % self->blocks), (self->last % self->blocks), (self->tail % self->blocks));
 
-	/* Filesystem interface init */
-	ifs_init(&self->fs);
-
-	self->fs.vmt.context = (void *)self;
-	self->fs.vmt.open = fs_open;
-	self->fs.vmt.close = fs_close;
-	self->fs.vmt.remove = fs_remove;
-	self->fs.vmt.read = fs_read;
-	self->fs.vmt.write = fs_write;
-	self->fs.vmt.stats = fs_stats;
-
-	/* Testing */
-	IFsFile f;
-	ifs_open(&self->fs, &f, "fifo", IFS_MODE_WRITEONLY);
-	for (uint32_t i = 0; i < 130; i++) {
-		size_t written = 0;
-		size_t len = 50000;
-		while (len > 0 && ifs_fwrite(&self->fs, f, (uint8_t *)"abcd", len, &written) == IFS_RET_OK) {
-			len -= written;
-		}
-	}
-	ifs_fclose(&self->fs, f);
-	for (uint32_t i = 0; i < 10; i++) {
-	}
-
-	for (uint32_t i = 0; i < 20; i++) {
-		ifs_open(&self->fs, &f, "fifo", IFS_MODE_READONLY);
-		uint8_t buf[16];
-		size_t read = 0;
-		size_t rtotal = 0;
-		while (ifs_fread(&self->fs, f, buf, 16, &read) == IFS_RET_OK) {
-			rtotal += read;
-		}
-		ifs_fclose(&self->fs, f);
-		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("read total %u B"), rtotal);
-		ifs_remove(&self->fs, "fifo");
-	}
-
-	size_t total = 0;
-	size_t used = 0;
-	ifs_stats(&self->fs, &total, &used);
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("stats total = %u KB, used = %u KB"), total / 1024, used / 1024);
+	self->fs.parent = (void *)self;
+	self->fs.vmt = &vmt;
 
 	return FLASH_FIFO_RET_OK;
 err:

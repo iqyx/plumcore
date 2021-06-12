@@ -31,8 +31,8 @@
 #define FLASH_FIFO_MAGIC_FIFO 0x33333333
 #define FLASH_FIFO_MAGIC_TAIL 0x00000000
 
-#define IFS_FILE_READING 0
-#define IFS_FILE_WRITING 1
+#define FS_FILE_READING 0
+#define FS_FILE_WRITING 1
 
 struct flash_fifo_header {
 	uint32_t magic;
@@ -65,7 +65,7 @@ typedef struct {
 
 	/* IFs interface */
 	size_t read_offset;
-	IFs fs;
+	Fs fs;
 } FlashFifo;
 
 
