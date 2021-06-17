@@ -392,18 +392,19 @@ bq35100_ret_t bq35100_init(Bq35100 *self, I2cBus *i2c) {
 	self->source.set_sample_rate = (typeof(self->source.set_sample_rate))icm42688p_set_sample_rate;
 	*/
 	bq35100_gauge_start(self);
-	vTaskDelay(10);
+	vTaskDelay(100);
 
 	uint8_t status = bq35100_battery_status(self);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("battery status = 0x%02x"), status);
 	(void)status;
-	vTaskDelay(10);
+	vTaskDelay(100);
 
 	uint16_t control_status = 0;
 	bq35100_write_uint16(self, BQ35100_CMD_CONTROL, (uint16_t)BQ35100_CONTROL_STATUS);
-	vTaskDelay(10);
+	vTaskDelay(100);
 	bq35100_read_uint16(self, BQ35100_CMD_CONTROL, &control_status);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("control status = 0x%04x"), control_status);
+	vTaskDelay(100);
 
 
 	//bq35100_enter_calib(self);

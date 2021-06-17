@@ -284,9 +284,19 @@ static flash_fifo_ret_t set_block_write_usage(FlashFifo *self, size_t len) {
 
 
 static flash_fifo_ret_t block_write_data(FlashFifo *self, size_t offset, const uint8_t *buf, size_t len) {
-	/* Do not check, assume we can safely write at the specified offset. */
-	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("write block data offset = %p, len = %p"), offset, len);
-	if (self->flash->vmt->write(self->flash, self->head * self->block_size + self->page_size + offset, buf, len) != FLASH_RET_OK) {
+	size_t wb = self->head % self->blocks;
+	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("write block %u, pos %x, len %u"), wb, offset, len);
+	if (self->flash->vmt->write(self->flash, wb * self->block_size + self->page_size + offset, buf, len) != FLASH_RET_OK) {
+		return FLASH_FIFO_RET_FAILED;
+	}
+	return FLASH_FIFO_RET_OK;
+}
+
+
+static flash_fifo_ret_t block_read_data(FlashFifo *self, size_t offset, const uint8_t *buf, size_t len) {
+	size_t rb = self->tail % self->blocks;
+	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("read block %u, pos %x, len %u"), rb, offset, len);
+	if (self->flash->vmt->read(self->flash, rb * self->block_size + self->page_size + offset, buf, len) != FLASH_RET_OK) {
 		return FLASH_FIFO_RET_FAILED;
 	}
 	return FLASH_FIFO_RET_OK;
@@ -326,14 +336,25 @@ flash_fifo_ret_t flash_fifo_write(FlashFifo *self, const uint8_t *buf, size_t le
 
 
 flash_fifo_ret_t flash_fifo_read(FlashFifo *self, uint8_t *buf, size_t len, size_t *read) {
-	/* Do not go beyond the block boundary */
+	/* If theres no full block written, consider FIFO empty yet. */
+	if (self->head == self->tail) {
+		return FLASH_FIFO_RET_EMPTY;
+	}
+	/* Now we are reading at the tail position. We assume it is full, because
+	 * it is full.. block_size - page_size data is available. */
+
+	/* Do not go beyond the block boundary. End is the offset from where the
+	 * data starts. */
 	size_t end = self->block_size - self->page_size;
-	/* Do not write more than a page_size */
+
+	/* Cannot go past the page boundary. Trim the size to page_size and
+	 * cut the tail going to the next page. */
 	if ((end - self->read_offset) > self->page_size) {
 		end = self->read_offset + self->page_size;
 	}
-	/* The end must be within the same page. */
 	end -= end % self->page_size;
+
+	/* Compute the actual number of bytes to read. */
 	size_t read_len = end - self->read_offset;
 	if (read_len == 0) {
 		return FLASH_FIFO_RET_EMPTY;
@@ -341,7 +362,8 @@ flash_fifo_ret_t flash_fifo_read(FlashFifo *self, uint8_t *buf, size_t len, size
 	if (len < read_len) {
 		read_len = len;
 	}
-	if (self->flash->vmt->read(self->flash, self->read_offset, buf, len) != FLASH_RET_OK) {
+
+	if (block_read_data(self, self->read_offset, buf, read_len) != FLASH_FIFO_RET_OK) {
 		return FLASH_FIFO_RET_FAILED;
 	}
 	self->read_offset += len;
@@ -389,7 +411,6 @@ static fs_ret_t fs_open(Fs *self, File *f, const char *path, enum fs_mode mode) 
 	}
 	if (!strcmp(path, "fifo") && (mode & FS_MODE_WRITEONLY)) {
 		f->handle = FS_FILE_WRITING;
-		ff->read_offset = 0;
 		return FS_RET_OK;
 	}
 	return FS_RET_FAILED;
@@ -459,7 +480,7 @@ static fs_ret_t fs_write(Fs *self, File *f, const void *buf, size_t len, size_t 
 
 	flash_fifo_ret_t ret = flash_fifo_write(ff, buf, len, written);
 	if (ret == FLASH_FIFO_RET_OK) {
-		log_fifo(ff, "written");
+		// log_fifo(ff, "written");
 		return FS_RET_OK;
 	}
 

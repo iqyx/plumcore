@@ -24,7 +24,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "interface_stream.h"
+#include <interfaces/stream.h>
 #include "cli_table_helper.h"
 
 #define ESC_CURSOR_UP "\x1b[A"
@@ -146,8 +146,8 @@ static void table_render_cell(const struct cli_table_cell *cols, const struct cl
 }
 
 
-void table_print_header(struct interface_stream *stream, const struct cli_table_cell *cols, const char *headers[]) {
-	interface_stream_write(stream, (const uint8_t *)(CLI_TABLE_HEADER_STYLE), strlen(CLI_TABLE_HEADER_STYLE));
+void table_print_header(Stream *stream, const struct cli_table_cell *cols, const char *headers[]) {
+	stream->vmt->write(stream, (const uint8_t *)(CLI_TABLE_HEADER_STYLE), strlen(CLI_TABLE_HEADER_STYLE));
 	for (size_t i = 0; cols[i].type != TYPE_END; i++) {
 
 		/* Cell size is size + vertical line character + \0 + optional UTF8 ellipsis. */
@@ -155,15 +155,15 @@ void table_print_header(struct interface_stream *stream, const struct cli_table_
 
 		table_align_cell(cols, &(cols[i]), headers[i], output);
 
-		interface_stream_write(stream, (const uint8_t *)output, strlen(output));
+		stream->vmt->write(stream, (const uint8_t *)output, strlen(output));
 	}
-	interface_stream_write(stream, (const uint8_t[]){CLI_TABLE_VERTICAL_LINE, '\r', '\n'}, 3);
-	interface_stream_write(stream, (const uint8_t *)(ESC_DEFAULT), strlen(ESC_DEFAULT));
+	stream->vmt->write(stream, (const uint8_t[]){CLI_TABLE_VERTICAL_LINE, '\r', '\n'}, 3);
+	stream->vmt->write(stream, (const uint8_t *)(ESC_DEFAULT), strlen(ESC_DEFAULT));
 }
 
 
-void table_print_row_separator(struct interface_stream *stream, const struct cli_table_cell *cols) {
-	interface_stream_write(stream, (const uint8_t *)(CLI_TABLE_SEPARATOR_STYLE), strlen(CLI_TABLE_SEPARATOR_STYLE));
+void table_print_row_separator(Stream *stream, const struct cli_table_cell *cols) {
+	stream->vmt->write(stream, (const uint8_t *)(CLI_TABLE_SEPARATOR_STYLE), strlen(CLI_TABLE_SEPARATOR_STYLE));
 	for (size_t i = 0; cols[i].type != TYPE_END; i++) {
 
 		char cell[cols[i].size + 2];
@@ -180,15 +180,15 @@ void table_print_row_separator(struct interface_stream *stream, const struct cli
 		*cell_pos = '\0';
 		cell_pos++;
 
-		interface_stream_write(stream, (const uint8_t *)cell, strlen(cell));
+		stream->vmt->write(stream, (const uint8_t *)cell, strlen(cell));
 	}
-	interface_stream_write(stream, (const uint8_t[]){CLI_TABLE_LINE_CROSSING, '\r', '\n'}, 3);
-	interface_stream_write(stream, (const uint8_t *)(ESC_DEFAULT), strlen(ESC_DEFAULT));
+	stream->vmt->write(stream, (const uint8_t[]){CLI_TABLE_LINE_CROSSING, '\r', '\n'}, 3);
+	stream->vmt->write(stream, (const uint8_t *)(ESC_DEFAULT), strlen(ESC_DEFAULT));
 }
 
 
-void table_print_row(struct interface_stream *stream, const struct cli_table_cell *cols, const union cli_table_cell_content *content) {
-	interface_stream_write(stream, (const uint8_t *)(CLI_TABLE_LINE_STYLE), strlen(CLI_TABLE_LINE_STYLE));
+void table_print_row(Stream *stream, const struct cli_table_cell *cols, const union cli_table_cell_content *content) {
+	stream->vmt->write(stream, (const uint8_t *)(CLI_TABLE_LINE_STYLE), strlen(CLI_TABLE_LINE_STYLE));
 	for (size_t i = 0; cols[i].type != TYPE_END; i++) {
 
 		/** @todo okay, meh */
@@ -200,9 +200,9 @@ void table_print_row(struct interface_stream *stream, const struct cli_table_cel
 		char output[cols[i].size + 2 + 3];
 		table_align_cell(cols, &(cols[i]), content_str, output);
 
-		interface_stream_write(stream, (const uint8_t *)output, strlen(output));
+		stream->vmt->write(stream, (const uint8_t *)output, strlen(output));
 	}
-	interface_stream_write(stream, (const uint8_t[]){CLI_TABLE_VERTICAL_LINE, '\r', '\n'}, 3);
-	interface_stream_write(stream, (const uint8_t *)(ESC_DEFAULT), strlen(ESC_DEFAULT));
+	stream->vmt->write(stream, (const uint8_t[]){CLI_TABLE_VERTICAL_LINE, '\r', '\n'}, 3);
+	stream->vmt->write(stream, (const uint8_t *)(ESC_DEFAULT), strlen(ESC_DEFAULT));
 }
 

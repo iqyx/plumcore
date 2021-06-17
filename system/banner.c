@@ -5,6 +5,7 @@
 #include "banner.h"
 #include "port.h"
 #include "interfaces/servicelocator.h"
+#include <interfaces/stream.h>
 
 #ifdef MODULE_NAME
 #undef MODULE_NAME
@@ -459,8 +460,6 @@ static const unsigned char banner2_data[] = {
 	0x6d, 0x0d, 0x0a
 };
 
-extern IServiceLocator *locator;
-
 static const char banner[] = 
 	"\n\x1b[34m\x1b[1m"
 	PORT_BANNER ", " PORT_NAME " port\r\n"
@@ -470,12 +469,10 @@ static const char banner[] =
 ;
 
 void startup_banner(void) {
-	Interface *interface;
-	if (iservicelocator_query_name(locator, "console", &interface) != ISERVICELOCATOR_RET_OK) {
+	Stream *console = NULL;
+	if (iservicelocator_query_name(locator, "console", (Interface **)&console) != ISERVICELOCATOR_RET_OK) {
 		return;
 	}
-	struct interface_stream *console = (struct interface_stream *)interface;
-
-	interface_stream_write(console, (const uint8_t *)banner2_data, sizeof(banner2_data));
-	interface_stream_write(console, (const uint8_t *)banner, sizeof(banner));
+	console->vmt->write(console, (const void *)banner2_data, sizeof(banner2_data));
+	console->vmt->write(console, (const void *)banner, sizeof(banner));
 }

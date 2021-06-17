@@ -27,11 +27,10 @@
 #include "task.h"
 #include "u_assert.h"
 #include "u_log.h"
-#include "interface_stream.h"
+#include <interfaces/stream.h>
 #include "module_loginmgr.h"
 #include "lineedit.h"
 #include "port.h"
-#include "module_crypto_test.h"
 
 /**
  * @todo login manager cound have two different stream interfaces, one for the CLI console itself and the other one
@@ -51,7 +50,7 @@ static int32_t module_loginmgr_print_handler(const char *s, void *ctx) {
 	}
 	struct module_loginmgr *loginmgr = (struct module_loginmgr *)ctx;
 
-	interface_stream_write(loginmgr->host, (const uint8_t *)s, strlen(s) + 1);
+	loginmgr->host->vmt->write(loginmgr->host, (const void *)s, strlen(s) + 1);
 
 	return MODULE_LOGINMGR_PRINT_HANDLER_OK;
 }
@@ -138,7 +137,7 @@ static void loginmgr_task(void *p) {
 				module_loginmgr_print_handler("\x1b[1m" "\r\nPress any key to activate this console.\r\n\r\n" "\x1b[0m", (void *)loginmgr);
 				/* Wait for anything, don't even check the result. */
 				uint8_t host_buf[1];
-				interface_stream_read(loginmgr->host, host_buf, sizeof(host_buf));
+				loginmgr->host->vmt->read(loginmgr->host, host_buf, sizeof(host_buf), NULL);
 				module_loginmgr_print_handler("\r\n\r\n", (void *)loginmgr);
 				module_loginmgr_set_state(loginmgr, LOGINMGR_STATE_LOGIN);
 				break;
@@ -154,9 +153,10 @@ static void loginmgr_task(void *p) {
 			case LOGINMGR_STATE_LOGIN:
 			case LOGINMGR_STATE_PASSWORD: {
 				uint8_t host_buf[10];
-				int32_t host_len = interface_stream_read(loginmgr->host, host_buf, sizeof(host_buf));
+				size_t host_len = 0;
+				loginmgr->host->vmt->read(loginmgr->host, host_buf, sizeof(host_buf), &host_len);
 
-				for (int32_t i = 0; i < host_len; i++) {
+				for (size_t i = 0; i < host_len; i++) {
 					int32_t res = lineedit_keypress(&(loginmgr->le), host_buf[i]);
 
 					if (res == LINEEDIT_ENTER) {
@@ -210,74 +210,6 @@ static void loginmgr_task(void *p) {
 }
 
 
-static int32_t module_loginmgr_read(void *context, uint8_t *buf, uint32_t len) {
-	if (u_assert(context != NULL && buf != NULL && len > 0)) {
-		return -1;
-	}
-	struct module_loginmgr *loginmgr = (struct module_loginmgr *)context;
-
-	/* Pass reads directly only if we are in the authenticated state. */
-	if (loginmgr->state == LOGINMGR_STATE_AUTH) {
-		if (loginmgr->host_refresh_pending) {
-			loginmgr->host_refresh_pending = false;
-			if (len >= 1) {
-				buf[0] = 0x12;
-				return 1;
-			}
-		} else {
-			return interface_stream_read(loginmgr->host, buf, len);
-		}
-	}
-
-	/* Signal end of stream otherwise. That should cause the shell
-	 * to be closed. */
-	return -1;
-}
-
-
-static int32_t module_loginmgr_read_timeout(void *context, uint8_t *buf, uint32_t len, uint32_t timeout) {
-	if (u_assert(context != NULL && buf != NULL && len > 0)) {
-		return -1;
-	}
-	struct module_loginmgr *loginmgr = (struct module_loginmgr *)context;
-
-	/* Pass reads directly only if we are in the authenticated state. */
-	if (loginmgr->state == LOGINMGR_STATE_AUTH) {
-		if (loginmgr->host_refresh_pending) {
-			loginmgr->host_refresh_pending = false;
-			if (len >= 1) {
-				buf[0] = 0x12;
-				return 1;
-			}
-		} else {
-			return interface_stream_read_timeout(loginmgr->host, buf, len, timeout);
-		}
-	}
-
-	/* Signal end of stream otherwise. That should cause the shell
-	 * to be closed. */
-	return -1;
-}
-
-
-static int32_t module_loginmgr_write(void *context, const uint8_t *buf, uint32_t len) {
-	if (u_assert(context != NULL)) {
-		return -1;
-	}
-	struct module_loginmgr *loginmgr = (struct module_loginmgr *)context;
-
-	/* Pass writes directly only if we are in the authenticated state. */
-	if (loginmgr->state == LOGINMGR_STATE_AUTH) {
-		/* TODO: write mutex should be probably obtained first. */
-		return interface_stream_write(loginmgr->host, buf, len);
-	}
-
-	/* Signal end of stream otherwise. That should cause the shell
-	 * to be closed. */
-	return -1;
-}
-
-
 static int32_t module_loginmgr_prompt_callback(struct lineedit *le, void *ctx) {
 	if (u_assert(ctx != NULL && le != NULL)) {
 		return -1;
@@ -292,7 +224,92 @@ static int32_t module_loginmgr_prompt_callback(struct lineedit *le, void *ctx) {
 }
 
 
-int32_t module_loginmgr_init(struct module_loginmgr *loginmgr, const char *name, struct interface_stream *host) {
+/*********************************************************************************************************************
+ * Stream interface implementation
+ *********************************************************************************************************************/
+
+static stream_ret_t stream_write(Stream *self, const void *buf, size_t size) {
+	struct module_loginmgr *loginmgr = (struct module_loginmgr *)self;
+
+	/* Pass writes directly only if we are in the authenticated state. */
+	if (loginmgr->state == LOGINMGR_STATE_AUTH) {
+		return loginmgr->host->vmt->write(loginmgr->host, buf, size);
+	}
+
+	/* Signal end of stream otherwise. That should cause the shell
+	 * to be closed. */
+	return STREAM_RET_EOF;
+}
+
+
+static stream_ret_t stream_read(Stream *self, void *buf, size_t size, size_t *read) {
+	struct module_loginmgr *loginmgr = (struct module_loginmgr *)self;
+
+	/* Pass reads directly only if we are in the authenticated state. */
+	if (loginmgr->state == LOGINMGR_STATE_AUTH) {
+		if (loginmgr->host_refresh_pending) {
+			loginmgr->host_refresh_pending = false;
+			if (size >= 1) {
+				((uint8_t *)buf)[0] = 0x12;
+				if (read != NULL) {
+					*read = 1;
+				}
+				return STREAM_RET_OK;
+			}
+		} else {
+			return loginmgr->host->vmt->read(loginmgr->host, buf, size, read);
+		}
+	}
+
+	return STREAM_RET_EOF;
+}
+
+
+static stream_ret_t stream_write_timeout(Stream *self, const void *buf, size_t size, size_t *written, uint32_t timeout_ms) {
+	struct module_loginmgr *loginmgr = (struct module_loginmgr *)self;
+
+	if (loginmgr->state == LOGINMGR_STATE_AUTH) {
+		return loginmgr->host->vmt->write_timeout(loginmgr->host, buf, size, written, timeout_ms);
+	}
+
+	return STREAM_RET_EOF;
+}
+
+
+static stream_ret_t stream_read_timeout(Stream *self, void *buf, size_t size, size_t *read, uint32_t timeout_ms) {
+	struct module_loginmgr *loginmgr = (struct module_loginmgr *)self;
+
+	/* Pass reads directly only if we are in the authenticated state. */
+	if (loginmgr->state == LOGINMGR_STATE_AUTH) {
+		if (loginmgr->host_refresh_pending) {
+			loginmgr->host_refresh_pending = false;
+			if (size >= 1) {
+				((uint8_t *)buf)[0] = 0x12;
+				if (read != NULL) {
+					*read = 1;
+				}
+				return STREAM_RET_OK;
+			}
+		} else {
+			return loginmgr->host->vmt->read_timeout(loginmgr->host, buf, size, read, timeout_ms);
+		}
+	}
+
+	return STREAM_RET_EOF;
+}
+
+
+static const struct stream_vmt stream_vmt = {
+	.write = stream_write,
+	.read = stream_read,
+	.write_timeout = stream_write_timeout,
+	.read_timeout = stream_read_timeout
+};
+
+/*********************************************************************************************************************/
+
+
+int32_t module_loginmgr_init(struct module_loginmgr *loginmgr, const char *name, Stream *host) {
 	if (u_assert(loginmgr != NULL)) {
 		return MODULE_LOGINMGR_INIT_FAILED;
 	}
@@ -300,12 +317,8 @@ int32_t module_loginmgr_init(struct module_loginmgr *loginmgr, const char *name,
 
 	memset(loginmgr, 0, sizeof(struct module_loginmgr));
 
-	/* Initialize stream interface for shell interpreter. */
-	interface_stream_init(&(loginmgr->iface));
-	loginmgr->iface.vmt.context = (void *)loginmgr;
-	loginmgr->iface.vmt.read = module_loginmgr_read;
-	loginmgr->iface.vmt.read_timeout = module_loginmgr_read_timeout;
-	loginmgr->iface.vmt.write = module_loginmgr_write;
+	loginmgr->iface.parent = loginmgr;
+	loginmgr->iface.vmt = &stream_vmt;
 
 	loginmgr->host = host;
 
@@ -314,7 +327,7 @@ int32_t module_loginmgr_init(struct module_loginmgr *loginmgr, const char *name,
 	lineedit_set_prompt_callback(&(loginmgr->le), module_loginmgr_prompt_callback, (void *)loginmgr);
 
 	xTaskCreate(loginmgr_task, "loginmgr_task", configMINIMAL_STACK_SIZE + 64, (void *)loginmgr, 1, NULL);
-	u_log(system_log, LOG_TYPE_INFO, "module loginmgr initialized on interface '%s'", host->descriptor.name);
+	u_log(system_log, LOG_TYPE_INFO, "init ok");
 
 	return MODULE_LOGINMGR_INIT_OK;
 }

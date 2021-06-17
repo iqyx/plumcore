@@ -340,6 +340,7 @@ int32_t files_fsN_cat(struct treecli_parser *parser, void *exec_context) {
 	}
 
 	size_t read = 0;
+	size_t read_total = 0;
 	uint8_t buf[64];
 	const char a[] = "0123456789abcdef";
 	while (fs->vmt->read(fs, &f, buf, sizeof(buf), &read) == FS_RET_OK) {
@@ -352,10 +353,14 @@ int32_t files_fsN_cat(struct treecli_parser *parser, void *exec_context) {
 			}
 			module_cli_output(s, cli);
 			module_cli_output("\r\n", cli);
-			vTaskDelay(10);
 		}
+		read_total += read;
 	}
 	fs->vmt->close(fs, &f);
+
+	char s[32] = {0};
+	snprintf(s, sizeof(s) - 1, "Total bytes read: %u\r\n", read_total);
+	module_cli_output(s, cli);
 
 	return 0;
 }

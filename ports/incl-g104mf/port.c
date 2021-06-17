@@ -39,10 +39,6 @@
 #include "module_led.h"
 #include "interface_led.h"
 
-/** @todo redo module and interface, keep the init here. */
-#include "module_usart.h"
-#include "interface_stream.h"
-
 /** @todo redo the whole SPI layer and flash driver */
 #include "interface_spibus.h"
 #include "module_spibus_locm3.h"
@@ -58,12 +54,6 @@
 #include "interface_rng.h"
 #include "module_prng_simple.h"
 
-#include "interfaces/adc.h"
-#include "interface_mac.h"
-#include "interface_profiling.h"
-#include "module_fifo_profiler.h"
-#include "umesh_l2_status.h"
-
 #include "interfaces/sensor.h"
 #include "interfaces/cellular.h"
 #include "interfaces/servicelocator.h"
@@ -73,10 +63,13 @@
 #include "services/icm42688p/icm42688p.h"
 #include "interfaces/i2c-bus.h"
 #include "services/stm32-i2c/stm32-i2c.h"
-#include "services/bq35100/bq35100.h"
 #include "services/spi-sd/spi-sd.h"
+#include "services/bq35100/bq35100.h"
 #include "services/gps-ublox/gps-ublox.h"
 #include "services/lora-rn2483/lora-rn2483.h"
+#include "services/stm32-uart/stm32-uart.h"
+#include "interfaces/stream.h"
+#include "interfaces/uart.h"
 
 /**
  * Port specific global variables and singleton instances.
@@ -86,7 +79,6 @@
 uint32_t SystemCoreClock;
 struct module_rtc_locm3 rtc1;
 struct module_prng_simple prng;
-struct module_fifo_profiler profiler;
 struct module_spibus_locm3 spi1;
 struct module_spidev_locm3 spi1_accel2;
 
@@ -124,6 +116,7 @@ Flash *lv_system;
 Flash *lv_fifo;
 FsSpiffs spiffs_system;
 FlashFifo fifo;
+
 static void port_qspi_init(void) {
 	rcc_periph_clock_enable(RCC_QSPI);
 	rcc_periph_reset_pulse(RST_QSPI);
@@ -276,7 +269,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 }
 
 
-struct module_usart console;
+Stm32Uart console;
 static void console_init(void) {
 	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO9 | GPIO10);
 	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO9 | GPIO10);
@@ -293,23 +286,21 @@ static void console_init(void) {
 
 	nvic_enable_irq(NVIC_USART1_IRQ);
 	nvic_set_priority(NVIC_USART1_IRQ, 6 * 16);
-	module_usart_init(&console, "console", USART1);
-	module_usart_set_baudrate(&console, 921600);
-	hal_interface_set_name(&(console.iface.descriptor), "console");
+	stm32_uart_init(&console, USART1);
 
 	/* Console is now initialized, set its stream to be used as u_log output. */
-	u_log_set_stream(&(console.iface));
+	u_log_set_stream(&(console.stream));
 
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&console.iface.descriptor, "console");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&console.stream, "console");
 }
 
 
 void usart1_isr(void) {
-	module_usart_interrupt_handler(&console);
+	stm32_uart_interrupt_handler(&console);
 }
 
 
-struct module_usart lora_usart;
+Stm32Uart lora_uart;
 static void rn2483_lora_init(void) {
 	/* LORA_PWR_EN */
 	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
@@ -327,16 +318,15 @@ static void rn2483_lora_init(void) {
 
 	nvic_enable_irq(NVIC_USART2_IRQ);
 	nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
-	module_usart_init(&lora_usart, "lora-usart", USART2);
-	module_usart_set_baudrate(&lora_usart, 57600);
-	hal_interface_set_name(&(lora_usart.iface.descriptor), "lora_usart");
+	stm32_uart_init(&lora_uart, USART2);
+	// module_usart_set_baudrate(&lora_usart, 57600);
 
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&lora_usart.iface.descriptor, "lora-usart");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&lora_uart.stream, "lora-usart");
 }
 
 
 void usart2_isr(void) {
-	module_usart_interrupt_handler(&lora_usart);
+	stm32_uart_interrupt_handler(&lora_uart);
 }
 
 
@@ -358,7 +348,7 @@ static void led_init(void) {
 	module_led_init(&led_status, "led_status");
 	module_led_set_port(&led_status, GPIOA, GPIO14);
 	// interface_led_loop(&led_status.iface, 0x111f);
-	interface_led_loop(&led_status.iface, 0xf);
+	interface_led_loop(&led_status.iface, 0xff);
 	hal_interface_set_name(&(led_status.iface.descriptor), "led_status");
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_status.iface.descriptor, "led_status");
 
@@ -672,7 +662,7 @@ int32_t port_init(void) {
 	stm32_rtc_init(&rtc);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CLOCK, &rtc.iface.interface, "rtc");
 
-	port_battery_gauge_init();
+	// port_battery_gauge_init();
 	port_gps_power(false);
 	// port_gps_init();
 	port_sd_init();
@@ -807,8 +797,21 @@ uint32_t lptim_get_extended(void) {
 }
 
 
+static void port_wait_sleep(void) {
+	while (
+		((USART_CR1(USART1) & USART_CR1_UE) && ((USART_ISR(USART1) & USART_ISR_TC) == 0)) ||
+		((USART_CR1(USART2) & USART_CR1_UE) && ((USART_ISR(USART2) & USART_ISR_TC) == 0))
+	) {
+		;
+	}
+}
+
 void port_sleep(TickType_t idle_time) {
 	eSleepModeStatus sleep_status;
+
+	/* Wait until all IO transmissions are completed.
+	 * Going to sleep in the middle of a tx/rx would corrupt the data. */
+	port_wait_sleep();
 
 	if (idle_time > 1000) {
 		idle_time = 1000;

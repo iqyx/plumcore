@@ -31,18 +31,20 @@
 #include "port.h"
 #include "config.h"
 
-#include "interface_stream.h"
+#include <interfaces/stream.h>
 #include "cli.h"
 
 #include "system_cli_tree.h"
 
 #include "interfaces/fs.h"
 
+#define MODULE_NAME "cli"
+
 
 int32_t module_cli_output(const char *s, void *ctx) {
 	ServiceCli *cli = (ServiceCli *)ctx;
 
-	interface_stream_write(cli->stream, (const uint8_t *)s, strlen(s));
+	cli->stream->vmt->write(cli->stream, (const void *)s, strlen(s));
 	if (cli->log_file_opened) {
 		cli->fs->vmt->write(cli->fs, &cli->log_file, (const uint8_t *)s, strlen(s), NULL);
 	}
@@ -55,20 +57,20 @@ static void cli_task(void *p) {
 
 	while (1) {
 		uint8_t buf[10];
-		int32_t ret = interface_stream_read(cli->stream, buf, sizeof(buf));
-		if (ret <= 0) {
-			vTaskDelay(100);
-		} else {
-			for (int32_t i = 0; i < ret; i++) {
+		size_t read = 0;
+		stream_ret_t ret = cli->stream->vmt->read(cli->stream, buf, sizeof(buf), &read);
+		if (ret == STREAM_RET_OK) {
+			for (size_t i = 0; i < read; i++) {
 				treecli_shell_keypress(&(cli->sh), buf[i]);
 			}
+		} else {
+			vTaskDelay(100);
 		}
 	}
-
 }
 
 
-service_cli_ret_t service_cli_init(ServiceCli *self, struct interface_stream *stream, const struct treecli_node *root) {
+service_cli_ret_t service_cli_init(ServiceCli *self, Stream *stream, const struct treecli_node *root) {
 	if (u_assert(self != NULL) ||
 	    u_assert(stream != NULL) ||
 	    u_assert(root != NULL)) {

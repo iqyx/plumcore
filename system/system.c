@@ -50,8 +50,8 @@
 #include "services/cli/cli.h"
 #include "services/cli/system_cli_tree.h"
 static void main_console_init(void) {
-	Interface *console;
-	if (iservicelocator_query_name(locator, "console", &console) != ISERVICELOCATOR_RET_OK) {
+	Stream *console;
+	if (iservicelocator_query_name(locator, "console", (Interface **)&console) != ISERVICELOCATOR_RET_OK) {
 		return;
 	}
 
@@ -60,8 +60,7 @@ static void main_console_init(void) {
 		return;
 	}
 
-	module_loginmgr_init(console_loginmgr, "login1", (struct interface_stream *)console);
-	hal_interface_set_name(&(console_loginmgr->iface.descriptor), "login1");
+	module_loginmgr_init(console_loginmgr, "login1", console);
 
 	ServiceCli *console_cli = malloc(sizeof(ServiceCli));
 	if (console_cli == NULL) {
@@ -73,7 +72,7 @@ static void main_console_init(void) {
 
 	#if defined(CONFIG_CONFIG_LOAD_FILE)
 		/* Wait for the extension board discovery. */
-		vTaskDelay(4000);
+		vTaskDelay(1000);
 
 		Interface *interface;
 		if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, &interface) == ISERVICELOCATOR_RET_OK) {

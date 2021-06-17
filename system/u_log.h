@@ -23,7 +23,7 @@
 #define _U_LOG_H_
 
 #include "system_log.h"
-#include "interface_stream.h"
+#include <interfaces/stream.h>
 #include "interface_rtc.h"
 
 /* Kept for legacy reasons. */
@@ -55,7 +55,7 @@ extern struct log_cbuffer *system_log;
 int32_t u_log_init(void);
 #define U_LOG_INIT_OK 0
 
-int32_t u_log_set_stream(struct interface_stream *stream);
+int32_t u_log_set_stream(Stream *stream);
 #define U_LOG_SET_STREAM_OK 0
 #define U_LOG_SET_STREAM_FAILED -1
 
