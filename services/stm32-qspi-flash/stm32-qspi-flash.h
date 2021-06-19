@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "config.h"
+#include <main.h>
 
 #include <interfaces/flash.h>
 
@@ -48,6 +48,7 @@ enum stm32_qspi_flash_status {
 
 typedef struct {
 	Flash iface;
+	SemaphoreHandle_t lock;
 	const struct stm32_qspi_flash_info *info;
 } Stm32QspiFlash;
 
