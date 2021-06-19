@@ -39,9 +39,7 @@ menu "Low-level platform drivers"
 			bool "STM32 QSPI flash memory driver"
 			default y
 
-		config SERVICE_STM32_UART
-			bool "STM32 UART driver"
-			default y
+		source "services/stm32-uart/Kconfig"
 	endmenu
 endmenu
 
