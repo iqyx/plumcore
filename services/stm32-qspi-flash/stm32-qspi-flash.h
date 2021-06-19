@@ -54,6 +54,7 @@ typedef struct {
 
 stm32_qspi_flash_ret_t stm32_qspi_flash_init(Stm32QspiFlash *self);
 stm32_qspi_flash_ret_t stm32_qspi_flash_free(Stm32QspiFlash *self);
+stm32_qspi_flash_ret_t stm32_qspi_flash_set_prescaler(Stm32QspiFlash *self, uint32_t prescaler);
 
 stm32_qspi_flash_ret_t stm32_qspi_flash_read_id(Stm32QspiFlash *self, uint32_t *id);
 stm32_qspi_flash_ret_t stm32_qspi_flash_read_winbond_uniq(Stm32QspiFlash *self, uint8_t *uniq);

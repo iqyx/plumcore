@@ -488,3 +488,15 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_free(Stm32QspiFlash *self) {
 
 	return STM32_QSPI_FLASH_RET_OK;
 }
+
+
+stm32_qspi_flash_ret_t stm32_qspi_flash_set_prescaler(Stm32QspiFlash *self, uint32_t prescaler) {
+	if (u_assert(self != NULL)) {
+		return STM32_QSPI_FLASH_RET_FAILED;
+	}
+
+	wait_qspi_busy(self);
+	QUADSPI_CR |= ((prescaler & 0xff) << QUADSPI_CR_PRESCALE_SHIFT);
+
+	return STM32_QSPI_FLASH_RET_OK;
+}
