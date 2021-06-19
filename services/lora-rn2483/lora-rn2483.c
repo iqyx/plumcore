@@ -19,8 +19,7 @@
 #include "u_log.h"
 #include "u_assert.h"
 
-#include <interface_spidev.h>
-#include <interfaces/block.h>
+#include <interfaces/stream.h>
 #include "lora-rn2483.h"
 
 #define MODULE_NAME "lora-rn2483"
@@ -161,7 +160,7 @@ static void lora_status_task(void *p) {
 }
 
 
-lora_modem_ret_t lora_modem_init(LoraModem *self, struct interface_stream *usart) {
+lora_modem_ret_t lora_modem_init(LoraModem *self, Stream *usart) {
 	memset(self, 0, sizeof(LoraModem));
 	self->usart = usart;
 
@@ -219,16 +218,17 @@ lora_modem_ret_t lora_modem_regain_comms(LoraModem *self) {
 	/* Clear RX buffer. */
 	size_t r = 0;
 	uint8_t c = 0;
+	stream_ret_t ret;
 	do {
-		r = interface_stream_read_timeout(self->usart, &c, 1, 0);
-	} while (r > 0);
+		ret = self->usart->vmt->read_timeout(self->usart, &c, 1, &r, 0);
+	} while (ret == STREAM_RET_OK);
 	
 	/* Perform auto baud rate detection. Change baudrate to 300 and send 0x00 (break). */
 	// usart_baudrate(self->usart, 300);
 	// usart_write(self->usart, (uint8_t *)"\0", 1, NULL);
 	/* Now change to the desired baudrate and send 0x55 to auto-detect it. */
 	// usart_baudrate(self->usart, 57600);
-	interface_stream_write(self->usart, (uint8_t *)"\x55", 1);
+	self->usart->vmt->write(self->usart, (void *)"\x55", 1);
 	// lora_modem_read_line(self, self->response_str, LORA_RESPONSE_LEN, &self->response_len);
 	vTaskDelay(300);
 
@@ -258,12 +258,7 @@ lora_modem_ret_t lora_modem_set_led(LoraModem *self, StatusLed *led) {
 
 lora_modem_ret_t lora_modem_write(LoraModem *self, const char *buf) {
 	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("-> %s"), buf);
-	size_t w = 0;
-	size_t len = strlen(buf);
-	while (w < len) {
-		w += interface_stream_write(self->usart, (const uint8_t *)(buf + w), len - w);
-	}
-
+	self->usart->vmt->write(self->usart, buf, strlen(buf));
 
 	return LORA_MODEM_RET_OK;
 }
@@ -271,7 +266,7 @@ lora_modem_ret_t lora_modem_write(LoraModem *self, const char *buf) {
 
 lora_modem_ret_t lora_modem_write_line(LoraModem *self, const char *buf) {
 	lora_modem_write(self, buf);
-	interface_stream_write(self->usart, (uint8_t *)"\r\n", 2);
+	self->usart->vmt->write(self->usart, (void *)"\r\n", 2);
 
 	return LORA_MODEM_RET_OK;
 }
@@ -285,7 +280,8 @@ lora_modem_ret_t lora_modem_read_line(LoraModem *self, char *buf, size_t max_buf
 	*read = 0;
 	while (true) {
 		/* Read with a timeout of ~10ms to avoid looping fast. */
-		size_t r = interface_stream_read_timeout(self->usart, &c, 1, 1000);
+		size_t r = 0;
+		self->usart->vmt->read_timeout(self->usart, &c, 1, &r, 1000);
 
 		if (r == 0) {
 			return LORA_MODEM_RET_FAILED;

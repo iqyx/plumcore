@@ -13,7 +13,7 @@
 #include "queue.h"
 #include "semphr.h"
 
-#include <interface_stream.h>
+#include <interfaces/stream.h>
 #include <interfaces/lora.h>
 
 
@@ -55,7 +55,7 @@ enum lora_modem_mac_state {
 };
 
 typedef struct {
-	struct interface_stream *usart;
+	Stream *usart;
 	LoRa lora;
 
 	SemaphoreHandle_t command_lock;
@@ -98,7 +98,7 @@ typedef struct {
 } LoraModem;
 
 
-lora_modem_ret_t lora_modem_init(LoraModem *self, struct interface_stream *usart);
+lora_modem_ret_t lora_modem_init(LoraModem *self, Stream *usart);
 lora_modem_ret_t lora_modem_free(LoraModem *self);
 
 lora_modem_ret_t lora_modem_regain_comms(LoraModem *self);
