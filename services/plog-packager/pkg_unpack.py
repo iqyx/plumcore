@@ -6,7 +6,7 @@ import sys
 import mmap
 import struct
 
-def printProgressBar(iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
+def printProgressBar(iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '#', printEnd = "\r"):
     """
     Call in a loop to create terminal progress bar
     @params:
@@ -69,6 +69,7 @@ with open(fname, "r+b") as f:
 		find_start = 0
 		len_processed = 0
 		prg_processed = 0
+		printProgressBar(0, 1)
 		while True:
 			found = mm.find(b'PKG', find_start)
 			if found >= 0:
@@ -85,3 +86,4 @@ with open(fname, "r+b") as f:
 				find_start = found + 3
 			else:
 				break
+		printProgressBar(1, 1)
