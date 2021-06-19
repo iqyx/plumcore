@@ -8,10 +8,7 @@
 
 #pragma once
 
-#include "config.h"
-#include "FreeRTOS.h"
-#include "stream_buffer.h"
-#include "semphr.h"
+#include <main.h>
 #include <interfaces/uart.h>
 #include <interfaces/stream.h>
 
