@@ -66,6 +66,10 @@ const struct treecli_node *files_fsN = Node {
 			Name "cat",
 			Exec files_fsN_cat,
 		},
+		Command {
+			Name "remove",
+			Exec files_fsN_remove,
+		},
 		End
 	},
 	Values {
@@ -363,4 +367,24 @@ int32_t files_fsN_cat(struct treecli_parser *parser, void *exec_context) {
 	module_cli_output(s, cli);
 
 	return 0;
+}
+
+
+int32_t files_fsN_remove(struct treecli_parser *parser, void *exec_context) {
+	(void)exec_context;
+	ServiceCli *cli = (ServiceCli *)parser->context;
+
+	Fs *fs = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_FS, DNODE_INDEX(parser, -1), (Interface **)&fs) != ISERVICELOCATOR_RET_OK) {
+		return 1;
+	}
+
+	if (fs->vmt->remove != NULL) {
+		if (fs->vmt->remove(fs, fname) == FS_RET_OK) {
+			return 0;
+		}
+
+	}
+	module_cli_output("error: cannot remove file\r\n", cli);
+	return 1;
 }

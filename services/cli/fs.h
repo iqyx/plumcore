@@ -23,4 +23,5 @@ int32_t files_fsN_sha256sum(struct treecli_parser *parser, void *exec_context);
 int32_t files_fsN_fname_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
 int32_t files_fsN_format_set(struct treecli_parser *parser, void *ctx, struct treecli_value *value, void *buf, size_t len);
 int32_t files_fsN_cat(struct treecli_parser *parser, void *exec_context);
+int32_t files_fsN_remove(struct treecli_parser *parser, void *exec_context);
 
