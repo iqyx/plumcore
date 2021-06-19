@@ -231,7 +231,8 @@ static flash_fifo_ret_t close_head(FlashFifo *self, uint32_t pos) {
 }
 
 
-static void format(FlashFifo *self) {
+flash_fifo_ret_t flash_fifo_format(FlashFifo *self) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("formatting/erasing FIFO"));
 	self->flash->vmt->erase(self->flash, 0, self->flash_size);
 	prepare_head(self, 0);
 	log_fifo(self, "format");
@@ -532,10 +533,9 @@ flash_fifo_ret_t flash_fifo_init(FlashFifo *self, Flash *flash) {
 		goto err;
 	}
 
-	format(self);
 	if (find_fifo(self) == FLASH_FIFO_RET_FAILED) {
-		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("FIFO content missing or corrupted"));
-		format(self);
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("FIFO content missing or corrupted, format required"));
+		flash_fifo_format(self);
 		if (find_fifo(self) != FLASH_FIFO_RET_OK) {
 			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("didn't help, no FIFO available"));
 			goto err;

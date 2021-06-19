@@ -76,4 +76,5 @@ flash_fifo_ret_t flash_fifo_read(FlashFifo *self, uint8_t *buf, size_t len, size
 
 flash_fifo_ret_t flash_fifo_init(FlashFifo *self, Flash *flash);
 flash_fifo_ret_t flash_fifo_free(FlashFifo *self);
+flash_fifo_ret_t flash_fifo_format(FlashFifo *self);
 
