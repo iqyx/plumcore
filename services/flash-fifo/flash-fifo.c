@@ -12,11 +12,7 @@
 #include <math.h>
 #include <time.h>
 
-#include "config.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include "u_log.h"
-#include "u_assert.h"
+#include <main.h>
 
 #include <interfaces/flash.h>
 #include <interfaces/fs.h>
@@ -233,8 +229,10 @@ static flash_fifo_ret_t close_head(FlashFifo *self, uint32_t pos) {
 
 flash_fifo_ret_t flash_fifo_format(FlashFifo *self) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("formatting/erasing FIFO"));
+
 	self->flash->vmt->erase(self->flash, 0, self->flash_size);
 	prepare_head(self, 0);
+
 	log_fifo(self, "format");
 }
 
@@ -295,7 +293,7 @@ static flash_fifo_ret_t block_write_data(FlashFifo *self, size_t offset, const u
 
 
 static flash_fifo_ret_t block_read_data(FlashFifo *self, size_t offset, const uint8_t *buf, size_t len) {
-	size_t rb = self->tail % self->blocks;
+	size_t rb = self->last % self->blocks;
 	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("read block %u, pos %x, len %u"), rb, offset, len);
 	if (self->flash->vmt->read(self->flash, rb * self->block_size + self->page_size + offset, buf, len) != FLASH_RET_OK) {
 		return FLASH_FIFO_RET_FAILED;
@@ -307,6 +305,7 @@ static flash_fifo_ret_t block_read_data(FlashFifo *self, size_t offset, const ui
 flash_fifo_ret_t flash_fifo_write(FlashFifo *self, const uint8_t *buf, size_t len, size_t *written) {
 	size_t rem = len;
 	/* Write data */
+
 	size_t block_write_offset = 0;
 	size_t block_write_len = 0;
 	while (get_block_write_range(self, &block_write_offset, &block_write_len) == FLASH_FIFO_RET_OK && rem > 0 && block_write_len > 0) {
@@ -332,16 +331,17 @@ flash_fifo_ret_t flash_fifo_write(FlashFifo *self, const uint8_t *buf, size_t le
 		}
 		return ret;
 	}
+
 	return FLASH_FIFO_RET_OK;
 }
 
 
 flash_fifo_ret_t flash_fifo_read(FlashFifo *self, uint8_t *buf, size_t len, size_t *read) {
 	/* If theres no full block written, consider FIFO empty yet. */
-	if (self->head == self->tail) {
+	if (self->head == self->last) {
 		return FLASH_FIFO_RET_EMPTY;
 	}
-	/* Now we are reading at the tail position. We assume it is full, because
+	/* Now we are reading at the last position. We assume it is full, because
 	 * it is full.. block_size - page_size data is available. */
 
 	/* Do not go beyond the block boundary. End is the offset from where the
@@ -371,6 +371,7 @@ flash_fifo_ret_t flash_fifo_read(FlashFifo *self, uint8_t *buf, size_t len, size
 	if (read != NULL) {
 		*read = len;
 	}
+
 	return FLASH_FIFO_RET_OK;
 }
 
@@ -397,6 +398,7 @@ static flash_fifo_ret_t flash_fifo_gc_single(FlashFifo *self) {
  * IFs filesystem interface implementation
  *************************************************************************************************/
 
+/* No locking needed here */
 static fs_ret_t fs_open(Fs *self, File *f, const char *path, enum fs_mode mode) {
 	if (u_assert(f != NULL) ||
 	    u_assert(path != NULL) ||
@@ -418,44 +420,67 @@ static fs_ret_t fs_open(Fs *self, File *f, const char *path, enum fs_mode mode) 
 }
 
 
+/* Lock to prevent closing the file during read/write */
 static fs_ret_t fs_close(Fs *self, File *f) {
 	if (u_assert(self != NULL) &&
 	    u_assert(f->handle == FS_FILE_READING || f->handle == FS_FILE_WRITING)) {
 		return FS_RET_FAILED;
 	}
+
+	FlashFifo *ff = (FlashFifo *)self->parent;
+	xSemaphoreTake(ff->lock, portMAX_DELAY);
+
+	xSemaphoreGive(ff->lock);
 	return FS_RET_OK;
 }
 
 
+/* Lock single concurrent operation */
 static fs_ret_t fs_remove(Fs *self, const char *path) {
 	if (u_assert(self != NULL) &&
 	    u_assert(path != NULL)) {
 		return FS_RET_FAILED;
 	}
 	FlashFifo *ff = (FlashFifo *)self->parent;
+	xSemaphoreTake(ff->lock, portMAX_DELAY);
 
 	if (!strcmp(path, "fifo")) {
+		/* Check if the last block is full (!= not head) */
 		struct flash_fifo_header h = {0};
 		read_header(ff, ff->last, &h);
 		if (h.magic != FLASH_FIFO_MAGIC_FIFO) {
 			/* Nothing to remove yet. */
-			return FS_RET_FAILED;
+			goto err;
 		}
+
+		/* Close it by adding it to the tail */
 		h.magic = FLASH_FIFO_MAGIC_TAIL;
 		write_header(ff, ff->last, &h);
 		ff->last++;
 		log_fifo(ff, "removed");
+
+		/* Try to garbage collect at least to blocks */
+		flash_fifo_gc_single(ff);
+		flash_fifo_gc_single(ff);
+
+		xSemaphoreGive(ff->lock);
 		return FS_RET_OK;
 	}
+
+err:
+	xSemaphoreGive(ff->lock);
 	return FS_RET_FAILED;
 }
 
 
+/* Lock single concurrent operation */
 static fs_ret_t fs_read(Fs *self, File *f, void *buf, size_t len, size_t *read) {
 	FlashFifo *ff = (FlashFifo *)self->parent;
 	if (f->handle != FS_FILE_READING) {
 		return FS_RET_FAILED;
 	}
+	xSemaphoreTake(ff->lock, portMAX_DELAY);
+
 	size_t r = 0;
 	size_t rem = len;
 	flash_fifo_ret_t ret = 0;
@@ -467,28 +492,37 @@ static fs_ret_t fs_read(Fs *self, File *f, void *buf, size_t len, size_t *read) 
 		if (read != NULL) {
 			*read = len - rem;
 		}
+
+		xSemaphoreGive(ff->lock);
 		return FS_RET_OK;
 	}
+
+	xSemaphoreGive(ff->lock);
 	return FS_RET_FAILED;
 }
 
 
+/* Lock single concurrent operation */
 static fs_ret_t fs_write(Fs *self, File *f, const void *buf, size_t len, size_t *written) {
 	FlashFifo *ff = (FlashFifo *)self->parent;
 	if (f->handle != FS_FILE_WRITING) {
 		return FS_RET_FAILED;
 	}
+	xSemaphoreTake(ff->lock, portMAX_DELAY);
 
 	flash_fifo_ret_t ret = flash_fifo_write(ff, buf, len, written);
 	if (ret == FLASH_FIFO_RET_OK) {
 		// log_fifo(ff, "written");
+		xSemaphoreGive(ff->lock);
 		return FS_RET_OK;
 	}
 
+	xSemaphoreGive(ff->lock);
 	return FS_RET_FAILED;
 }
 
 
+/* No locking required here */
 static fs_ret_t fs_info(Fs *self, struct fs_info *info) {
 	if (u_assert(self != NULL)) {
 		return FS_RET_FAILED;
@@ -533,6 +567,11 @@ flash_fifo_ret_t flash_fifo_init(FlashFifo *self, Flash *flash) {
 		goto err;
 	}
 
+	self->lock = xSemaphoreCreateMutex();
+	if (self->lock == NULL) {
+		goto err;
+	}
+
 	if (find_fifo(self) == FLASH_FIFO_RET_FAILED) {
 		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("FIFO content missing or corrupted, format required"));
 		flash_fifo_format(self);
@@ -560,6 +599,9 @@ flash_fifo_ret_t flash_fifo_free(FlashFifo *self) {
 	}
 
 	free(self->page_buf);
+	if (self->lock != NULL) {
+		vSemaphoreDelete(self->lock);
+	}
 
 	return FLASH_FIFO_RET_OK;
 }
