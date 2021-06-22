@@ -71,13 +71,17 @@ static void main_console_init(void) {
 	service_cli_start(console_cli);
 
 	#if defined(CONFIG_CONFIG_LOAD_FILE)
-		/* Wait for the extension board discovery. */
-		vTaskDelay(1000);
 
 		Interface *interface;
 		if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, &interface) == ISERVICELOCATOR_RET_OK) {
 			Fs *fs = (Fs *)interface;
+
+			const char *name = "";
+			iservicelocator_get_name(locator, interface, &name);
+
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("loading startup configuration from %s:'%s'"), name, CONFIG_CONFIG_LOAD_FILE_FILENAME);
 			service_cli_load_file(console_cli, fs, CONFIG_CONFIG_LOAD_FILE_FILENAME);
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("startup configuration loaded"));
 		}
 	#endif
 }
