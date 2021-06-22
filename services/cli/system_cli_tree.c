@@ -84,6 +84,8 @@
 #if defined(CONFIG_SERVICE_CLI_DEVICE_CLOCK)
 	#include "device_clock.h"
 #endif
+#include "device_lora.h"
+
 #include "config_export.h"
 #include "system_debug.h"
 #include "fs.h"
@@ -297,6 +299,28 @@ const struct treecli_node *system_cli_tree = Node {
 						DNode {
 							Name "clockN",
 							.create = device_clock_clockN_create,
+						}
+					}
+				},
+				#endif
+				#if 1
+				Node {
+					Name "lora",
+					Commands {
+						Command {
+							Name "print",
+							Exec device_lora_print,
+						},
+						Command {
+							Name "export",
+							Exec default_export,
+						},
+						End
+					},
+					DSubnodes {
+						DNode {
+							Name "loraN",
+							.create = device_lora_loraN_create,
 						}
 					}
 				},
