@@ -372,7 +372,8 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		lora_modem_init(&rn2483_lora, &lora_uart.stream);
 		lora_modem_set_ar(&rn2483_lora, true);
 
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LORA, (Interface *)&rn2483_lora.lora, "lora");
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LORA, (Interface *)&rn2483_lora.lora, "rn2483");
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&rn2483_lora.vdd, "rn2483-vdd");
 	}
 
 
@@ -580,11 +581,16 @@ void port_battery_gauge_init(void) {
 	stm32_i2c_init(&i2c1, I2C1);
 
 	/* BQ35100 test */
-	bq35100_init(&bq35100, &i2c1.bus);
-	while (false) {
-		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("bat U = %u mV, I = %d mA"), bq35100_voltage(&bq35100), bq35100_current(&bq35100));
-		vTaskDelay(1000);
+	if (bq35100_init(&bq35100, &i2c1.bus) == BQ35100_RET_OK) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&bq35100.voltage, "vbat");
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&bq35100.current, "ibat");
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&bq35100.bat_temp, "bat_temp");
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&bq35100.die_temp, "bq35100_temp");
 	}
+	// while (false) {
+		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("bat U = %u mV, I = %d mA"), bq35100_voltage(&bq35100), bq35100_current(&bq35100));
+		// vTaskDelay(1000);
+	// }
 }
 
 
@@ -647,7 +653,7 @@ int32_t port_init(void) {
 		led_init();
 	#endif
 
-	// port_battery_gauge_init();
+	port_battery_gauge_init();
 	port_gps_power(false);
 	// port_gps_init();
 	port_sd_init();
@@ -673,7 +679,7 @@ int32_t port_init(void) {
 		#endif
 	#endif
 
-	port_check_debug();
+	// port_check_debug();
 
 	return PORT_INIT_OK;
 }
