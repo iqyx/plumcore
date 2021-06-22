@@ -11,13 +11,10 @@
 #include <stdbool.h>
 #include <math.h>
 
-#include "config.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include "u_log.h"
-#include "u_assert.h"
+#include <main.h>
 
-#include <i2c-bus.h>
+#include <interfaces/i2c-bus.h>
+#include <interfaces/sensor.h>
 #include "bq35100.h"
 
 #define MODULE_NAME "bq35100"
@@ -179,6 +176,14 @@ uint16_t bq35100_voltage(Bq35100 *self) {
 int16_t bq35100_temperature(Bq35100 *self) {
 	int16_t temperature = 0;
 	bq35100_read_int16(self, BQ35100_CMD_TEMPERATURE, &temperature);
+	vTaskDelay(10);
+	return temperature;
+}
+
+
+int16_t bq35100_int_temperature(Bq35100 *self) {
+	int16_t temperature = 0;
+	bq35100_read_int16(self, BQ35100_CMD_INT_TEMPERATURE, &temperature);
 	vTaskDelay(10);
 	return temperature;
 }
@@ -377,34 +382,119 @@ static bq35100_ret_t bq35100_calibrate_board_offset(Bq35100 *self) {
 }
 
 
+/*********************************************************************************************************************
+ * Sensor interface for voltage measurement
+ *********************************************************************************************************************/
+
+static sensor_ret_t voltage_sensor_value_f(Sensor *self, float *value) {
+	if (u_assert(self != NULL)) {
+		return SENSOR_RET_FAILED;
+	}
+	Bq35100 *bq = (Bq35100 *)self->parent;
+
+	/** @TODO lock */
+	*value = bq35100_voltage(bq) / 1000.0f;
+
+	return SENSOR_RET_OK;
+}
+
+static const struct sensor_vmt voltage_sensor_vmt = {
+	.value_f = voltage_sensor_value_f
+};
+
+static const struct sensor_info voltage_sensor_info = {
+	.description = "battery voltage",
+	.unit = "V"
+};
+
+/*********************************************************************************************************************/
+
+static sensor_ret_t current_sensor_value_f(Sensor *self, float *value) {
+	if (u_assert(self != NULL)) {
+		return SENSOR_RET_FAILED;
+	}
+	Bq35100 *bq = (Bq35100 *)self->parent;
+
+	/** @TODO lock */
+	*value = (float)bq35100_current(bq) / 1000.0f;
+
+	return SENSOR_RET_OK;
+}
+
+static const struct sensor_vmt current_sensor_vmt = {
+	.value_f = current_sensor_value_f
+};
+
+static const struct sensor_info current_sensor_info = {
+	.description = "battery current",
+	.unit = "A"
+};
+
+/*********************************************************************************************************************/
+
+static sensor_ret_t bat_temp_sensor_value_f(Sensor *self, float *value) {
+	if (u_assert(self != NULL)) {
+		return SENSOR_RET_FAILED;
+	}
+	Bq35100 *bq = (Bq35100 *)self->parent;
+
+	/** @TODO lock */
+	*value = (float)bq35100_temperature(bq) / 10.0f - 273.15f;
+
+	return SENSOR_RET_OK;
+}
+
+static const struct sensor_vmt bat_temp_sensor_vmt = {
+	.value_f = bat_temp_sensor_value_f
+};
+
+static const struct sensor_info bat_temp_sensor_info = {
+	.description = "battery temperature",
+	.unit = "°C"
+};
+
+/*********************************************************************************************************************/
+
+static sensor_ret_t int_temp_sensor_value_f(Sensor *self, float *value) {
+	if (u_assert(self != NULL)) {
+		return SENSOR_RET_FAILED;
+	}
+	Bq35100 *bq = (Bq35100 *)self->parent;
+
+	/** @TODO lock */
+	*value = (float)bq35100_int_temperature(bq) / 10.0f - 273.15f;
+
+	return SENSOR_RET_OK;
+}
+
+static const struct sensor_vmt int_temp_sensor_vmt = {
+	.value_f = int_temp_sensor_value_f
+};
+
+static const struct sensor_info int_temp_sensor_info = {
+	.description = "die temperature",
+	.unit = "°C"
+};
+
+
 bq35100_ret_t bq35100_init(Bq35100 *self, I2cBus *i2c) {
 	memset(self, 0, sizeof(Bq35100));
 	self->i2c = i2c;
 
-	/*
-	waveform_source_init(&self->source);
-	self->source.parent = self;
-	self->source.start = (typeof(self->source.start))icm42688p_start;
-	self->source.stop= (typeof(self->source.stop))icm42688p_stop;
-	self->source.read = (typeof(self->source.read))icm42688p_read;
-	self->source.get_format = (typeof(self->source.get_format))icm42688p_get_format;
-	self->source.get_sample_rate = (typeof(self->source.get_sample_rate))icm42688p_get_sample_rate;
-	self->source.set_sample_rate = (typeof(self->source.set_sample_rate))icm42688p_set_sample_rate;
-	*/
 	bq35100_gauge_start(self);
-	vTaskDelay(100);
+	vTaskDelay(10);
 
 	uint8_t status = bq35100_battery_status(self);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("battery status = 0x%02x"), status);
 	(void)status;
-	vTaskDelay(100);
+	vTaskDelay(10);
 
 	uint16_t control_status = 0;
 	bq35100_write_uint16(self, BQ35100_CMD_CONTROL, (uint16_t)BQ35100_CONTROL_STATUS);
-	vTaskDelay(100);
+	vTaskDelay(10);
 	bq35100_read_uint16(self, BQ35100_CMD_CONTROL, &control_status);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("control status = 0x%04x"), control_status);
-	vTaskDelay(100);
+	vTaskDelay(10);
 
 
 	//bq35100_enter_calib(self);
@@ -422,6 +512,22 @@ bq35100_ret_t bq35100_init(Bq35100 *self, I2cBus *i2c) {
 		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("U = %u mV, I = %d mA, Q = %ld uAh, CS = 0x%04x"), bq35100_voltage(self), bq35100_current(self), bq35100_capacity(self), bq35100_control_status(self));
 		vTaskDelay(1000);
 	}
+
+	self->voltage.vmt = &voltage_sensor_vmt;
+	self->voltage.info = &voltage_sensor_info;
+	self->voltage.parent = self;
+
+	self->current.vmt = &current_sensor_vmt;
+	self->current.info = &current_sensor_info;
+	self->current.parent = self;
+
+	self->bat_temp.vmt = &bat_temp_sensor_vmt;
+	self->bat_temp.info = &bat_temp_sensor_info;
+	self->bat_temp.parent = self;
+
+	self->die_temp.vmt = &int_temp_sensor_vmt;
+	self->die_temp.info = &int_temp_sensor_info;
+	self->die_temp.parent = self;
 
 	return BQ35100_RET_OK;
 }

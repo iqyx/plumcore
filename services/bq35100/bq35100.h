@@ -12,6 +12,10 @@
 #include <stdbool.h>
 #include <i2c-bus.h>
 
+#include <main.h>
+
+#include <interfaces/sensor.h>
+
 typedef enum {
 	BQ35100_CMD_CONTROL = 0x00,
 	BQ35100_CMD_ACCUMULATED_CAPACITY = 0x02,
@@ -70,6 +74,11 @@ typedef enum {
 typedef struct {
 	I2cBus *i2c;
 	uint8_t who_am_i;
+
+	Sensor voltage;
+	Sensor current;
+	Sensor bat_temp;
+	Sensor die_temp;
 } Bq35100;
 
 
@@ -89,6 +98,7 @@ bq35100_ret_t bq35100_gauge_start(Bq35100 *self);
 int32_t bq35100_capacity(Bq35100 *self);
 uint16_t bq35100_voltage(Bq35100 *self);
 int16_t bq35100_temperature(Bq35100 *self);
+int16_t bq35100_int_temperature(Bq35100 *self);
 int16_t bq35100_current(Bq35100 *self);
 bq35100_ret_t bq35100_set_cc_gain(Bq35100 *self, float calib);
 uint8_t bq35100_battery_status(Bq35100 *self);
