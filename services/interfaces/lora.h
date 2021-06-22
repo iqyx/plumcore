@@ -27,28 +27,44 @@ typedef enum {
 	LORA_RET_PAUSED,
 	LORA_RET_INVALID_DATA_LEN,
 	LORA_RET_TIMEOUT,
+	LORA_RET_MODE,
 } lora_ret_t;
 
+enum lora_mode {
+	LORA_MODE_NONE = 0,
+	LORA_MODE_OTAA,
+	LORA_MODE_ABP,
+};
 
+typedef struct lora LoRa;
 typedef struct {
-	lora_ret_t (*set_appkey)(void *parent, const char *appkey);
-	lora_ret_t (*set_appeui)(void *parent, const char *appeui);
-	lora_ret_t (*set_deveui)(void *parent, const char *deveui);
-	lora_ret_t (*get_deveui)(void *parent, char *deveui);
-	lora_ret_t (*set_devaddr)(void *parent, const uint8_t devaddr[4]);
-	lora_ret_t (*set_nwkskey)(void *parent, const char *nwkskey);
-	lora_ret_t (*set_appskey)(void *parent, const char *appskey);
-	lora_ret_t (*join_abp)(void *parent);
-	lora_ret_t (*join_otaa)(void *parent);
-	lora_ret_t (*leave)(void *parent);
-	lora_ret_t (*set_datarate)(void *parent, uint8_t datarate);
-	lora_ret_t (*set_adr)(void *parent, bool adr);
-	lora_ret_t (*send)(void *parent, uint8_t port, const uint8_t *data, size_t len);
-	lora_ret_t (*receive)(void *parent, uint8_t port, uint8_t *data, size_t size, size_t *len, uint32_t timeout);
+	lora_ret_t (*set_mode)(LoRa *self, enum lora_mode mode);
+	lora_ret_t (*get_mode)(LoRa *self, enum lora_mode *mode);
+
+	lora_ret_t (*set_appkey)(LoRa *self, const char *appkey);
+	lora_ret_t (*get_appkey)(LoRa *self, char *appkey, size_t size);
+
+	lora_ret_t (*set_appeui)(LoRa *self, const char *appeui);
+	lora_ret_t (*get_appeui)(LoRa *self, char *appeui, size_t size);
+
+	lora_ret_t (*set_deveui)(LoRa *self, const char *deveui);
+	lora_ret_t (*get_deveui)(LoRa *self, char *deveui);
+	lora_ret_t (*set_devaddr)(LoRa *self, const uint8_t devaddr[4]);
+	lora_ret_t (*set_nwkskey)(LoRa *self, const char *nwkskey);
+	lora_ret_t (*set_appskey)(LoRa *self, const char *appskey);
+	lora_ret_t (*join)(LoRa *self);
+	lora_ret_t (*leave)(LoRa *self);
+
+	lora_ret_t (*set_datarate)(LoRa *self, uint8_t datarate);
+	lora_ret_t (*get_datarate)(LoRa *self, uint8_t *datarate);
+
+	lora_ret_t (*set_adr)(LoRa *self, bool adr);
+	lora_ret_t (*send)(LoRa *self, uint8_t port, const uint8_t *data, size_t len);
+	lora_ret_t (*receive)(LoRa *self, uint8_t port, uint8_t *data, size_t size, size_t *len, uint32_t timeout);
 } lora_vmt_t;
 
 
-typedef struct {
+typedef struct lora {
 	const lora_vmt_t *vmt;
 	void *parent;
 } LoRa;
