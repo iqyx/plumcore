@@ -5,5 +5,5 @@ PyYAML==5.4.1
 six==1.15.0
 smmap==3.0.5
 kconfiglib==14.1.0
-protobuf==3.15.3
+protobuf==3.18.3
 SCons==4.1.0.post1
