@@ -679,7 +679,7 @@ int32_t port_init(void) {
 		#endif
 	#endif
 
-	// port_check_debug();
+	port_check_debug();
 
 	return PORT_INIT_OK;
 }
