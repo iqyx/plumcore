@@ -38,6 +38,8 @@ menu "Low-level platform drivers"
 		config SERVICE_STM32_QSPI_FLASH
 			bool "STM32 QSPI flash memory driver"
 			default y
+
+		source "services/stm32-uart/Kconfig"
 	endmenu
 endmenu
 
@@ -216,6 +218,12 @@ menu "User interface services"
 endmenu
 
 menu "Communication server/client services"
+	menu "LoRaWAN services"
+		config SERVICE_LORA_FS
+			bool "Service for accessing filesystems over LoRaWAN"
+			default y
+	endmenu
+
 	menu "MQTT client/server services"
 		config SERVICE_MQTT_FILE_SERVER
 			bool "MQTT File server service"

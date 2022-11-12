@@ -12,11 +12,7 @@
 #include <math.h>
 #include <time.h>
 
-#include "config.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include "u_log.h"
-#include "u_assert.h"
+#include <main.h>
 
 #include <interfaces/flash.h>
 #include <interfaces/clock.h>
@@ -362,14 +358,17 @@ static flash_ret_t flash_get_size(Flash *self, uint32_t i, size_t *size, flash_b
 		default:
 			return FLASH_RET_FAILED;
 	}
+
 	return FLASH_RET_OK;
 }
 
 
 static flash_ret_t flash_erase(Flash *self, const size_t addr, size_t len) {
 	Stm32QspiFlash *qspi = (Stm32QspiFlash *)self->parent;
+	xSemaphoreTake(qspi->lock, portMAX_DELAY);
 
 	if (stm32_qspi_flash_write_enable(qspi, true) != STM32_QSPI_FLASH_RET_OK) {
+		xSemaphoreGive(qspi->lock);
 		return FLASH_RET_FAILED;
 	}
 
@@ -377,38 +376,54 @@ static flash_ret_t flash_erase(Flash *self, const size_t addr, size_t len) {
 	 * a block or a full chip and the address must be properly aligned. */
 	if (len == (1UL << qspi->info->size) && addr == 0) {
 		if (stm32_qspi_flash_erase_chip(qspi) == STM32_QSPI_FLASH_RET_OK) {
+			xSemaphoreGive(qspi->lock);
 			return FLASH_RET_OK;
 		}
 	} else if (len == (1UL << qspi->info->block_size) && ((addr % (1UL << qspi->info->block_size)) == 0)) {
 		if (stm32_qspi_flash_erase_block(qspi, addr) == STM32_QSPI_FLASH_RET_OK) {
+			xSemaphoreGive(qspi->lock);
 			return FLASH_RET_OK;
 		}
 	} else if (len == (1UL << qspi->info->sector_size) && ((addr % (1UL << qspi->info->sector_size)) == 0)) {
 		if (stm32_qspi_flash_erase_sector(qspi, addr) == STM32_QSPI_FLASH_RET_OK) {
+			xSemaphoreGive(qspi->lock);
 			return FLASH_RET_OK;
 		}
 	}
+
+	xSemaphoreGive(qspi->lock);
 	return FLASH_RET_FAILED;
 }
 
 
 static flash_ret_t flash_write(Flash *self, const size_t addr, const void *buf, size_t len) {
 	Stm32QspiFlash *qspi = (Stm32QspiFlash *)self->parent;
+	xSemaphoreTake(qspi->lock, portMAX_DELAY);
+
 	if (stm32_qspi_flash_write_enable(qspi, true) != STM32_QSPI_FLASH_RET_OK) {
+		xSemaphoreGive(qspi->lock);
 		return FLASH_RET_FAILED;
 	}
 	if (stm32_qspi_flash_write_page(qspi, addr, buf, len) != STM32_QSPI_FLASH_RET_OK) {
+		xSemaphoreGive(qspi->lock);
 		return FLASH_RET_FAILED;
 	}
+
+	xSemaphoreGive(qspi->lock);
 	return FLASH_RET_OK;
 }
 
 
 static flash_ret_t flash_read(Flash *self, const size_t addr, void *buf, size_t len) {
 	Stm32QspiFlash *qspi = (Stm32QspiFlash *)self->parent;
+	xSemaphoreTake(qspi->lock, portMAX_DELAY);
+
 	if (stm32_qspi_flash_read_page(qspi, addr, buf, len) != STM32_QSPI_FLASH_RET_OK) {
+		xSemaphoreGive(qspi->lock);
 		return FLASH_RET_FAILED;
 	}
+
+	xSemaphoreGive(qspi->lock);
 	return FLASH_RET_OK;
 }
 
@@ -428,6 +443,11 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_init(Stm32QspiFlash *self) {
 	memset(self, 0, sizeof(Stm32QspiFlash));
 	quadspi_enable();
 	reset(self);	
+
+	self->lock = xSemaphoreCreateMutex();
+	if (self->lock == NULL) {
+		goto err;
+	}
 
 	/* The size is unknown until we read ID */
 	QUADSPI_DCR = (10 << QUADSPI_DCR_FSIZE_SHIFT);
@@ -485,6 +505,22 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_free(Stm32QspiFlash *self) {
 	if (u_assert(self != NULL)) {
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
+
+	if (self->lock != NULL) {
+		vSemaphoreDelete(self->lock);
+	}
+
+	return STM32_QSPI_FLASH_RET_OK;
+}
+
+
+stm32_qspi_flash_ret_t stm32_qspi_flash_set_prescaler(Stm32QspiFlash *self, uint32_t prescaler) {
+	if (u_assert(self != NULL)) {
+		return STM32_QSPI_FLASH_RET_FAILED;
+	}
+
+	wait_qspi_busy(self);
+	QUADSPI_CR |= ((prescaler & 0xff) << QUADSPI_CR_PRESCALE_SHIFT);
 
 	return STM32_QSPI_FLASH_RET_OK;
 }

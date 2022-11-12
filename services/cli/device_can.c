@@ -45,6 +45,8 @@
 #include "interfaces/ccan.h"
 #include "port.h"
 
+#include <interfaces/stream.h>
+
 #include "device_can.h"
 
 /**
@@ -162,8 +164,7 @@ int32_t device_can_canN_sniff(struct treecli_parser *parser, void *exec_context)
 		}
 
 		uint8_t chr = 0;
-		int16_t read = interface_stream_read_timeout(cli->stream, &chr, 1, 0);
-		if (read != 0) {
+		if (cli->stream->vmt->read_timeout(cli->stream, &chr, sizeof(chr), NULL, 0) == STREAM_RET_OK) {
 			break;
 		}
 	}

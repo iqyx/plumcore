@@ -28,7 +28,7 @@
 #include <stdlib.h>
 #include "lineedit.h"
 
-#include "interface_stream.h"
+#include <interfaces/stream.h>
 
 
 enum cli_table_cell_alignment {
@@ -60,6 +60,6 @@ struct cli_table_cell {
 };
 
 
-void table_print_header(struct interface_stream *stream, const struct cli_table_cell *cols, const char *headers[]);
-void table_print_row_separator(struct interface_stream *stream, const struct cli_table_cell *cols);
-void table_print_row(struct interface_stream *stream, const struct cli_table_cell *cols, const union cli_table_cell_content *content);
+void table_print_header(Stream *stream, const struct cli_table_cell *cols, const char *headers[]);
+void table_print_row_separator(Stream *stream, const struct cli_table_cell *cols);
+void table_print_row(Stream *stream, const struct cli_table_cell *cols, const union cli_table_cell_content *content);

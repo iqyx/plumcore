@@ -44,10 +44,10 @@
 #define MODULE_NAME "fs-spiffs"
 
 
-/**
+/********************************************************************************************************************
  * SPIFFS HAL functions to read, write and erase the flash memory.
  * They are using the IFlash interface to access it.
- */
+ ********************************************************************************************************************/
 
 static s32_t fs_spiffs_read(struct spiffs_t *context, u32_t addr, u32_t size, u8_t *dst) {
 	FsSpiffs *self = (FsSpiffs *)context;
@@ -74,135 +74,159 @@ static s32_t fs_spiffs_erase(struct spiffs_t *context, u32_t addr, u32_t size) {
 
 
 static void fs_spiffs_check_callback(struct spiffs_t *context, spiffs_check_type type, spiffs_check_report report, u32_t arg1, u32_t arg2) {
+	(void)context;
 	if (report != SPIFFS_CHECK_PROGRESS) {
 		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("check type=%u report=%u arg1=%u arg2=%u"), type, report, arg1, arg2);
 	}
 }
 
-/**
- * IFs filesystem interface implementation
- */
+/********************************************************************************************************************
+ * Fs filesystem interface implementation
+ ********************************************************************************************************************/
 
-static ifs_ret_t fs_spiffs_ifs_open(void *context, IFsFile *f, const char *filename, uint32_t mode) {
-	FsSpiffs *self = (FsSpiffs *)context;
-	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return IFS_RET_FAILED;
-	}
+#define FS_IMPL_HEADER  FsSpiffs *fs_spiffs = (FsSpiffs *)self->parent; \
+                        if (u_assert(fs_spiffs->state == FS_SPIFFS_STATE_MOUNTED)) { \
+                        	return FS_RET_FAILED; \
+                        } \
+			SPIFFS_clearerr(&fs_spiffs->spiffs); 
+
+#define FS_CHECK_ERRNO  if (SPIFFS_errno(&fs_spiffs->spiffs) != 0) { \
+                        	return FS_RET_FAILED; \
+                        }
+
+
+static fs_ret_t fs_spiffs_fs_open(Fs *self, File *f, const char *path, enum fs_mode mode) {
+	FS_IMPL_HEADER
 
 	uint32_t smode = 0;
-	if (mode & IFS_MODE_APPEND) smode |= SPIFFS_APPEND;
-	if (mode & IFS_MODE_TRUNCATE) smode |= SPIFFS_TRUNC;
-	if (mode & IFS_MODE_CREATE) smode |= SPIFFS_CREAT;
-	if (mode & IFS_MODE_WRITEONLY) smode |= SPIFFS_WRONLY;
-	if (mode & IFS_MODE_READONLY) smode |= SPIFFS_RDONLY;
-	if (mode & IFS_MODE_READWRITE) smode |= SPIFFS_RDWR;
+	if (mode & FS_MODE_APPEND) smode |= SPIFFS_APPEND;
+	if (mode & FS_MODE_TRUNCATE) smode |= SPIFFS_TRUNC;
+	if (mode & FS_MODE_CREATE) smode |= SPIFFS_CREAT;
+	if (mode & FS_MODE_WRITEONLY) smode |= SPIFFS_WRONLY;
+	if (mode & FS_MODE_READONLY) smode |= SPIFFS_RDONLY;
+	if (mode & FS_MODE_READWRITE) smode |= SPIFFS_RDWR;
 
-	spiffs_file sf = SPIFFS_open(&self->spiffs, filename, smode, 0);
+	spiffs_file sf = SPIFFS_open(&fs_spiffs->spiffs, path, smode, 0);
 	if (sf < 0) {
 		/** @todo proper return code */
-		return IFS_RET_FAILED;
+		return FS_RET_FAILED;
 	}
 
-	*f = (IFsFile)sf;
-	return IFS_RET_OK;
+	f->handle = sf;
+	return FS_RET_OK;
 }
 
 
-static ifs_ret_t fs_spiffs_ifs_close(void *context, IFsFile f) {
-	FsSpiffs *self = (FsSpiffs *)context;
-	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return IFS_RET_FAILED;
-	}
-
-	SPIFFS_clearerr(&self->spiffs);
-	SPIFFS_close(&self->spiffs, (spiffs_file)f);
-	if (SPIFFS_errno(&self->spiffs) != 0) {
-		return IFS_RET_FAILED;
-	}
-	return IFS_RET_OK;
+static fs_ret_t fs_spiffs_fs_close(Fs *self, File *f) {
+	FS_IMPL_HEADER
+	SPIFFS_close(&fs_spiffs->spiffs, (spiffs_file)f->handle);
+	FS_CHECK_ERRNO
+	return FS_RET_OK;
 }
 
 
-static ifs_ret_t fs_spiffs_ifs_remove(void *context, const char *filename) {
-	FsSpiffs *self = (FsSpiffs *)context;
-	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return IFS_RET_FAILED;
-	}
-
-	SPIFFS_clearerr(&self->spiffs);
-	SPIFFS_remove(&self->spiffs, filename);
-	if (SPIFFS_errno(&self->spiffs) != 0) {
-		return IFS_RET_FAILED;
-	}
-	return IFS_RET_OK;
+static fs_ret_t fs_spiffs_fs_remove(Fs *self, const char *path) {
+	FS_IMPL_HEADER
+	SPIFFS_remove(&fs_spiffs->spiffs, path);
+	FS_CHECK_ERRNO
+	return FS_RET_OK;
 }
 
 
-static ifs_ret_t fs_spiffs_ifs_rename(void *context, const char *old_fn, const char *new_fn) {
-	FsSpiffs *self = (FsSpiffs *)context;
-	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return IFS_RET_FAILED;
-	}
-
-	SPIFFS_clearerr(&self->spiffs);
-	SPIFFS_rename(&self->spiffs, old_fn, new_fn);
-	if (SPIFFS_errno(&self->spiffs) != 0) {
-		return IFS_RET_FAILED;
-	}
-	return IFS_RET_OK;
+static fs_ret_t fs_spiffs_fs_rename(Fs *self, const char *old_path, const char *new_path) {
+	FS_IMPL_HEADER
+	SPIFFS_rename(&fs_spiffs->spiffs, old_path, new_path);
+	FS_CHECK_ERRNO
+	return FS_RET_OK;
 }
 
 
-static ifs_ret_t fs_spiffs_ifs_read(void *context, IFsFile f, uint8_t *buf, size_t len, size_t *read) {
-	FsSpiffs *self = (FsSpiffs *)context;
-	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return IFS_RET_FAILED;
-	}
-
-	SPIFFS_clearerr(&self->spiffs);
+static fs_ret_t fs_spiffs_fs_read(Fs *self, File *f, void *buf, size_t len, size_t *read) {
+	FS_IMPL_HEADER
+	size_t r = SPIFFS_read(&fs_spiffs->spiffs, (spiffs_file)f->handle, buf, len);
 	if (read != NULL) {
-		*read = SPIFFS_read(&self->spiffs, (spiffs_file)f, (void *)buf, len);
-	} else {
-		SPIFFS_read(&self->spiffs, (spiffs_file)f, (void *)buf, len);
+		*read = r;
 	}
-	if (SPIFFS_errno(&self->spiffs) != 0) {
-		return IFS_RET_FAILED;
-	}
-	return IFS_RET_OK;
+	FS_CHECK_ERRNO
+	return FS_RET_OK;
 }
 
 
-static ifs_ret_t fs_spiffs_ifs_write(void *context, IFsFile f, const uint8_t *buf, size_t len, size_t *written) {
-	FsSpiffs *self = (FsSpiffs *)context;
-	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return IFS_RET_FAILED;
-	}
-
-	SPIFFS_clearerr(&self->spiffs);
+static fs_ret_t fs_spiffs_fs_write(Fs *self, File *f, const void *buf, size_t len, size_t *written) {
+	FS_IMPL_HEADER
+	size_t w = SPIFFS_write(&fs_spiffs->spiffs, (spiffs_file)f->handle, buf, len);
 	if (written != NULL) {
-		*written = SPIFFS_write(&self->spiffs, (spiffs_file)f, (void *)buf, len);
-	} else {
-		SPIFFS_write(&self->spiffs, (spiffs_file)f, (void *)buf, len);
+		*written = w;
 	}
-	if (SPIFFS_errno(&self->spiffs) != 0) {
-		return IFS_RET_FAILED;
-	}
-	return IFS_RET_OK;
+	FS_CHECK_ERRNO
+	return FS_RET_OK;
 }
 
 
-static ifs_ret_t fs_spiffs_ifs_flush(void *context, IFsFile f) {
-	FsSpiffs *self = (FsSpiffs *)context;
-	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return IFS_RET_FAILED;
-	}
-
-	SPIFFS_fflush(&self->spiffs, (spiffs_file)f);
-	if (SPIFFS_errno(&self->spiffs) != 0) {
-		return IFS_RET_FAILED;
-	}
-	return IFS_RET_OK;
+static fs_ret_t fs_spiffs_fs_fflush(Fs *self, File *f) {
+	FS_IMPL_HEADER
+	SPIFFS_fflush(&fs_spiffs->spiffs, (spiffs_file)f->handle);
+	FS_CHECK_ERRNO
+	return FS_RET_OK;
 }
+
+
+static fs_ret_t fs_spiffs_fs_info(Fs *self, struct fs_info *info) {
+	FS_IMPL_HEADER
+	SPIFFS_info(&fs_spiffs->spiffs, (uint32_t *)&info->size_total, (uint32_t *)&info->size_used);
+	FS_CHECK_ERRNO
+	return FS_RET_OK;
+}
+
+
+static fs_ret_t fs_spiffs_fs_opendir(Fs *self, Dir *d, const char *path) {
+	FS_IMPL_HEADER
+	d->ptr = malloc(sizeof(spiffs_DIR));
+	if (d->ptr == NULL) {
+		return FS_RET_FAILED;
+	}
+	SPIFFS_opendir(&fs_spiffs->spiffs, path, (spiffs_DIR *)d->ptr);
+	FS_CHECK_ERRNO
+	return FS_RET_OK;
+}
+
+
+static fs_ret_t fs_spiffs_fs_closedir(Fs *self, Dir *d) {
+	FS_IMPL_HEADER
+	SPIFFS_closedir((spiffs_DIR *)d->ptr);
+	FS_CHECK_ERRNO
+	free(d->ptr);
+	return FS_RET_OK;
+}
+
+
+static fs_ret_t fs_spiffs_fs_readdir(Fs *self, Dir *d, DirEntry *e) {
+	FS_IMPL_HEADER
+	struct spiffs_dirent dirent = {0};
+	struct spiffs_dirent *res = NULL;
+	res = SPIFFS_readdir((spiffs_DIR *)d->ptr, &dirent);
+	if (res) {
+		strlcpy(e->name, (char *)res->name, e->name_size);
+		e->size = res->size;
+		return FS_RET_OK;
+	}
+	return FS_RET_FAILED;
+}
+
+
+static const struct fs_vmt vmt = {
+	.open = fs_spiffs_fs_open,
+	.close = fs_spiffs_fs_close,
+	.remove = fs_spiffs_fs_remove,
+	.rename = fs_spiffs_fs_rename,
+	.read = fs_spiffs_fs_read,
+	.write = fs_spiffs_fs_write,
+	.fflush = fs_spiffs_fs_fflush,
+	.info = fs_spiffs_fs_info,
+	.opendir = fs_spiffs_fs_opendir,
+	.closedir = fs_spiffs_fs_closedir,
+	.readdir = fs_spiffs_fs_readdir
+};
 
 
 fs_spiffs_ret_t fs_spiffs_init(FsSpiffs *self) {
@@ -211,16 +235,9 @@ fs_spiffs_ret_t fs_spiffs_init(FsSpiffs *self) {
 	}
 
 	memset(self, 0, sizeof(FsSpiffs));
-	ifs_init(&self->iface);
 
-	self->iface.vmt.context = (void *)self;
-	self->iface.vmt.open = fs_spiffs_ifs_open;
-	self->iface.vmt.close = fs_spiffs_ifs_close;
-	self->iface.vmt.remove = fs_spiffs_ifs_remove;
-	self->iface.vmt.rename = fs_spiffs_ifs_rename;
-	self->iface.vmt.read = fs_spiffs_ifs_read;
-	self->iface.vmt.write = fs_spiffs_ifs_write;
-	self->iface.vmt.flush = fs_spiffs_ifs_flush;
+	self->iface.vmt = &vmt;
+	self->iface.parent = (void *)self;
 
 	self->state = FS_SPIFFS_STATE_INITIALIZED;
 	return FS_SPIFFS_RET_OK;
@@ -235,8 +252,6 @@ fs_spiffs_ret_t fs_spiffs_free(FsSpiffs *self) {
 	if (u_assert(self->state == FS_SPIFFS_STATE_INITIALIZED)) {
 		return FS_SPIFFS_RET_BAD_STATE;
 	}
-
-	ifs_free(&self->iface);
 
 	return FS_SPIFFS_RET_OK;
 }
@@ -362,13 +377,3 @@ fs_spiffs_ret_t fs_spiffs_check(FsSpiffs *self) {
 }
 
 
-IFs *fs_spiffs_interface(FsSpiffs *self) {
-	if (u_assert(self != NULL)) {
-		return NULL;
-	}
-	if (u_assert(self->state == FS_SPIFFS_STATE_MOUNTED)) {
-		return NULL;
-	}
-
-	return &self->iface;
-}

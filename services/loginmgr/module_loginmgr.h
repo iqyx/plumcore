@@ -24,9 +24,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "interface_stream.h"
+#include <interfaces/stream.h>
 #include "lineedit.h"
-#include "module_crypto_test.h"
 
 
 #define MODULE_LOGINMGR_LOGIN_LENGTH 16
@@ -44,13 +43,13 @@ struct module_loginmgr {
 	/**
 	 * Interface provided for the shell interpreter.
 	 */
-	struct interface_stream iface;
+	Stream iface;
 
 	/**
 	 * Interface on which the login manager service is provided
 	 * (such as the console serial port)
 	 */
-	struct interface_stream *host;
+	Stream *host;
 
 	/**
 	 * Lineedit library context, current command prompt and saved login.
@@ -67,7 +66,7 @@ struct module_loginmgr {
 };
 
 
-int32_t module_loginmgr_init(struct module_loginmgr *loginmgr, const char *name, struct interface_stream *host);
+int32_t module_loginmgr_init(struct module_loginmgr *loginmgr, const char *name, Stream *host);
 #define MODULE_LOGINMGR_INIT_OK 0
 #define MODULE_LOGINMGR_INIT_FAILED -1
 

@@ -54,7 +54,6 @@
 #include "ucli_system_memory.c"
 #include "ucli_system_processes.c"
 #include "ucli_system.c"
-#include "ucli_files.c"
 #if defined(CONFIG_SERVICE_CLI_DEVICE_SENSOR)
 	#include "device_sensor.c"
 #endif
@@ -85,8 +84,11 @@
 #if defined(CONFIG_SERVICE_CLI_DEVICE_CLOCK)
 	#include "device_clock.h"
 #endif
+#include "device_lora.h"
+
 #include "config_export.h"
 #include "system_debug.h"
+#include "fs.h"
 
 
 const struct treecli_node *system_cli_tree = Node {
@@ -96,11 +98,17 @@ const struct treecli_node *system_cli_tree = Node {
 			Name "files",
 			Commands {
 				Command {
-					Name "copy",
-					.exec = ucli_files_copy,
+					Name "print",
+					.exec = fs_print,
 				},
 				End
 			},
+			DSubnodes {
+				DNode {
+					Name "fsN",
+					.create = files_fsN_create,
+				}
+			}
 		},
 /*
 		&(struct treecli_node) {
@@ -291,6 +299,28 @@ const struct treecli_node *system_cli_tree = Node {
 						DNode {
 							Name "clockN",
 							.create = device_clock_clockN_create,
+						}
+					}
+				},
+				#endif
+				#if 1
+				Node {
+					Name "lora",
+					Commands {
+						Command {
+							Name "print",
+							Exec device_lora_print,
+						},
+						Command {
+							Name "export",
+							Exec default_export,
+						},
+						End
+					},
+					DSubnodes {
+						DNode {
+							Name "loraN",
+							.create = device_lora_loraN_create,
 						}
 					}
 				},

@@ -65,7 +65,7 @@ typedef struct fs_spiffs {
 	u8_t spiffs_cache_buf[(LOG_PAGE_SIZE + 32) * 4];
 
 	Flash *flash;
-	IFs iface;
+	Fs iface;
 
 	fs_spiffs_state_t state;
 } FsSpiffs;
@@ -78,5 +78,4 @@ fs_spiffs_ret_t fs_spiffs_mount(FsSpiffs *self, Flash *flash);
 fs_spiffs_ret_t fs_spiffs_unmount(FsSpiffs *self);
 fs_spiffs_ret_t fs_spiffs_format(FsSpiffs *self, Flash *flash);
 fs_spiffs_ret_t fs_spiffs_check(FsSpiffs *self);
-IFs *fs_spiffs_interface(FsSpiffs *self);
 

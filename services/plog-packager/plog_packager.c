@@ -256,16 +256,26 @@ static plog_packager_ret_t package_publish(struct plog_packager_package *self) {
 		return PLOG_PACKAGER_RET_NULL;
 	}
 
-	const char *topic = self->parent->dst_topic;
-	if (strlen(topic) == 0) {
-		topic = "package";
+	/* Publish the package to a Mq if a topic is set */
+	if (strlen(self->parent->dst_topic) > 0) {
+		struct timespec ts = {0};
+		NdArray array;
+		ndarray_init_view(&array, DTYPE_BYTE, self->data_used + self->header_used, self->data - self->header_used, self->data_used + self->header_used);
+		/* Do not check the return value. */
+		self->parent->mqc->vmt->publish(self->parent->mqc, self->parent->dst_topic, &array, &ts);
 	}
 
-	struct timespec ts = {0};
-	NdArray array;
-	ndarray_init_view(&array, DTYPE_BYTE, self->data_used + self->header_used, self->data - self->header_used, self->data_used + self->header_used);
-	if (self->parent->mqc->vmt->publish(self->parent->mqc, self->parent->dst_topic, &array, &ts) != MQ_RET_OK) {
-		return PLOG_PACKAGER_RET_FAILED;
+	/* Write to file */
+	if (self->parent->dst_fs != NULL && strlen(self->parent->dst_path) > 0) {
+		File f;
+		Fs *fs = self->parent->dst_fs;
+		if (fs->vmt->open(fs, &f, self->parent->dst_path, FS_MODE_APPEND | FS_MODE_CREATE | FS_MODE_WRITEONLY) == FS_RET_OK) {
+			size_t w = 0;
+			/** @TODO: write properly */
+			if (fs->vmt->write(fs, &f, self->data - self->header_used, self->data_used + self->header_used, &w) == FS_RET_OK) {
+			}
+			fs->vmt->close(fs, &f);
+		}
 	}
 
 	return PLOG_PACKAGER_RET_OK;
@@ -306,7 +316,6 @@ static plog_packager_ret_t package_add_message(struct plog_packager_package *sel
 	encode_message(&len_stream, msg, topic);
 	size_t msg_len = len_stream.bytes_written;
 
-	size_t remaining = self->data_size - self->data_used;
 	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("remaining %u"), remaining);
 	if ((msg_len + self->data_used) > (self->data_size / 2)) {
 		package_finish(self);
@@ -404,7 +413,13 @@ plog_packager_ret_t plog_packager_start(PlogPackager *self, size_t msg_size, siz
 		goto err;
 	}
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("packaging '%s' -> '%s', max pkg size %u B"), self->topic_filter, self->dst_topic, package_size);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("packaging '%s', max pkg size %u B..."), self->topic_filter, package_size);
+	if (strlen(self->dst_topic) > 0) {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("  -> mq '%s'"), self->dst_topic);
+	}
+	if (self->dst_fs) {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("  -> file '%s'"), self->dst_path);
+	}
 	return PLOG_PACKAGER_RET_OK;
 err:
 	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start"));
@@ -432,9 +447,8 @@ plog_packager_ret_t plog_packager_stop(PlogPackager *self) {
 }
 
 
-plog_packager_ret_t plog_packager_add_filter(PlogPackager *self, const char *topic_filter, const char *dst_topic) {
+plog_packager_ret_t plog_packager_add_filter(PlogPackager *self, const char *topic_filter) {
 	strlcpy(self->topic_filter, topic_filter, PLOG_PACKAGER_TOPIC_FILTER_SIZE);
-	strlcpy(self->dst_topic, dst_topic, PLOG_PACKAGER_TOPIC_FILTER_SIZE);
 	return PLOG_PACKAGER_RET_OK;
 }
 
@@ -455,6 +469,19 @@ plog_packager_ret_t plog_packager_set_key(PlogPackager *self, const uint8_t *key
 	}
 	memcpy(self->key, key, len);
 	self->key_size = len;
+	return PLOG_PACKAGER_RET_OK;
+}
+
+
+plog_packager_ret_t plog_packager_add_dst_mq(PlogPackager *self, const char *dst_topic) {
+	strlcpy(self->dst_topic, dst_topic, PLOG_PACKAGER_TOPIC_FILTER_SIZE);
+	return PLOG_PACKAGER_RET_OK;
+}
+
+
+plog_packager_ret_t plog_packager_add_dst_file(PlogPackager *self, Fs *fs, const char *path) {
+	self->dst_fs = fs;
+	strlcpy(self->dst_path, path, PLOG_PACKAGER_PATH_MAX);
 	return PLOG_PACKAGER_RET_OK;
 }
 

@@ -46,9 +46,24 @@
 #include "config_export.h"
 
 
+static void export_node(struct treecli_parser *parser, const struct treecli_node *n) {
+	ServiceCli *cli = (ServiceCli *)parser->context;
+
+	/* Print the current path. */
+	module_cli_output("/ ", cli);
+	treecli_parser_pos_print(parser, true);
+	module_cli_output(" ", cli);
+	module_cli_output(n->name, cli);
+	module_cli_output("\r\n", cli);
+
+	char line[50];
+	snprintf(line, sizeof(line), "%s export", n->name);
+	treecli_parser_parse_line(parser, line);
+}
+
+
 int32_t default_export(struct treecli_parser *parser, void *exec_context) {
 	(void)exec_context;
-	ServiceCli *cli = (ServiceCli *)parser->context;
 
 	/* Now traverse all subnodes at the current position. */
 	const struct treecli_node *node = NULL;
@@ -59,19 +74,27 @@ int32_t default_export(struct treecli_parser *parser, void *exec_context) {
 		node = parser->pos.levels[parser->pos.depth - 1].node;
 	}
 
-	const struct treecli_node *n;
-	for (size_t i = 0; (n = (*(node->subnodes))[i]) != NULL; i++) {
+	if (node->subnodes != NULL) {
+		const struct treecli_node *n;
+		for (size_t i = 0; (n = (*(node->subnodes))[i]) != NULL; i++) {
+			export_node(parser, n);
+		}
+	}
 
-		/* Print the current path. */
-		module_cli_output("/ ", cli);
-		treecli_parser_pos_print(parser, true);
-		module_cli_output(" ", cli);
-		module_cli_output(n->name, cli);
-		module_cli_output("\r\n", cli);
+	if (node->dsubnodes != NULL) {
+		/* construct dynamic node */
+		struct treecli_node n;
+		memset(&n, 0, sizeof(n));
+		char name[32] = {0}; /* uh oh */
+		n.name = name;
+		
+		const struct treecli_dnode *d = (*(node->dsubnodes))[0];
 
-		char line[50];
-		snprintf(line, sizeof(line), "%s export", n->name);
-		treecli_parser_parse_line(parser, line);
+		if (d->create != NULL) {
+			for (uint32_t i = 0; d->create(parser, i, &n, d->create_context) >= 0; i++) {
+				export_node(parser, &n);
+			}
+		}
 	}
 
 	return 0;
@@ -82,9 +105,8 @@ int32_t config_save(struct treecli_parser *parser, void *exec_context) {
 	(void)exec_context;
 	ServiceCli *cli = (ServiceCli *)parser->context;
 
-	Interface *interface;
-	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, &interface) == ISERVICELOCATOR_RET_OK) {
-		IFs *fs = (IFs *)interface;
+	Fs *fs = NULL;
+	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, (Interface **)&fs) == ISERVICELOCATOR_RET_OK) {
 
 		if (service_cli_start_out_logging(cli, fs, "startup.cfg") != SERVICE_CLI_RET_OK) {
 			module_cli_output("cannot open file\r\n", cli);
@@ -101,9 +123,8 @@ int32_t config_load(struct treecli_parser *parser, void *exec_context) {
 	(void)exec_context;
 	ServiceCli *cli = (ServiceCli *)parser->context;
 
-	Interface *interface;
-	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, &interface) == ISERVICELOCATOR_RET_OK) {
-		IFs *fs = (IFs *)interface;
+	Fs *fs = NULL;
+	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, (Interface **)&fs) == ISERVICELOCATOR_RET_OK) {
 		service_cli_load_file(cli, fs, "startup.cfg");
 	}
 

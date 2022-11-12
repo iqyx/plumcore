@@ -49,6 +49,7 @@
 
 #include <interfaces/mq.h>
 #include <types/ndarray.h>
+#include <interfaces/stream.h>
 
 #include "service_plog_router.h"
 
@@ -78,7 +79,7 @@ static void cli_print_base85(ServiceCli *self, const uint8_t *buf, size_t len) {
 				out[j] = base85chars[acc / d % 85];
 				d /= 85;
 			}
-			interface_stream_write(self->stream, (const uint8_t *)out, 5);
+			self->stream->vmt->write(self->stream, (const void *)out, sizeof(out));
 		}
 	}
 }
@@ -91,7 +92,7 @@ static void cli_print_array_data(ServiceCli *self, NdArray *array) {
 		module_cli_output("\"", self);
 	} else if (array->dtype == DTYPE_CHAR) {
 		module_cli_output("\"", self);
-		interface_stream_write(self->stream, (const uint8_t *)array->buf, array->asize);
+		self->stream->vmt->write(self->stream, (const void *)array->buf, array->asize);
 		module_cli_output("\"", self);
 	} else {
 		module_cli_output("[", self);
@@ -203,8 +204,7 @@ int32_t service_plog_router_sniff(struct treecli_parser *parser, void *exec_cont
 
 		/* Check if a key was pressed. Interrupt if yes. */
 		uint8_t chr = 0;
-		int16_t read = interface_stream_read_timeout(cli->stream, &chr, 1, 0);
-		if (read != 0) {
+		if (cli->stream->vmt->read_timeout(cli->stream, &chr, sizeof(chr), NULL, 0) == STREAM_RET_OK) {
 			break;
 		}
 	}

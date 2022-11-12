@@ -135,8 +135,7 @@ static int32_t ucli_system_processes_monitor(struct treecli_parser *parser, void
 		}
 
 		uint8_t chr = 0;
-		int16_t read = interface_stream_read_timeout(cli->stream, &chr, 1, 1000);
-		if (read != 0) {
+		if (cli->stream->vmt->read_timeout(cli->stream, &chr, sizeof(chr), NULL, 1000)) {
 			break;
 		}
 	}

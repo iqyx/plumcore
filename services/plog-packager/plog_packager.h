@@ -18,6 +18,7 @@
 
 #include <interfaces/mq.h>
 #include <types/ndarray.h>
+#include <interfaces/fs.h>
 #include "heatshrink_encoder.h"
 
 
@@ -25,6 +26,7 @@
 #define PLOG_PACKAGER_MAX_KEY_SIZE 32
 #define PLOG_PACKAGER_TOPIC_FILTER_SIZE 32
 #define PLOG_PACKAGER_HEADER_SIZE 64
+#define PLOG_PACKAGER_PATH_MAX 32
 
 /* Randomly generated header allows us to find the package in arbitrary data. */
 #define PLOG_PACKAGER_PACKAGE_MAGIC ((uint8_t[]){'P', 'K', 'G'})
@@ -69,9 +71,13 @@ typedef struct plog_packager {
 	MqClient *mqc;
 	Mq *mq;
 	char topic_filter[PLOG_PACKAGER_TOPIC_FILTER_SIZE];
-	char dst_topic[PLOG_PACKAGER_TOPIC_FILTER_SIZE];
 	uint8_t key[PLOG_PACKAGER_MAX_KEY_SIZE];
 	size_t key_size;
+
+	/* Destinations */
+	char dst_topic[PLOG_PACKAGER_TOPIC_FILTER_SIZE];
+	Fs *dst_fs;
+	char dst_path[PLOG_PACKAGER_PATH_MAX];
 
 	uint8_t nonce[PLOG_PACKAGER_NONCE_SIZE];
 	size_t nonce_size;
@@ -91,8 +97,9 @@ plog_packager_ret_t plog_packager_init(PlogPackager *self, Mq *mq);
 plog_packager_ret_t plog_packager_free(PlogPackager *self);
 plog_packager_ret_t plog_packager_start(PlogPackager *self, size_t msg_size, size_t package_size);
 plog_packager_ret_t plog_packager_stop(PlogPackager *self);
-plog_packager_ret_t plog_packager_add_filter(PlogPackager *self, const char *topic_filter, const char *dst_topic);
+plog_packager_ret_t plog_packager_add_filter(PlogPackager *self, const char *topic_filter);
 plog_packager_ret_t plog_packager_set_nonce(PlogPackager *self, const uint8_t *nonce, size_t len);
 plog_packager_ret_t plog_packager_set_key(PlogPackager *self, const uint8_t *key, size_t len);
-
+plog_packager_ret_t plog_packager_add_dst_mq(PlogPackager *self, const char *dst_topic);
+plog_packager_ret_t plog_packager_add_dst_file(PlogPackager *self, Fs *fs, const char *path);
 

@@ -28,7 +28,7 @@
 #include "u_assert.h"
 #include "system_log.h"
 #include "port.h"
-#include "interface_stream.h"
+#include <interfaces/stream.h>
 // #include "lineedit.h"
 #include "interface_rtc.h"
 
@@ -86,13 +86,13 @@ int32_t u_log_init(void) {
 
 
 /* TODO: include this function in the stream interface directly. */
-static void u_log_stream_print(struct interface_stream *stream, const char *s) {
+static void u_log_stream_print(Stream *stream, const char *s) {
 	/* Do not use assert here. */
 	if (stream == NULL || s == NULL) {
 		return;
 	}
 	/* TODO: replace 200 with a config value. */
-	interface_stream_write(stream, (const uint8_t *)s, strnlen(s, 200));
+	stream->vmt->write(stream, (const void *)s, strnlen(s, 200));
 }
 
 
@@ -109,7 +109,7 @@ static void u_log_print_handler(struct log_cbuffer *buf, uint32_t pos, void *ctx
 	log_cbuffer_get_message(buf, pos, &msg);
 	log_cbuffer_get_time(buf, pos, &time);
 
-	struct interface_stream *stream = (struct interface_stream *)ctx;
+	Stream *stream = (Stream *)ctx;
 	struct interface_rtc *rtc = (struct interface_rtc *)buf->time_handler_ctx;
 
 	char s[30] = {0};
@@ -176,7 +176,7 @@ static void u_log_time_handler(struct log_cbuffer *buf, uint32_t *time, void *ct
 }
 
 
-int32_t u_log_set_stream(struct interface_stream *stream) {
+int32_t u_log_set_stream(Stream *stream) {
 	if (u_assert(stream != NULL)) {
 		return U_LOG_SET_STREAM_FAILED;
 	}

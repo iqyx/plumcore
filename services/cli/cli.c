@@ -31,20 +31,22 @@
 #include "port.h"
 #include "config.h"
 
-#include "interface_stream.h"
+#include <interfaces/stream.h>
 #include "cli.h"
 
 #include "system_cli_tree.h"
 
 #include "interfaces/fs.h"
 
+#define MODULE_NAME "cli"
+
 
 int32_t module_cli_output(const char *s, void *ctx) {
 	ServiceCli *cli = (ServiceCli *)ctx;
 
-	interface_stream_write(cli->stream, (const uint8_t *)s, strlen(s));
+	cli->stream->vmt->write(cli->stream, (const void *)s, strlen(s));
 	if (cli->log_file_opened) {
-		ifs_fwrite(cli->fs, cli->log_file, (const uint8_t *)s, strlen(s), NULL);
+		cli->fs->vmt->write(cli->fs, &cli->log_file, (const uint8_t *)s, strlen(s), NULL);
 	}
 	return 0;
 }
@@ -55,20 +57,20 @@ static void cli_task(void *p) {
 
 	while (1) {
 		uint8_t buf[10];
-		int32_t ret = interface_stream_read(cli->stream, buf, sizeof(buf));
-		if (ret <= 0) {
-			vTaskDelay(100);
-		} else {
-			for (int32_t i = 0; i < ret; i++) {
+		size_t read = 0;
+		stream_ret_t ret = cli->stream->vmt->read(cli->stream, buf, sizeof(buf), &read);
+		if (ret == STREAM_RET_OK) {
+			for (size_t i = 0; i < read; i++) {
 				treecli_shell_keypress(&(cli->sh), buf[i]);
 			}
+		} else {
+			vTaskDelay(100);
 		}
 	}
-
 }
 
 
-service_cli_ret_t service_cli_init(ServiceCli *self, struct interface_stream *stream, const struct treecli_node *root) {
+service_cli_ret_t service_cli_init(ServiceCli *self, Stream *stream, const struct treecli_node *root) {
 	if (u_assert(self != NULL) ||
 	    u_assert(stream != NULL) ||
 	    u_assert(root != NULL)) {
@@ -99,6 +101,7 @@ service_cli_ret_t service_cli_start(ServiceCli *self) {
 
 service_cli_ret_t service_cli_stop(ServiceCli *self) {
 	/** @todo */
+	(void)self;
 
 	return SERVICE_CLI_RET_OK;
 }
@@ -106,19 +109,20 @@ service_cli_ret_t service_cli_stop(ServiceCli *self) {
 
 service_cli_ret_t service_cli_free(ServiceCli *self) {
 	/** @todo */
+	(void)self;
 
 	return SERVICE_CLI_RET_OK;
 }
 
 
-service_cli_ret_t service_cli_start_out_logging(ServiceCli *self, IFs *fs, const char *filename) {
+service_cli_ret_t service_cli_start_out_logging(ServiceCli *self, Fs *fs, const char *filename) {
 	if (u_assert(self != NULL) ||
 	    u_assert(filename != NULL)) {
 		return SERVICE_CLI_RET_FAILED;
 	}
 
 	self->fs = fs;
-	if (ifs_open(self->fs, &self->log_file, filename, IFS_MODE_CREATE | IFS_MODE_WRITEONLY | IFS_MODE_TRUNCATE) != IFS_RET_OK) {
+	if (self->fs->vmt->open(self->fs, &self->log_file, filename, FS_MODE_CREATE | FS_MODE_WRITEONLY | FS_MODE_TRUNCATE) != FS_RET_OK) {
 		return SERVICE_CLI_RET_FAILED;
 	}
 	self->log_file_opened = true;
@@ -133,27 +137,26 @@ service_cli_ret_t service_cli_stop_out_logging(ServiceCli *self) {
 	}
 
 	self->log_file_opened = false;
-	ifs_fclose(self->fs, self->log_file);
+	self->fs->vmt->close(self->fs, &self->log_file);
 
 	return SERVICE_CLI_RET_OK;
 }
 
 
-service_cli_ret_t service_cli_load_file(ServiceCli *self, IFs *fs, const char *filename) {
+service_cli_ret_t service_cli_load_file(ServiceCli *self, Fs *fs, const char *filename) {
 	if (u_assert(self != NULL)) {
 		return SERVICE_CLI_RET_FAILED;
 	}
 
-	IFsFile f;
-
-	if (ifs_open(fs, &f, filename, IFS_MODE_READONLY) != IFS_RET_OK) {
+	File f;
+	if (fs->vmt->open(fs, &f, filename, FS_MODE_READONLY) != FS_RET_OK) {
 		return 1;
 	}
 
 	while (1) {
 		uint8_t buf[256];
 		size_t read = 0;
-		if (ifs_fread(fs, f, buf, sizeof(buf), &read) == IFS_RET_OK) {
+		if (fs->vmt->read(fs, &f, buf, sizeof(buf), &read) == FS_RET_OK) {
 			for (size_t i = 0; i < read; i++) {
 				treecli_shell_keypress(&self->sh, buf[i]);
 			}
@@ -161,10 +164,9 @@ service_cli_ret_t service_cli_load_file(ServiceCli *self, IFs *fs, const char *f
 			break;
 		}
 	}
-	ifs_fclose(fs, f);
+	fs->vmt->close(fs, &f);
 	treecli_shell_keypress(&self->sh, '/');
 	treecli_shell_keypress(&self->sh, '\n');
-
 
 	return SERVICE_CLI_RET_OK;
 }

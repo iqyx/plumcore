@@ -1,0 +1,13 @@
+config SERVICE_STM32_UART
+	bool "STM32 UART driver"
+	default y
+
+	config SERVICE_STM32_UART_RXBUF_SIZE
+		int "Receive buffer size (bytes)"
+		default 256
+		depends on SERVICE_STM32_UART
+
+	config SERVICE_STM32_UART_TXBUF_SIZE
+		int "Transmit buffer size (bytes)"
+		default 256
+		depends on SERVICE_STM32_UART

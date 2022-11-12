@@ -9,11 +9,9 @@
 
 #include <stdint.h>
 
-#include "FreeRTOS.h"
-#include "queue.h"
-#include "semphr.h"
+#include <main.h>
 
-#include <interface_stream.h>
+#include <interfaces/stream.h>
 #include <interfaces/lora.h>
 
 
@@ -55,10 +53,12 @@ enum lora_modem_mac_state {
 };
 
 typedef struct {
-	struct interface_stream *usart;
+	Stream *usart;
 	LoRa lora;
+	enum lora_mode lora_mode;
 
 	SemaphoreHandle_t command_lock;
+	UBaseType_t api_prio;
 	bool can_run;
 	bool running;
 
@@ -91,20 +91,30 @@ typedef struct {
 	bool sleeping;
 
 	uint32_t status_vdd_mV;
+	Sensor vdd;
 
 	SemaphoreHandle_t rx_lock[16];
 	SemaphoreHandle_t rx_data_release;
 
+	bool debug_requests;
+	bool debug_responses;
+
+	/* Reading keys is not supported. We have to remember them. */
+	char appkey[32 + 1];
+	char nwkskey[32 + 1];
+	char appskey[32 + 1];
+
 } LoraModem;
 
 
-lora_modem_ret_t lora_modem_init(LoraModem *self, struct interface_stream *usart);
+lora_modem_ret_t lora_modem_init(LoraModem *self, Stream *usart);
 lora_modem_ret_t lora_modem_free(LoraModem *self);
 
 lora_modem_ret_t lora_modem_regain_comms(LoraModem *self);
 /* lora_modem_ret_t lora_modem_set_led(LoraModem *self, StatusLed *led); */
 lora_modem_ret_t lora_modem_write(LoraModem *self, const char *buf);
 lora_modem_ret_t lora_modem_write_line(LoraModem *self, const char *buf);
+lora_modem_ret_t lora_modem_clear_input(LoraModem *self);
 lora_modem_ret_t lora_modem_read_line(LoraModem *self, char *buf, size_t max_buf, size_t *read);
 lora_modem_ret_t lora_modem_save(LoraModem *self);
 lora_modem_ret_t lora_modem_get_vdd(LoraModem *self, uint32_t *vdd);
@@ -113,21 +123,3 @@ lora_modem_ret_t lora_modem_factory_reset(LoraModem *self);
 lora_modem_ret_t lora_modem_reset(LoraModem *self);
 lora_modem_ret_t lora_modem_get_ver(LoraModem *self, char *version, size_t ver_len);
 lora_modem_ret_t lora_modem_set_ar(LoraModem *self, bool ar);
-
-/* LoRa API */
-lora_ret_t lora_modem_set_appkey(LoraModem *self, const char *appkey);
-lora_ret_t lora_modem_set_appeui(LoraModem *self, const char *appeui);
-lora_ret_t lora_modem_set_deveui(LoraModem *self, const char *deveui);
-lora_ret_t lora_modem_get_deveui(LoraModem *self, char *deveui);
-lora_ret_t lora_modem_set_devaddr(LoraModem *self, const uint8_t devaddr[4]);
-lora_ret_t lora_modem_set_nwkskey(LoraModem *self, const char *nwkskey);
-lora_ret_t lora_modem_set_appskey(LoraModem *self, const char *appskey);
-lora_ret_t lora_modem_join_abp(LoraModem *self);
-lora_ret_t lora_modem_join_otaa(LoraModem *self);
-lora_ret_t lora_modem_leave(LoraModem *self);
-lora_ret_t lora_modem_set_datarate(LoraModem *self, uint8_t datarate);
-lora_ret_t lora_modem_set_adr(LoraModem *self, bool adr);
-
-lora_ret_t lora_modem_send(LoraModem *self, uint8_t port, const uint8_t *data, size_t len);
-lora_ret_t lora_modem_receive(LoraModem *self, uint8_t port, uint8_t *data, size_t size, size_t *len, uint32_t timeout);
-

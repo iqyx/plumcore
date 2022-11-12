@@ -28,7 +28,7 @@ config PORT_INCL_G104MF
 		endchoice
 
 		config INCL_G104MF_ENABLE_LEDS
-			bool "Enable LEDs (disables SWD debug!)"
+			bool "Enable LEDs"
 			default n
 
 		config INCL_G104MF_ENABLE_WATCHDOG
@@ -39,4 +39,49 @@ config PORT_INCL_G104MF
 		config STM32_DEBUG_IN_STOP
 			bool "Enable debugging in stop mode"
 			default y
+
+		config INCL_G104MF_ENABLE_QSPI
+			select SERVICE_STM32_QSPI_FLASH
+			bool "Enable QSPI NOR flash (FIFO for measured data, SPIFFS for firmware update & configuratio)"
+			default y
+
+		config INCL_G104MF_QSPI_STARTUP_TEST
+			depends on INCL_G104MF_ENABLE_QSPI
+			select SERVICE_FLASH_TEST
+			bool "Run QSPI speed test on startup"
+			default n
+
+			comment "Warning: running flash tests on every boot wears out the flash memory faster"
+				depends on INCL_G104MF_QSPI_STARTUP_TEST
+
+		config INCL_G104MF_ENABLE_CONSOLE
+			select SERVICE_STM32_UART
+			select SERVICE_CLI
+			select SERVICE_LOGINMGR
+			bool "Enable serial console"
+			default y
+
+			config INCL_G104MF_CONSOLE_SPEED
+				depends on INCL_G104MF_ENABLE_CONSOLE
+				int "Console speed (baudrate)"
+				default 115200
+
+		config INCL_G104MF_ENABLE_LORA
+			select SERVICE_LORA_RN2483
+			bool "Enable RN2483 LoRaWAN modem"
+			default y
+
+		config INCL_G104MF_ENABLE_RFM
+			bool "Enable RFMxx LoRa modem transceiver"
+			default y
+
+		config INCL_G104MF_ENABLE_TDK_ACCEL
+			bool "Enable ICM-42688 accelerometer (SPI2)"
+			default y
+
+		config INCL_G104MF_ENABLE_MICROSD
+			bool "Enable micro-SD card"
+			default y
+
+
 	endmenu

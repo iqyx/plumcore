@@ -11,10 +11,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "config.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include "semphr.h"
+#include <main.h>
 
 #include <interfaces/flash.h>
 #include <interfaces/fs.h>
@@ -31,8 +28,8 @@
 #define FLASH_FIFO_MAGIC_FIFO 0x33333333
 #define FLASH_FIFO_MAGIC_TAIL 0x00000000
 
-#define IFS_FILE_READING 0
-#define IFS_FILE_WRITING 1
+#define FS_FILE_READING 1
+#define FS_FILE_WRITING 2
 
 struct flash_fifo_header {
 	uint32_t magic;
@@ -63,12 +60,15 @@ typedef struct {
 	/* Head is the first block containing data. It may not be complete. */
 	uint32_t head;
 
-	/* IFs interface */
+	/* Fs interface (thread safe) */
 	size_t read_offset;
-	IFs fs;
+	Fs fs;
+
+	SemaphoreHandle_t lock;
 } FlashFifo;
 
 
+/* Flash-fifo API is not thread-safe! */
 flash_fifo_ret_t flash_fifo_find_block(FlashFifo *self, size_t from, uint32_t magic, size_t *addr_l, size_t *addr_h);
 flash_fifo_ret_t flash_fifo_stats(FlashFifo *self, size_t *erased, size_t *half, size_t *full, size_t *gc, size_t *inv, uint32_t *seq_l, uint32_t *seq_h);
 flash_fifo_ret_t flash_fifo_write(FlashFifo *self, const uint8_t *buf, size_t len, size_t *written);
@@ -76,4 +76,5 @@ flash_fifo_ret_t flash_fifo_read(FlashFifo *self, uint8_t *buf, size_t len, size
 
 flash_fifo_ret_t flash_fifo_init(FlashFifo *self, Flash *flash);
 flash_fifo_ret_t flash_fifo_free(FlashFifo *self);
+flash_fifo_ret_t flash_fifo_format(FlashFifo *self);
 

@@ -31,6 +31,9 @@
 #include <stdbool.h>
 
 #include "interface.h"
+#include "config.h"
+#include "FreeRTOS.h"
+#include "semphr.h"
 
 
 typedef enum {

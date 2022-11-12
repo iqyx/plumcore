@@ -65,6 +65,7 @@ enum iservicelocator_type {
 	ISERVICELOCATOR_TYPE_BLOCK,
 	ISERVICELOCATOR_TYPE_WORN,
 	ISERVICELOCATOR_TYPE_MQ,
+	ISERVICELOCATOR_TYPE_LORA,
 };
 
 struct iservicelocator_vmt {

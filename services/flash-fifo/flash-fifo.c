@@ -12,11 +12,7 @@
 #include <math.h>
 #include <time.h>
 
-#include "config.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include "u_log.h"
-#include "u_assert.h"
+#include <main.h>
 
 #include <interfaces/flash.h>
 #include <interfaces/fs.h>
@@ -231,9 +227,12 @@ static flash_fifo_ret_t close_head(FlashFifo *self, uint32_t pos) {
 }
 
 
-static void format(FlashFifo *self) {
+flash_fifo_ret_t flash_fifo_format(FlashFifo *self) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("formatting/erasing FIFO"));
+
 	self->flash->vmt->erase(self->flash, 0, self->flash_size);
 	prepare_head(self, 0);
+
 	log_fifo(self, "format");
 }
 
@@ -284,9 +283,19 @@ static flash_fifo_ret_t set_block_write_usage(FlashFifo *self, size_t len) {
 
 
 static flash_fifo_ret_t block_write_data(FlashFifo *self, size_t offset, const uint8_t *buf, size_t len) {
-	/* Do not check, assume we can safely write at the specified offset. */
-	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("write block data offset = %p, len = %p"), offset, len);
-	if (self->flash->vmt->write(self->flash, self->head * self->block_size + self->page_size + offset, buf, len) != FLASH_RET_OK) {
+	size_t wb = self->head % self->blocks;
+	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("write block %u, pos %x, len %u"), wb, offset, len);
+	if (self->flash->vmt->write(self->flash, wb * self->block_size + self->page_size + offset, buf, len) != FLASH_RET_OK) {
+		return FLASH_FIFO_RET_FAILED;
+	}
+	return FLASH_FIFO_RET_OK;
+}
+
+
+static flash_fifo_ret_t block_read_data(FlashFifo *self, size_t offset, const uint8_t *buf, size_t len) {
+	size_t rb = self->last % self->blocks;
+	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("read block %u, pos %x, len %u"), rb, offset, len);
+	if (self->flash->vmt->read(self->flash, rb * self->block_size + self->page_size + offset, buf, len) != FLASH_RET_OK) {
 		return FLASH_FIFO_RET_FAILED;
 	}
 	return FLASH_FIFO_RET_OK;
@@ -296,6 +305,7 @@ static flash_fifo_ret_t block_write_data(FlashFifo *self, size_t offset, const u
 flash_fifo_ret_t flash_fifo_write(FlashFifo *self, const uint8_t *buf, size_t len, size_t *written) {
 	size_t rem = len;
 	/* Write data */
+
 	size_t block_write_offset = 0;
 	size_t block_write_len = 0;
 	while (get_block_write_range(self, &block_write_offset, &block_write_len) == FLASH_FIFO_RET_OK && rem > 0 && block_write_len > 0) {
@@ -321,19 +331,31 @@ flash_fifo_ret_t flash_fifo_write(FlashFifo *self, const uint8_t *buf, size_t le
 		}
 		return ret;
 	}
+
 	return FLASH_FIFO_RET_OK;
 }
 
 
 flash_fifo_ret_t flash_fifo_read(FlashFifo *self, uint8_t *buf, size_t len, size_t *read) {
-	/* Do not go beyond the block boundary */
+	/* If theres no full block written, consider FIFO empty yet. */
+	if (self->head == self->last) {
+		return FLASH_FIFO_RET_EMPTY;
+	}
+	/* Now we are reading at the last position. We assume it is full, because
+	 * it is full.. block_size - page_size data is available. */
+
+	/* Do not go beyond the block boundary. End is the offset from where the
+	 * data starts. */
 	size_t end = self->block_size - self->page_size;
-	/* Do not write more than a page_size */
+
+	/* Cannot go past the page boundary. Trim the size to page_size and
+	 * cut the tail going to the next page. */
 	if ((end - self->read_offset) > self->page_size) {
 		end = self->read_offset + self->page_size;
 	}
-	/* The end must be within the same page. */
 	end -= end % self->page_size;
+
+	/* Compute the actual number of bytes to read. */
 	size_t read_len = end - self->read_offset;
 	if (read_len == 0) {
 		return FLASH_FIFO_RET_EMPTY;
@@ -341,13 +363,15 @@ flash_fifo_ret_t flash_fifo_read(FlashFifo *self, uint8_t *buf, size_t len, size
 	if (len < read_len) {
 		read_len = len;
 	}
-	if (self->flash->vmt->read(self->flash, self->read_offset, buf, len) != FLASH_RET_OK) {
+
+	if (block_read_data(self, self->read_offset, buf, read_len) != FLASH_FIFO_RET_OK) {
 		return FLASH_FIFO_RET_FAILED;
 	}
 	self->read_offset += len;
 	if (read != NULL) {
 		*read = len;
 	}
+
 	return FLASH_FIFO_RET_OK;
 }
 
@@ -374,114 +398,153 @@ static flash_fifo_ret_t flash_fifo_gc_single(FlashFifo *self) {
  * IFs filesystem interface implementation
  *************************************************************************************************/
 
-static ifs_ret_t fs_open(void *context, IFsFile *f, const char *filename, uint32_t mode) {
+/* No locking needed here */
+static fs_ret_t fs_open(Fs *self, File *f, const char *path, enum fs_mode mode) {
 	if (u_assert(f != NULL) ||
-	    u_assert(filename != NULL) ||
-	    u_assert(context != NULL)) {
-		return IFS_RET_FAILED;
+	    u_assert(path != NULL) ||
+	    u_assert(self != NULL)) {
+		return FS_RET_FAILED;
 	}
-	FlashFifo *self = (FlashFifo *)context;
+	FlashFifo *ff = (FlashFifo *)self->parent;
 
-	if (!strcmp(filename, "fifo") && mode == IFS_MODE_READONLY) {
-		*f = IFS_FILE_READING;
-		self->read_offset = 0;
-		return IFS_RET_OK;
+	if (!strcmp(path, "fifo") && (mode & FS_MODE_READONLY)) {
+		f->handle = FS_FILE_READING;
+		ff->read_offset = 0;
+		return FS_RET_OK;
 	}
-	if (!strcmp(filename, "fifo") && mode == IFS_MODE_WRITEONLY) {
-		*f = IFS_FILE_WRITING;
-		self->read_offset = 0;
-		return IFS_RET_OK;
+	if (!strcmp(path, "fifo") && (mode & FS_MODE_WRITEONLY)) {
+		f->handle = FS_FILE_WRITING;
+		return FS_RET_OK;
 	}
-	return IFS_RET_FAILED;
+	return FS_RET_FAILED;
 }
 
 
-static ifs_ret_t fs_close(void *context, IFsFile f) {
-	if (u_assert(context != NULL) &&
-	    u_assert(f == 0 || f == 1)) {
-		return IFS_RET_FAILED;
+/* Lock to prevent closing the file during read/write */
+static fs_ret_t fs_close(Fs *self, File *f) {
+	if (u_assert(self != NULL) &&
+	    u_assert(f->handle == FS_FILE_READING || f->handle == FS_FILE_WRITING)) {
+		return FS_RET_FAILED;
 	}
-	return IFS_RET_OK;
+
+	FlashFifo *ff = (FlashFifo *)self->parent;
+	xSemaphoreTake(ff->lock, portMAX_DELAY);
+
+	xSemaphoreGive(ff->lock);
+	return FS_RET_OK;
 }
 
 
-static ifs_ret_t fs_remove(void *context, const char *filename) {
-	if (u_assert(context != NULL) &&
-	    u_assert(filename != NULL)) {
-		return IFS_RET_FAILED;
+/* Lock single concurrent operation */
+static fs_ret_t fs_remove(Fs *self, const char *path) {
+	if (u_assert(self != NULL) &&
+	    u_assert(path != NULL)) {
+		return FS_RET_FAILED;
 	}
-	FlashFifo *self = (FlashFifo *)context;
+	FlashFifo *ff = (FlashFifo *)self->parent;
+	xSemaphoreTake(ff->lock, portMAX_DELAY);
 
-	if (!strcmp(filename, "fifo")) {
+	if (!strcmp(path, "fifo")) {
+		/* Check if the last block is full (!= not head) */
 		struct flash_fifo_header h = {0};
-		read_header(self, self->last, &h);
+		read_header(ff, ff->last, &h);
 		if (h.magic != FLASH_FIFO_MAGIC_FIFO) {
 			/* Nothing to remove yet. */
-			return IFS_RET_FAILED;
+			goto err;
 		}
+
+		/* Close it by adding it to the tail */
 		h.magic = FLASH_FIFO_MAGIC_TAIL;
-		write_header(self, self->last, &h);
-		self->last++;
-		log_fifo(self, "removed");
-		return IFS_RET_OK;
+		write_header(ff, ff->last, &h);
+		ff->last++;
+		log_fifo(ff, "removed");
+
+		/* Try to garbage collect at least to blocks */
+		flash_fifo_gc_single(ff);
+		flash_fifo_gc_single(ff);
+
+		xSemaphoreGive(ff->lock);
+		return FS_RET_OK;
 	}
-	return IFS_RET_FAILED;
+
+err:
+	xSemaphoreGive(ff->lock);
+	return FS_RET_FAILED;
 }
 
 
-static ifs_ret_t fs_read(void *context, IFsFile f, uint8_t *buf, size_t len, size_t *read) {
-	FlashFifo *self = (FlashFifo *)context;
-	if (f != IFS_FILE_READING) {
-		return IFS_RET_FAILED;
+/* Lock single concurrent operation */
+static fs_ret_t fs_read(Fs *self, File *f, void *buf, size_t len, size_t *read) {
+	FlashFifo *ff = (FlashFifo *)self->parent;
+	if (f->handle != FS_FILE_READING) {
+		return FS_RET_FAILED;
 	}
+	xSemaphoreTake(ff->lock, portMAX_DELAY);
+
 	size_t r = 0;
 	size_t rem = len;
 	flash_fifo_ret_t ret = 0;
-	while (rem > 0 && (ret = flash_fifo_read(self, buf, rem, &r)) == FLASH_FIFO_RET_OK) {
-		buf += r;
+	while (rem > 0 && (ret = flash_fifo_read(ff, buf, rem, &r)) == FLASH_FIFO_RET_OK) {
+		buf = (uint8_t *)buf + r;
 		rem -= r;
 	}
 	if (ret == FLASH_FIFO_RET_OK) {
 		if (read != NULL) {
 			*read = len - rem;
 		}
-		return IFS_RET_OK;
+
+		xSemaphoreGive(ff->lock);
+		return FS_RET_OK;
 	}
-	return IFS_RET_FAILED;
+
+	xSemaphoreGive(ff->lock);
+	return FS_RET_FAILED;
 }
 
 
-static ifs_ret_t fs_write(void *context, IFsFile f, const uint8_t *buf, size_t len, size_t *written) {
-	FlashFifo *self = (FlashFifo *)context;
-	if (f != IFS_FILE_WRITING) {
-		return IFS_RET_FAILED;
+/* Lock single concurrent operation */
+static fs_ret_t fs_write(Fs *self, File *f, const void *buf, size_t len, size_t *written) {
+	FlashFifo *ff = (FlashFifo *)self->parent;
+	if (f->handle != FS_FILE_WRITING) {
+		return FS_RET_FAILED;
 	}
+	xSemaphoreTake(ff->lock, portMAX_DELAY);
 
-	flash_fifo_ret_t ret = flash_fifo_write(self, buf, len, written);
+	flash_fifo_ret_t ret = flash_fifo_write(ff, buf, len, written);
 	if (ret == FLASH_FIFO_RET_OK) {
-		return IFS_RET_OK;
+		// log_fifo(ff, "written");
+		xSemaphoreGive(ff->lock);
+		return FS_RET_OK;
 	}
 
-	return IFS_RET_FAILED;
+	xSemaphoreGive(ff->lock);
+	return FS_RET_FAILED;
 }
 
 
-static ifs_ret_t fs_stats(void *context, size_t *total, size_t *used) {
-	if (u_assert(context != NULL)) {
-		return IFS_RET_FAILED;
+/* No locking required here */
+static fs_ret_t fs_info(Fs *self, struct fs_info *info) {
+	if (u_assert(self != NULL)) {
+		return FS_RET_FAILED;
 	}
-	FlashFifo *self = (FlashFifo *)context;
+	FlashFifo *ff = (FlashFifo *)self->parent;
 
-	if (total != NULL) {
-		*total = self->blocks * (self->block_size - self->page_size);
-	}
-	if (used != NULL) {
-		/** @todo better computation */
-		*used = (self->head - self->tail) * (self->block_size - self->page_size);
-	}
+	info->size_total = ff->blocks * (ff->block_size - ff->page_size);
+	/** @todo better computation */
+	info->size_used = (ff->head - ff->tail) * (ff->block_size - ff->page_size);
 
-	return IFS_RET_OK;
+	return FS_RET_OK;
 }
+
+
+static const struct fs_vmt vmt = {
+	.open = fs_open,
+	.close = fs_close,
+	.read = fs_read,
+	.write = fs_write,
+	.remove = fs_remove,
+	.info = fs_info
+};
 
 
 flash_fifo_ret_t flash_fifo_init(FlashFifo *self, Flash *flash) {
@@ -504,10 +567,14 @@ flash_fifo_ret_t flash_fifo_init(FlashFifo *self, Flash *flash) {
 		goto err;
 	}
 
-	format(self);
+	self->lock = xSemaphoreCreateMutex();
+	if (self->lock == NULL) {
+		goto err;
+	}
+
 	if (find_fifo(self) == FLASH_FIFO_RET_FAILED) {
-		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("FIFO content missing or corrupted"));
-		format(self);
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("FIFO content missing or corrupted, format required"));
+		flash_fifo_format(self);
 		if (find_fifo(self) != FLASH_FIFO_RET_OK) {
 			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("didn't help, no FIFO available"));
 			goto err;
@@ -516,48 +583,8 @@ flash_fifo_ret_t flash_fifo_init(FlashFifo *self, Flash *flash) {
 	log_fifo(self, "init");
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("blocks %u, head %u, last %u, tail %u"), self->blocks, (self->head % self->blocks), (self->last % self->blocks), (self->tail % self->blocks));
 
-	/* Filesystem interface init */
-	ifs_init(&self->fs);
-
-	self->fs.vmt.context = (void *)self;
-	self->fs.vmt.open = fs_open;
-	self->fs.vmt.close = fs_close;
-	self->fs.vmt.remove = fs_remove;
-	self->fs.vmt.read = fs_read;
-	self->fs.vmt.write = fs_write;
-	self->fs.vmt.stats = fs_stats;
-
-	/* Testing */
-	IFsFile f;
-	ifs_open(&self->fs, &f, "fifo", IFS_MODE_WRITEONLY);
-	for (uint32_t i = 0; i < 130; i++) {
-		size_t written = 0;
-		size_t len = 50000;
-		while (len > 0 && ifs_fwrite(&self->fs, f, (uint8_t *)"abcd", len, &written) == IFS_RET_OK) {
-			len -= written;
-		}
-	}
-	ifs_fclose(&self->fs, f);
-	for (uint32_t i = 0; i < 10; i++) {
-	}
-
-	for (uint32_t i = 0; i < 20; i++) {
-		ifs_open(&self->fs, &f, "fifo", IFS_MODE_READONLY);
-		uint8_t buf[16];
-		size_t read = 0;
-		size_t rtotal = 0;
-		while (ifs_fread(&self->fs, f, buf, 16, &read) == IFS_RET_OK) {
-			rtotal += read;
-		}
-		ifs_fclose(&self->fs, f);
-		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("read total %u B"), rtotal);
-		ifs_remove(&self->fs, "fifo");
-	}
-
-	size_t total = 0;
-	size_t used = 0;
-	ifs_stats(&self->fs, &total, &used);
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("stats total = %u KB, used = %u KB"), total / 1024, used / 1024);
+	self->fs.parent = (void *)self;
+	self->fs.vmt = &vmt;
 
 	return FLASH_FIFO_RET_OK;
 err:
@@ -572,6 +599,9 @@ flash_fifo_ret_t flash_fifo_free(FlashFifo *self) {
 	}
 
 	free(self->page_buf);
+	if (self->lock != NULL) {
+		vSemaphoreDelete(self->lock);
+	}
 
 	return FLASH_FIFO_RET_OK;
 }
