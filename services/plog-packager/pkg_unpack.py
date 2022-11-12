@@ -24,21 +24,23 @@ def printProgressBar(iteration, total, prefix = '', suffix = '', decimals = 1, l
     bar = fill * filledLength + '-' * (length - filledLength)
     print(f'\r{prefix} |{bar}| {percent}% {suffix}', end = printEnd, file=sys.stderr)
     # Print New Line on Complete
-    if iteration == total: 
+    if iteration == total:
         print()
 
 
 def format_data(data, dtype):
 	if dtype == pkg_pb2.Msg.Type.INT16:
 		return struct.unpack("h" * (len(data) // 2), data)
+	if dtype == pkg_pb2.Msg.Type.FLOAT:
+		return struct.unpack("f" * (len(data) // 4), data)
 	return []
 
 
 def unpack_msg(topic='', dtype='', data=''):
 	if topic_filter and topic != topic_filter:
 		return
-		
-	print(topic, " ".join([str(i) for i in format_data(data, dtype)]))
+
+	print(topic, len(data), " ".join([str(i) for i in format_data(data, dtype)]))
 
 def parse_pkg(pd):
 	if pd[:3] != b'PKG':
@@ -46,14 +48,19 @@ def parse_pkg(pd):
 	pd = pd[3:]
 	rd = None
 
+	# Crop 0xff from the end
+	pd = pd.rstrip(b"\xff")
+
 	p = pkg_pb2.Package()
 	p.ParseFromString(pd)
 	if p.data:
 		pdata = pkg_pb2.PackageData()
 		pdata.ParseFromString(p.data)
-		# print(pdata)
+		# print(len(p.data))
 		if pdata.heatshrink:
+			print(len(pdata.heatshrink.msg))
 			rd = heatshrink2.decode(pdata.heatshrink.msg, window_sz2=pdata.heatshrink.window_size, lookahead_sz2=pdata.heatshrink.lookahead_size)
+			print(len(rd))
 			if rd:
 				rawdata = pkg_pb2.RawData()
 				rawdata.ParseFromString(rd)
@@ -62,7 +69,11 @@ def parse_pkg(pd):
 
 
 fname = sys.argv[1]
-topic_filter = sys.argv[2]
+topic_filter = None
+if len(sys.argv) > 2:
+	topic_filter = sys.argv[2]
+
+
 with open(fname, "r+b") as f:
 	with mmap.mmap(f.fileno(), 0) as mm:
 		pkg_start = -1
@@ -85,5 +96,7 @@ with open(fname, "r+b") as f:
 				pkg_start = found
 				find_start = found + 3
 			else:
+				pkg = mm[pkg_start:]
+				parse_pkg(pkg)
 				break
 		printProgressBar(1, 1)
