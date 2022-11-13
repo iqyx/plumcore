@@ -156,6 +156,7 @@ menu "Data manipulation/evaluation/processing services"
 
 	config SERVICE_PLOG_PACKAGER
 		bool "Service for packaging PLOG messages into compressed blobs"
+		select LIB_HEATSHRINK
 		default y
 endmenu
 
