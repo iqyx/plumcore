@@ -2,4 +2,8 @@ Import("env")
 Import("conf")
 Import("objs")
 
+objs.append(env.Object(source = [
+	File("app.c"),
+]))
+env.Append(CPPPATH = [Dir(".")])
 
