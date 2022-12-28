@@ -130,6 +130,10 @@ menu "High level device drivers"
 	config SERVICE_GENERIC_POWER
 		bool "A generic power device with various/GPIO backends"
 		default n
+
+	config SERVICE_GENERIC_MUX
+		bool "A generic analog/digital MUX configurable using GPIO"
+		default n
 endmenu
 
 menu "Filesystem and memory management services"

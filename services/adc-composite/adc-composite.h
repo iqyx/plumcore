@@ -10,11 +10,12 @@
 
 #include <main.h>
 
-// #include <interfaces/power.h>
 #include <interfaces/mux.h>
 #include <interfaces/adc.h>
 #include <interfaces/power.h>
 #include <services/adc-mcp3564/mcp3564.h>
+
+#define ADC_COMPOSITE_MAX_MUX 4
 
 typedef enum  {
 	ADC_COMPOSITE_RET_OK = 0,
@@ -29,9 +30,8 @@ struct adc_composite_mux {
 
 struct adc_composite_channel {
 	/* Before sampling of the channel, the following muxes have to be set. The last one is NULL. */
-	const struct adc_composite_mux (*muxes)[];
+	const struct adc_composite_mux muxes[ADC_COMPOSITE_MAX_MUX];
 	const char *name;
-	uint32_t number;
 	bool ac_excitation;
 };
 

@@ -121,7 +121,10 @@ adc_composite_ret_t adc_composite_stop_cont(AdcComposite *self) {
 
 
 static void set_muxes(AdcComposite *self, const struct adc_composite_mux m[]) {
-	/** @todo set channel muxes */
+	while (m->mux != NULL) {
+		m->mux->vmt->select(m->mux, m->channel);
+		m++;
+	}
 }
 
 
@@ -129,7 +132,7 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 	/* Iterate over all channels. */
 	const struct adc_composite_channel *c = *(self->channels);
 	while (c->name != NULL) {
-		set_muxes(self, *(c->muxes));
+		set_muxes(self, c->muxes);
 		/** @todo compute exactly how much time is needed to stabilise the input */
 		/** @todo save the current sample time */
 
@@ -145,7 +148,6 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 		uint8_t status = 0;
 		int32_t v1 = 0;
 		/** @todo measure multiple times until the input is stable */
-		mcp_measure(self->adc, &status, &v1);
 		mcp_measure(self->adc, &status, &v1);
 		mcp_measure(self->adc, &status, &v1);
 		mcp_measure(self->adc, &status, &v1);
@@ -165,7 +167,6 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 			mcp_measure(self->adc, &status, &v2);
 			mcp_measure(self->adc, &status, &v2);
 			mcp_measure(self->adc, &status, &v2);
-			mcp_measure(self->adc, &status, &v2);
 
 			/* Aggregate the two results */
 			v1 = (v1 - v2) / 2;
@@ -175,10 +176,6 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("channel %s = %d"), c->name, v1);
 
 		c++;
-	}
-	/* Set excitation voltage to 0 V to save power at the end of the sequence. */
-	if (self->exc_power != NULL) {
-		// self->exc_power->vmt->set_voltage(self->exc_power, 0.0f);
 	}
 
 	return ADC_COMPOSITE_RET_OK;

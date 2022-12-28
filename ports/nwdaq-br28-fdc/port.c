@@ -55,6 +55,7 @@
 // #include <services/locm3-mux/locm3-mux.h>
 #include <services/stm32-dac/stm32-dac.h>
 #include <services/generic-power/generic-power.h>
+#include <services/generic-mux/generic-mux.h>
 
 /**
  * Port specific global variables and singleton instances.
@@ -71,6 +72,7 @@ AdcComposite adc;
 Stm32Dac dac1_1;
 Stm32Dac dac1_2;
 GenericPower exc_power;
+GenericMux input_mux;
 
 
 /* PLL configuration for a 19.2 MHz XTAL. We are using such a weird frequency to possibly
@@ -180,35 +182,30 @@ int32_t port_early_init(void) {
 const struct adc_composite_channel adc_channels[] = {
 	{
 		.name = "ch1",
-		.muxes = &(const struct adc_composite_mux[]) {
-			{
-				.mux = NULL,
-			},
+		.muxes = {
+			{.mux = &input_mux.mux, .channel = 1},
+			{.mux = NULL},
 		},
-		.number = 1,
-		.ac_excitation = true,
-	}, {
-		.name = "ch2",
-		.muxes = &(const struct adc_composite_mux[]) {
-			{
-				.mux = NULL,
-			},
-		},
-		.number = 2,
 		.ac_excitation = true,
 	}, {
 		.name = "ch3",
-		.muxes = &(const struct adc_composite_mux[]) {
-			{
-				.mux = NULL,
-			},
+		.muxes = {
+			{.mux = &input_mux.mux, .channel = 3},
+			{.mux = NULL},
 		},
-		.number = 3,
 		.ac_excitation = true,
 	}, {
 		.name = NULL,
 	},
 };
+
+
+const struct generic_mux_sel_line input_mux_lines[] = {
+	{.port = MUX_A0_PORT, .pin = MUX_A0_PIN},
+	{.port = MUX_A1_PORT, .pin = MUX_A1_PIN},
+	{.port = MUX_A2_PORT, .pin = MUX_A2_PIN},
+};
+
 
 static void adc_init(void) {
 	rcc_periph_clock_enable(RCC_SPI2);
@@ -221,10 +218,12 @@ static void adc_init(void) {
 
 	mcp3564_init(&mcp, &(spi2_adc.iface));
 	mcp3564_set_stp_enable(&mcp, false);
-	mcp3564_set_gain(&mcp, MCP3564_GAIN_16);
+	mcp3564_set_gain(&mcp, MCP3564_GAIN_64);
 	mcp3564_set_osr(&mcp, MCP3564_OSR_8192);
 	mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
 	mcp3564_update(&mcp);
+
+	generic_mux_init(&input_mux, MUX_EN_PORT, MUX_EN_PIN, &input_mux_lines, 3);
 
 	adc_composite_init(&adc, NULL);
 	adc.adc = &mcp;
@@ -316,7 +315,6 @@ static void port_setup_default_gpio(void) {
 	gpio_mode_setup(MUX_A0_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A0_PIN);
 	gpio_mode_setup(MUX_A1_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A1_PIN);
 	gpio_mode_setup(MUX_A2_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A2_PIN);
-	gpio_set(MUX_A0_PORT, MUX_A0_PIN);
 
 }
 
