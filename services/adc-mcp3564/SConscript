@@ -1,0 +1,6 @@
+Import("env")
+Import("objs")
+Import("conf")
+
+if conf["SERVICE_ADC_MCP3564"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))
