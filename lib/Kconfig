@@ -30,6 +30,14 @@ config LIB_DUKTAPE
 	bool "duktape ECMAScript interpreter library"
 	default n
 
+config LIB_WREN
+	bool "wren.io language compiler & VM"
+	default n
+
+config LIB_GRAVITY
+	bool "Gravity language compiler & VM"
+	default n
+
 config LIB_SPIFFS
 	bool "SPIFFS NOR flash memory filesystem library"
 	default y

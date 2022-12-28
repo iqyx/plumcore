@@ -13,6 +13,10 @@ menu "Low-level platform drivers"
 			bool "STM32 ADC support"
 			default y
 
+		config SERVICE_STM32_DAC
+			bool "STM32 DAC support"
+			default y
+
 		config SERVICE_STM32_TIMER_CAPSENSE
 			bool "Support capacitive sensing using STM32 timer peripheral"
 			default n
@@ -93,6 +97,14 @@ menu "High level device drivers"
 		default y
 		select SERVICE_STM32_ADC
 
+	config SERVICE_ADC_MCP3564
+		bool "MCP3564 ADC"
+		default n
+
+	config SERVICE_ADC_COMPOSITE
+		bool "Composite ADC device"
+		default n
+
 	config SERVICE_INERTIAL_ICM42688P
 		bool "TDK InvenSense ICM-42688-P inertial 6-DOF sensor"
 		default n
@@ -113,6 +125,10 @@ menu "High level device drivers"
 
 	config SERVICE_LORA_RN2483
 		bool "Microchip RN2483 LoRaWAN modem driver"
+		default n
+
+	config SERVICE_GENERIC_POWER
+		bool "A generic power device with various/GPIO backends"
 		default n
 endmenu
 
@@ -210,6 +226,10 @@ menu "User interface services"
 		config SERVICE_CLI_SYSTEM_BOOTLOADER
 			bool "/system/bootloader bootloader configuration submenu"
 			default y
+
+		config SERVICE_CLI_SYSTEM_DEBUG
+			bool "/system/debug configuration submenu"
+			default n
 	endmenu
 
 	config SERVICE_LOGINMGR
@@ -323,6 +343,16 @@ menu "Language interpreters"
 		bool "ECMAScript language interpreter (Duktape)"
 		default n
 		select LIB_DUKTAPE
+
+	config SERVICE_SCRIPT_WREN
+		bool "wren.io language interpreter"
+		default n
+		select LIB_WREN
+
+	config SERVICE_SCRIPT_GRAVITY
+		bool "Gravity language interpreter"
+		default n
+		select LIB_GRAVITY
 
 endmenu
 
