@@ -49,81 +49,28 @@
 #include <services/stm32-i2c/stm32-i2c.h>
 #include <services/stm32-uart/stm32-uart.h>
 
-
-/**
- * GPIO definitions
- */
-#define CAN_SHDN_PORT GPIOA
-#define CAN_SHDN_PIN GPIO10
-#define CAN_RX_PORT GPIOA
-#define CAN_RX_PIN GPIO11
-#define CAN_TX_PORT GPIOA
-#define CAN_TX_PIN GPIO12
-#define CAN_AF GPIO_AF9
-
-#define EXC_EN_PORT GPIOA
-#define EXC_EN_PIN GPIO8
-
-/* ADC_MCLK on TIM2, channel 3 */
-#define ADC_MCLK_PORT GPIOB
-#define ADC_MCLK_PIN GPIO10
-#define ADC_MCLK_AF GPIO_AF1
-
-/* ADC_IRQ on TIM2, channel 4 */
-#define ADC_IRQ_PORT GPIOB
-#define ADC_IRQ_PIN GPIO11
-#define ADC_IRQ_AF GPIO_AF1
-
-#define LED_STAT_PORT GPIOB
-#define LED_STAT_PIN GPIO6
-
-#define LED_ERROR_PORT GPIOC
-#define LED_ERROR_PIN GPIO10
-
-#define ADC_CS_PORT GPIOB
-#define ADC_CS_PIN GPIO12
-
-#define VDDA_SW_EN_PORT GPIOA
-#define VDDA_SW_EN_PIN GPIO1
-
-#define VREF1_DAC_PORT GPIOA
-#define VREF1_DAC_PIN GPIO4
-#define VREF2_DAC_PORT GPIOA
-#define VREF2_DAC_PIN GPIO5
-
-#define VREF_M (0)
-#define VREF_P (4095)
-
-#define VREF1_SEL_PORT GPIOB
-#define VREF1_SEL_PIN GPIO1
-#define VREF2_SEL_PORT GPIOB
-#define VREF2_SEL_PIN GPIO2
-
-#define MUX_EN_PORT GPIOB
-#define MUX_EN_PIN GPIO0
-
-#define MUX_A0_PORT GPIOC
-#define MUX_A0_PIN GPIO4
-#define MUX_A1_PORT GPIOA
-#define MUX_A1_PIN GPIO7
-#define MUX_A2_PORT GPIOA
-#define MUX_A2_PIN GPIO6
-
+#include <services/adc-mcp3564/mcp3564.h>
+#include <services/adc-composite/adc-composite.h>
+#include <services/stm32-watchdog/watchdog.h>
+// #include <services/locm3-mux/locm3-mux.h>
+#include <services/stm32-dac/stm32-dac.h>
+#include <services/generic-power/generic-power.h>
 
 /**
  * Port specific global variables and singleton instances.
  */
 
-/* Old-style HAL */
-uint32_t SystemCoreClock;
-
-/*New-style HAL and services. */
-#if defined(CONFIG_SERVICE_STM32_WATCHDOG)
-	#include "services/stm32-watchdog/watchdog.h"
-	Watchdog watchdog;
-#endif
-SystemClock system_clock;
+Watchdog watchdog;
 Stm32Rtc rtc;
+/* This is somewhat mandatory as the main purpose of the device is to measure something. */
+struct module_spibus_locm3 spi2;
+struct module_spidev_locm3 spi2_adc;
+Mcp3564 mcp;
+// Locm3Mux muxp, muxm;
+AdcComposite adc;
+Stm32Dac dac1_1;
+Stm32Dac dac1_2;
+GenericPower exc_power;
 
 
 /* PLL configuration for a 19.2 MHz XTAL. We are using such a weird frequency to possibly
@@ -150,29 +97,15 @@ static const struct rcc_clock_scale hse_192_to_64 = {
 
 
 int32_t port_early_init(void) {
-	/* Relocate the vector table first if required. */
-	#if defined(CONFIG_RELOCATE_VECTOR_TABLE)
-		SCB_VTOR = CONFIG_VECTOR_TABLE_ADDRESS;
-	#endif
-
 	rcc_osc_on(RCC_HSE);
 	rcc_wait_for_osc_ready(RCC_HSE);
 	rcc_clock_setup_pll(&hse_192_to_64);
 	rcc_set_sysclk_source(RCC_PLL);
 
-	/* Running on 64 MHz PLL now */
-
-	#if defined(CONFIG_STM32_DEBUG_IN_STOP)
-		/* Leave SWD running in STOP1 mode for development. */
-		DBGMCU_CR |= DBGMCU_CR_STOP;
-	#endif
-
-	/* Enable LSE. */
-	// rcc_osc_on(RCC_LSE);
+	rcc_osc_on(RCC_LSE);
+	/** @todo fails intermittently */
 	// rcc_wait_for_osc_ready(RCC_LSE);
 
-
-	/* Initialize all required clocks for GPIO ports. */
 	rcc_periph_clock_enable(RCC_GPIOA);
 	rcc_periph_clock_enable(RCC_GPIOB);
 	rcc_periph_clock_enable(RCC_GPIOC);
@@ -185,34 +118,35 @@ int32_t port_early_init(void) {
 }
 
 
-/*********************************************************************************************************************
- * System serial console initialization
- *********************************************************************************************************************/
+/**********************************************************************************************************************
+ * System serial console initialisation
+ **********************************************************************************************************************/
 
 #if defined(CONFIG_NWDAQ_BR28_FDC_ENABLE_SERIAL_CONSOLE)
-	Stm32Uart console;
+	Stm32Uart uart2;
 	static void console_init(void) {
+		/* Set the corresponding GPIO to alternate mode and enable USART2 clock. */
 		gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
 		gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
 		gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
-
-		/* Main system console is created on the first USART interface. Enable
-		 * USART clocks and interrupts and start the corresponding HAL module. */
 		rcc_periph_clock_enable(RCC_USART2);
 
 		nvic_enable_irq(NVIC_USART2_IRQ);
 		nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
-		stm32_uart_init(&console, USART2);
-		console.uart.vmt->set_bitrate(&console.uart, CONFIG_NWDAQ_BR28_FDC_CONSOLE_SPEED);
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&console.stream, "console");
 
-		/* Console is now initialized, set its stream to be used as u_log output. */
-		u_log_set_stream(&(console.stream));
+		/* Initialise and configure the UART */
+		stm32_uart_init(&uart2, USART2);
+		uart2.uart.vmt->set_bitrate(&uart2.uart, CONFIG_NWDAQ_BR28_FDC_CONSOLE_SPEED);
+
+		/* Advertise the console stream output and set it as default for log output. */
+		Stream *console = &uart2.stream;
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)console, "console");
+		u_log_set_stream(console);
 	}
 
 
 	void usart2_isr(void) {
-		stm32_uart_interrupt_handler(&console);
+		stm32_uart_interrupt_handler(&uart2);
 	}
 #endif
 
@@ -239,6 +173,93 @@ int32_t port_early_init(void) {
 #endif
 
 
+/**********************************************************************************************************************
+ * Main ADC initialisation
+ **********************************************************************************************************************/
+
+const struct adc_composite_channel adc_channels[] = {
+	{
+		.name = "ch1",
+		.muxes = &(const struct adc_composite_mux[]) {
+			{
+				.mux = NULL,
+			},
+		},
+		.number = 1,
+		.ac_excitation = true,
+	}, {
+		.name = "ch2",
+		.muxes = &(const struct adc_composite_mux[]) {
+			{
+				.mux = NULL,
+			},
+		},
+		.number = 2,
+		.ac_excitation = true,
+	}, {
+		.name = "ch3",
+		.muxes = &(const struct adc_composite_mux[]) {
+			{
+				.mux = NULL,
+			},
+		},
+		.number = 3,
+		.ac_excitation = true,
+	}, {
+		.name = NULL,
+	},
+};
+
+static void adc_init(void) {
+	rcc_periph_clock_enable(RCC_SPI2);
+	/* GPIO is already initialised */
+	module_spibus_locm3_init(&spi2, "spi2", SPI2);
+	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
+
+	module_spidev_locm3_init(&spi2_adc, "spi2-adc", &(spi2.iface), ADC_CS_PORT, ADC_CS_PIN);
+	hal_interface_set_name(&(spi2_adc.iface.descriptor), "spi2-adc");
+
+	mcp3564_init(&mcp, &(spi2_adc.iface));
+	mcp3564_set_stp_enable(&mcp, false);
+	mcp3564_set_gain(&mcp, MCP3564_GAIN_16);
+	mcp3564_set_osr(&mcp, MCP3564_OSR_8192);
+	mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
+	mcp3564_update(&mcp);
+
+	adc_composite_init(&adc, NULL);
+	adc.adc = &mcp;
+	adc.channels = &adc_channels;
+	adc_composite_set_exc_power(&adc, &exc_power.power);
+
+	adc_composite_start_cont(&adc);
+}
+
+/**********************************************************************************************************************
+ * Sensor excitation initialisation
+ **********************************************************************************************************************/
+
+static void exc_init(void) {
+	/* Excitation is handled as a generic power device which can be enabled/disabled, it's voltage/polarity set. */
+	generic_power_init(&exc_power);
+	generic_power_set_vref(&exc_power, 3.0f);
+
+	/* Enable STM32 DAC and create a stm32-dac service per channel. It is used to set the excitation power
+	 * device output voltage. */
+	gpio_mode_setup(VREF1_DAC_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, VREF1_DAC_PIN);
+	gpio_mode_setup(VREF2_DAC_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, VREF2_DAC_PIN);
+	rcc_periph_clock_enable(RCC_DAC1);
+	stm32_dac_init(&dac1_1, DAC1, DAC_CHANNEL1);
+	stm32_dac_init(&dac1_2, DAC1, DAC_CHANNEL2);
+	generic_power_set_voltage_dac(&exc_power, &dac1_1.dac_iface, &dac1_2.dac_iface);
+
+	/* Setup excitation enable GPIO output. Not inverted. */
+	gpio_mode_setup(EXC_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, EXC_EN_PIN);
+	gpio_clear(EXC_EN_PORT, EXC_EN_PIN);
+	generic_power_set_enable_gpio(&exc_power, EXC_EN_PORT, EXC_EN_PIN, false);
+
+}
+
+
 void vPortSetupTimerInterrupt(void);
 void vPortSetupTimerInterrupt(void) {
 	/* Initialize systick interrupt for FreeRTOS. */
@@ -260,7 +281,7 @@ static void port_setup_default_gpio(void) {
 	gpio_set_af(CAN_TX_PORT, CAN_AF, CAN_TX_PIN);
 
 	gpio_mode_setup(EXC_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, EXC_EN_PIN);
-	gpio_set(EXC_EN_PORT, EXC_EN_PIN);
+	gpio_clear(EXC_EN_PORT, EXC_EN_PIN);
 
 	gpio_mode_setup(ADC_MCLK_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, ADC_MCLK_PIN);
 	gpio_set_af(ADC_MCLK_PORT, ADC_MCLK_AF, ADC_MCLK_PIN);
@@ -280,14 +301,10 @@ static void port_setup_default_gpio(void) {
 	gpio_clear(VDDA_SW_EN_PORT, VDDA_SW_EN_PIN);
 
 	/* DAC outputs for the reference driver power op-amp */
-	gpio_mode_setup(VREF1_DAC_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, VREF1_DAC_PIN);
-	gpio_mode_setup(VREF2_DAC_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, VREF2_DAC_PIN);
-
-	dac_enable(DAC1, DAC_CHANNEL1);
-	dac_load_data_buffer_single(DAC1, VREF_M, DAC_ALIGN_RIGHT12, DAC_CHANNEL1);
-	dac_enable(DAC1, DAC_CHANNEL2);
-	dac_load_data_buffer_single(DAC1, VREF_P, DAC_ALIGN_RIGHT12, DAC_CHANNEL2);
-
+	gpio_clear(VREF1_DAC_PORT, VREF1_DAC_PIN);
+	gpio_mode_setup(VREF1_DAC_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, VREF1_DAC_PIN);
+	gpio_clear(VREF2_DAC_PORT, VREF2_DAC_PIN);
+	gpio_mode_setup(VREF2_DAC_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, VREF2_DAC_PIN);
 
 	/* VREF inversion MUX */
 	gpio_mode_setup(VREF1_SEL_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, VREF1_SEL_PIN);
@@ -299,17 +316,24 @@ static void port_setup_default_gpio(void) {
 	gpio_mode_setup(MUX_A0_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A0_PIN);
 	gpio_mode_setup(MUX_A1_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A1_PIN);
 	gpio_mode_setup(MUX_A2_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A2_PIN);
+	gpio_set(MUX_A0_PORT, MUX_A0_PIN);
+
 }
 
 
 int32_t port_init(void) {
 	port_setup_default_gpio();
-	console_init();
+	#if defined(CONFIG_NWDAQ_BR28_FDC_ENABLE_SERIAL_CONSOLE)
+		console_init();
+	#endif
 	stm32_rtc_init(&rtc);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CLOCK, &rtc.iface.interface, "rtc");
 	#if defined(CONFIG_NWDAQ_BR28_FDC_ENABLE_LEDS)
 		led_init();
 	#endif
+	exc_init();
+	adc_init();
+
 	return PORT_INIT_OK;
 }
 
@@ -317,7 +341,7 @@ int32_t port_init(void) {
 void tim2_isr(void) {
 	if (TIM_SR(TIM2) & TIM_SR_UIF) {
 		timer_clear_flag(TIM2, TIM_SR_UIF);
-		system_clock_overflow_handler(&system_clock);
+		// system_clock_overflow_handler(&system_clock);
 	}
 }
 
@@ -339,7 +363,4 @@ uint32_t port_task_timer_get_value(void) {
 }
 
 
-void port_enable_swd(bool e) {
-
-}
 

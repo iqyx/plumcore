@@ -7,6 +7,7 @@
 #define configIDLE_SHOULD_YIELD 1
 #define configUSE_TRACE_FACILITY 1
 #define configUSE_MALLOC_FAILED_HOOK 1
+#define configUSE_NEWLIB_REENTRANT 1
 #ifndef configUSE_IDLE_HOOK
 	#define configUSE_IDLE_HOOK 0
 #endif
@@ -24,4 +25,3 @@
 #define xPortPendSVHandler pend_sv_handler
 #define xPortSysTickHandler sys_tick_handler
 #define configASSERT(x) if ((x) == 0) {taskDISABLE_INTERRUPTS(); for (;;);}
-

@@ -4,6 +4,7 @@ Import("objs")
 
 objs.append(env.Object(source = [
 	File("platform.c"),
+	File("heap_useNewlib.c"),
 ]))
 
 env.Replace(FREERTOS_PORT = "GCC/ARM_CM4F")
