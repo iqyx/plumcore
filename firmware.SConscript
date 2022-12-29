@@ -182,6 +182,7 @@ env.Append(BUILDERS={'Stats': stats_builder})
 
 size_stats = env.Stats(
 	source = image_elf,
+	target = 'stats',
 )
 
 env.Alias("stats", size_stats);
