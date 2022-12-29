@@ -1,3 +1,6 @@
+import subprocess
+import os
+
 Import("env")
 Import("conf")
 Import("objs")
@@ -140,3 +143,45 @@ gdb_debug = env.Command(
 )
 
 env.Alias("debug", gdb_debug);
+
+###################################################################
+# Size statistics
+###################################################################
+
+def stats_builder_func(target, source, env):
+	o = subprocess.run([env['NM'], '--size-sort', '-l', str(source[0])], capture_output=True, text=True).stdout
+	files = {}
+	for l in o.split('\n'):
+		cols = l.split()
+		if len(cols) == 3:
+			cols.append('other:0')
+		if len(cols) < 4:
+			continue
+		(code_len, section, name, filename,) = cols
+		(filename, line, ) = filename.split(':')
+		if filename:
+			filename = os.path.relpath(filename)
+
+		if files.get(filename) == None:
+			files[filename] = {}
+		files[filename][name] = code_len;
+
+	sizes = {}
+	for k, v in files.items():
+		total_size = 0;
+		for function_size in v.values():
+			total_size += int(function_size, base=16)
+		sizes[k] = total_size
+
+	for k in sorted(sizes, key=sizes.get):
+		print(k, sizes[k])
+
+
+stats_builder = Builder(action=Action(stats_builder_func, env["STATSCOMSTR"]))
+env.Append(BUILDERS={'Stats': stats_builder})
+
+size_stats = env.Stats(
+	source = image_elf,
+)
+
+env.Alias("stats", size_stats);
