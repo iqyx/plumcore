@@ -11,6 +11,9 @@
 #include <stdint.h>
 #include "version.h"
 #include "interfaces/servicelocator.h"
+#include "services/generic-power/generic-power.h"
+#include "services/generic-mux/generic-mux.h"
+#include "services/adc-mcp3564/mcp3564.h"
 
 
 #define PORT_NAME                  "nwdaq-b28-fdc"
@@ -88,6 +91,9 @@
 
 
 extern IServiceLocator *locator;
+extern GenericPower exc_power;
+extern GenericMux input_mux;
+extern Mcp3564 mcp;
 
 int32_t port_early_init(void);
 #define PORT_EARLY_INIT_OK 0

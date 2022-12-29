@@ -20,6 +20,7 @@
 
 #include <interfaces/mq.h>
 #include <types/ndarray.h>
+#include <arm_math.h>
 
 #include "mq-stats.h"
 
@@ -81,6 +82,14 @@ static void publish_float(MqClient *mqc, const char *topic, float value) {
 }
 
 
+static void publish_int32(MqClient *mqc, const char *topic, int32_t value) {
+	NdArray array;
+	ndarray_init_view(&array, DTYPE_INT32, 1, &value, sizeof(int32_t));
+	struct timespec ts = {0};
+	mqc->vmt->publish(mqc, topic, &array, &ts);
+}
+
+
 static void mq_stats_task(void *p) {
 	MqStats *self = (MqStats *)p;
 
@@ -108,6 +117,16 @@ static void mq_stats_task(void *p) {
 					publish_float(self->mqc, new_topic, f);
 				}
 			}
+			if (self->buf.dtype == DTYPE_INT32) {
+				if (self->e & MQ_STATS_MEAN) {
+					int32_t res = 0;
+					arm_mean_q31((const q31_t *)self->buf.buf, self->buf.asize, (q31_t *)res);
+					strlcpy(new_topic, topic, MQ_STATS_MAX_TOPIC_LEN);
+					strlcat(new_topic, "/mean", MQ_STATS_MAX_TOPIC_LEN);
+					publish_int32(self->mqc, new_topic, *(int32_t *)&res);
+				}
+			}
+
 		}
 	}
 	self->running = false;

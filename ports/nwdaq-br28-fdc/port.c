@@ -68,7 +68,6 @@ struct module_spibus_locm3 spi2;
 struct module_spidev_locm3 spi2_adc;
 Mcp3564 mcp;
 // Locm3Mux muxp, muxm;
-AdcComposite adc;
 Stm32Dac dac1_1;
 Stm32Dac dac1_2;
 GenericPower exc_power;
@@ -179,27 +178,6 @@ int32_t port_early_init(void) {
  * Main ADC initialisation
  **********************************************************************************************************************/
 
-const struct adc_composite_channel adc_channels[] = {
-	{
-		.name = "ch1",
-		.muxes = {
-			{.mux = &input_mux.mux, .channel = 1},
-			{.mux = NULL},
-		},
-		.ac_excitation = true,
-	}, {
-		.name = "ch3",
-		.muxes = {
-			{.mux = &input_mux.mux, .channel = 3},
-			{.mux = NULL},
-		},
-		.ac_excitation = true,
-	}, {
-		.name = NULL,
-	},
-};
-
-
 const struct generic_mux_sel_line input_mux_lines[] = {
 	{.port = MUX_A0_PORT, .pin = MUX_A0_PIN},
 	{.port = MUX_A1_PORT, .pin = MUX_A1_PIN},
@@ -225,12 +203,6 @@ static void adc_init(void) {
 
 	generic_mux_init(&input_mux, MUX_EN_PORT, MUX_EN_PIN, &input_mux_lines, 3);
 
-	adc_composite_init(&adc, NULL);
-	adc.adc = &mcp;
-	adc.channels = &adc_channels;
-	adc_composite_set_exc_power(&adc, &exc_power.power);
-
-	adc_composite_start_cont(&adc);
 }
 
 /**********************************************************************************************************************
@@ -329,6 +301,8 @@ int32_t port_init(void) {
 	#if defined(CONFIG_NWDAQ_BR28_FDC_ENABLE_LEDS)
 		led_init();
 	#endif
+
+	/** @todo move to the application, it needs the system fully initialised */
 	exc_init();
 	adc_init();
 

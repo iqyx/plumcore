@@ -157,10 +157,10 @@ int32_t service_plog_router_sniff(struct treecli_parser *parser, void *exec_cont
 	} else {
 		module_cli_output("log'\r\n", cli);
 	}
-	
+
 	c->vmt->subscribe(c, sniff_sub_filter);
 	c->vmt->set_timeout(c, 100);
-	
+
 	module_cli_output("plog-router sniffer started... (press any key to interrupt)\r\n", cli);
 	NdArray array;
 	ndarray_init_empty(&array, DTYPE_INT8, 4096 + 128);

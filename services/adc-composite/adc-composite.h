@@ -14,6 +14,7 @@
 #include <interfaces/adc.h>
 #include <interfaces/power.h>
 #include <services/adc-mcp3564/mcp3564.h>
+#include <interfaces/mq.h>
 
 #define ADC_COMPOSITE_MAX_MUX 4
 
@@ -77,11 +78,14 @@ typedef struct adc_composite {
 	uint32_t interval_ms;
 	TaskHandle_t cont_task;
 
+	Mq *mq;
+	MqClient *mqc;
+
 
 } AdcComposite;
 
 
-adc_composite_ret_t adc_composite_init(AdcComposite *self, Adc *adc);
+adc_composite_ret_t adc_composite_init(AdcComposite *self, Adc *adc, Mq *mq);
 adc_composite_ret_t adc_composite_start_cont(AdcComposite *self);
 adc_composite_ret_t adc_composite_stop_cont(AdcComposite *self);
 adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self);

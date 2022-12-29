@@ -58,6 +58,7 @@ env.AddSourceIf("LIB_CMSIS_DSP",
 		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_var_f32.c"),
 		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_std_q15.c"),
 		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_var_q15.c"),
+		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_mean_q31.c"),
 		File("other/cmsis/CMSIS/DSP/Source/FastMathFunctions/arm_sqrt_q15.c"),
 	], [
 		Dir("other/cmsis/CMSIS/DSP/Include"),
