@@ -30,12 +30,8 @@
 #include "module_led.h"
 #include "interface_led.h"
 
-#include "interface_spibus.h"
-#include "module_spibus_locm3.h"
 #include "interface_flash.h"
 #include "module_spi_flash.h"
-#include "interface_spidev.h"
-#include "module_spidev_locm3.h"
 
 #include <interfaces/sensor.h>
 #include <interfaces/servicelocator.h>
@@ -56,6 +52,7 @@
 #include <services/stm32-dac/stm32-dac.h>
 #include <services/generic-power/generic-power.h>
 #include <services/generic-mux/generic-mux.h>
+#include <services/stm32-spi/stm32-spi.h>
 
 /**
  * Port specific global variables and singleton instances.
@@ -64,14 +61,14 @@
 Watchdog watchdog;
 Stm32Rtc rtc;
 /* This is somewhat mandatory as the main purpose of the device is to measure something. */
-struct module_spibus_locm3 spi2;
-struct module_spidev_locm3 spi2_adc;
 Mcp3564 mcp;
 // Locm3Mux muxp, muxm;
 Stm32Dac dac1_1;
 Stm32Dac dac1_2;
 GenericPower exc_power;
 GenericMux input_mux;
+Stm32SpiBus spi2;
+Stm32SpiDev spi2_adc;
 
 
 /* PLL configuration for a 19.2 MHz XTAL. We are using such a weird frequency to possibly
@@ -188,13 +185,14 @@ const struct generic_mux_sel_line input_mux_lines[] = {
 static void adc_init(void) {
 	rcc_periph_clock_enable(RCC_SPI2);
 	/* GPIO is already initialised */
-	module_spibus_locm3_init(&spi2, "spi2", SPI2);
-	hal_interface_set_name(&(spi2.iface.descriptor), "spi2");
 
-	module_spidev_locm3_init(&spi2_adc, "spi2-adc", &(spi2.iface), ADC_CS_PORT, ADC_CS_PIN);
-	hal_interface_set_name(&(spi2_adc.iface.descriptor), "spi2-adc");
+	stm32_spibus_init(&spi2, SPI2);
+	spi2.bus.vmt->set_sck_freq(&spi2.bus, 10e6);
+	spi2.bus.vmt->set_mode(&spi2.bus, 0, 0);
 
-	mcp3564_init(&mcp, &(spi2_adc.iface));
+	stm32_spidev_init(&spi2_adc, &spi2.bus, ADC_CS_PORT, ADC_CS_PIN);
+
+	mcp3564_init(&mcp, &(spi2_adc.dev));
 	mcp3564_set_stp_enable(&mcp, false);
 	mcp3564_set_gain(&mcp, MCP3564_GAIN_64);
 	mcp3564_set_osr(&mcp, MCP3564_OSR_8192);

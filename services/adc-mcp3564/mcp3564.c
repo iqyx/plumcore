@@ -18,7 +18,7 @@
 #define MODULE_NAME "mcp3564"
 
 
-mcp3564_ret_t mcp3564_init(Mcp3564 *self, struct interface_spidev *spidev) {
+mcp3564_ret_t mcp3564_init(Mcp3564 *self, SpiDev *spidev) {
 	memset(self, 0, sizeof(Mcp3564));
 
 	self->spidev = spidev;
@@ -46,24 +46,24 @@ mcp3564_ret_t mcp3564_init(Mcp3564 *self, struct interface_spidev *spidev) {
 
 
 mcp3564_ret_t mcp3564_send_cmd(Mcp3564 *self, enum mcp3564_command cmd, uint8_t *status, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen) {
-	interface_spidev_select(self->spidev);
+	self->spidev->vmt->select(self->spidev);
 
 	/* Send the command and read the status byte. 0x40 is the default device address shifted 6 bits left. */
 	uint8_t txbuf[1] = {cmd | 0x40};
 	uint8_t rxbuf[1] = {0};
-	interface_spidev_exchange(self->spidev, txbuf, rxbuf, 1);
+	self->spidev->vmt->exchange(self->spidev, txbuf, rxbuf, 1);
 
 	if (status != NULL) {
 		*status = rxbuf[0];
 	}
 	if (txdata != NULL) {
-		interface_spidev_send(self->spidev, txdata, txlen);
+		self->spidev->vmt->send(self->spidev, txdata, txlen);
 	}
 	if (rxdata != NULL) {
-		interface_spidev_receive(self->spidev, rxdata, rxlen);
+		self->spidev->vmt->receive(self->spidev, rxdata, rxlen);
 	}
 
-	interface_spidev_deselect(self->spidev);
+	self->spidev->vmt->deselect(self->spidev);
 
 	return MCP3564_RET_OK;
 }

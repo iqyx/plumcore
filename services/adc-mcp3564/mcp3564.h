@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "interface_spidev.h"
+#include <interfaces/spi.h>
 
 typedef enum  {
 	MCP3564_RET_OK = 0,
@@ -170,7 +170,7 @@ enum mcp3564_irq_inactive {
 #define MCP3564_REG_SIZES (uint32_t []){4, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3}
 
 typedef struct {
-	struct interface_spidev *spidev;
+	SpiDev *spidev;
 
 	uint32_t regs[MCP3564_REG_MAX + 1];
 } Mcp3564;
@@ -178,7 +178,7 @@ typedef struct {
 
 
 
-mcp3564_ret_t mcp3564_init(Mcp3564 *self, struct interface_spidev *spidev);
+mcp3564_ret_t mcp3564_init(Mcp3564 *self, SpiDev *spidev);
 mcp3564_ret_t mcp3564_send_cmd(Mcp3564 *self, enum mcp3564_command cmd, uint8_t *status, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen);
 mcp3564_ret_t mcp3564_read_reg(Mcp3564 *self, enum mcp3564_reg reg, size_t bytes, uint32_t *value, uint8_t *status);
 mcp3564_ret_t mcp3564_write_reg(Mcp3564 *self, enum mcp3564_reg reg, size_t bytes, uint32_t value, uint8_t *status);
