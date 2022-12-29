@@ -53,6 +53,9 @@
 #include <services/generic-power/generic-power.h>
 #include <services/generic-mux/generic-mux.h>
 #include <services/stm32-spi/stm32-spi.h>
+#include <services/spi-flash/spi-flash.h>
+#include <services/flash-vol-static/flash-vol-static.h>
+#include <services/fs-spiffs/fs-spiffs.h>
 
 /**
  * Port specific global variables and singleton instances.
@@ -228,6 +231,55 @@ static void exc_init(void) {
 
 }
 
+/**********************************************************************************************************************
+ * Flash memory initialisation
+ **********************************************************************************************************************/
+
+Stm32SpiBus spi3;
+Stm32SpiDev spi3_flash;
+SpiFlash nor_flash;
+
+FlashVolStatic lvs;
+Flash *lv_boot;
+Flash *lv_system;
+Flash *lv_test;
+
+FsSpiffs spiffs_system;
+
+static void nor_flash_init(void) {
+	/* SPI for the NOR flash is not initialised in the default GPIO setup. Do full setup here. */
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3 | GPIO4 | GPIO5);
+	gpio_set_af(GPIOB, GPIO_AF6, GPIO3 | GPIO4 | GPIO5);
+	/* FLASH_CS pin */
+	gpio_set(FLASH_CS_PORT, FLASH_CS_PIN);
+	gpio_mode_setup(FLASH_CS_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, FLASH_CS_PIN);
+
+	rcc_periph_clock_enable(RCC_SPI3);
+	stm32_spibus_init(&spi3, SPI3);
+	spi3.bus.vmt->set_sck_freq(&spi3.bus, 10e6);
+	spi3.bus.vmt->set_mode(&spi3.bus, 0, 0);
+	stm32_spidev_init(&spi3_flash, &spi3.bus, FLASH_CS_PORT, FLASH_CS_PIN);
+
+	spi_flash_init(&nor_flash, &spi3_flash.dev);
+
+	flash_vol_static_init(&lvs, &nor_flash.flash);
+	flash_vol_static_create(&lvs, "boot", 0x0, 0x80000, &lv_boot);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_boot, "boot");
+	flash_vol_static_create(&lvs, "system", 0x80000, 0x80000, &lv_system);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_system, "system");
+	flash_vol_static_create(&lvs, "test", 0x100000, 0x100000, &lv_test);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_test, "test");
+
+	fs_spiffs_init(&spiffs_system);
+	if (fs_spiffs_mount(&spiffs_system, lv_system) == FS_SPIFFS_RET_OK) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, (Interface *)&spiffs_system.iface, "system");
+	} else {
+		/* We cannot continue if mounting fails. There is no important data on
+		 * the system volume, let's format it to make the thing working again. */
+		fs_spiffs_format(&spiffs_system, lv_system);
+	}
+}
+
 
 void vPortSetupTimerInterrupt(void);
 void vPortSetupTimerInterrupt(void) {
@@ -300,9 +352,9 @@ int32_t port_init(void) {
 		led_init();
 	#endif
 
-	/** @todo move to the application, it needs the system fully initialised */
 	exc_init();
 	adc_init();
+	nor_flash_init();
 
 	return PORT_INIT_OK;
 }

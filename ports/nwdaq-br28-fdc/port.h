@@ -87,7 +87,8 @@
 #define MUX_A2_PORT GPIOA
 #define MUX_A2_PIN GPIO6
 
-
+#define FLASH_CS_PORT GPIOC
+#define FLASH_CS_PIN GPIO11
 
 
 extern IServiceLocator *locator;
