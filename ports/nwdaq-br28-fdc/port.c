@@ -6,6 +6,24 @@
  * All rights reserved.
  */
 
+/**
+ * @todo
+ *
+ * - tidy up port.c and document stuff
+ * - remove filesystem and fifo service init, they should not be here. Move to the application code instead, they
+ *   are not hardware defined and can be easily replaced depending on the application.
+ * - refactor LED service and initialise LEDs properly
+ * - HW update request: measure the input voltage and current consumption, which should help in deciding when to
+ *   schedule measurements
+ * - a proper file transfer service without the use of CLI. Define an API with reliable transport over a Stream
+ *   interface, define basic functions for file manipulation, filesystem manipulation, file transfer.
+ *   Run the api as a CLI command, hence: allow arbitrary text (user presses random keys when the API command
+ *   is started), user wants to end the API command (accept some common break sequence, ctrl+c maybe?).
+ *   Regain command framing when it is lost (magic numbers?)
+ *
+ */
+
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -48,7 +66,6 @@
 #include <services/adc-mcp3564/mcp3564.h>
 #include <services/adc-composite/adc-composite.h>
 #include <services/stm32-watchdog/watchdog.h>
-// #include <services/locm3-mux/locm3-mux.h>
 #include <services/stm32-dac/stm32-dac.h>
 #include <services/generic-power/generic-power.h>
 #include <services/generic-mux/generic-mux.h>
@@ -56,6 +73,7 @@
 #include <services/spi-flash/spi-flash.h>
 #include <services/flash-vol-static/flash-vol-static.h>
 #include <services/fs-spiffs/fs-spiffs.h>
+#include <services/flash-fifo/flash-fifo.h>
 
 /**
  * Port specific global variables and singleton instances.
@@ -65,7 +83,6 @@ Watchdog watchdog;
 Stm32Rtc rtc;
 /* This is somewhat mandatory as the main purpose of the device is to measure something. */
 Mcp3564 mcp;
-// Locm3Mux muxp, muxm;
 Stm32Dac dac1_1;
 Stm32Dac dac1_2;
 GenericPower exc_power;
@@ -181,7 +198,6 @@ int32_t port_early_init(void) {
 const struct generic_mux_sel_line input_mux_lines[] = {
 	{.port = MUX_A0_PORT, .pin = MUX_A0_PIN},
 	{.port = MUX_A1_PORT, .pin = MUX_A1_PIN},
-	{.port = MUX_A2_PORT, .pin = MUX_A2_PIN},
 };
 
 
@@ -190,19 +206,19 @@ static void adc_init(void) {
 	/* GPIO is already initialised */
 
 	stm32_spibus_init(&spi2, SPI2);
-	spi2.bus.vmt->set_sck_freq(&spi2.bus, 10e6);
+	spi2.bus.vmt->set_sck_freq(&spi2.bus, 2e6);
 	spi2.bus.vmt->set_mode(&spi2.bus, 0, 0);
 
 	stm32_spidev_init(&spi2_adc, &spi2.bus, ADC_CS_PORT, ADC_CS_PIN);
 
 	mcp3564_init(&mcp, &(spi2_adc.dev));
 	mcp3564_set_stp_enable(&mcp, false);
-	mcp3564_set_gain(&mcp, MCP3564_GAIN_64);
-	mcp3564_set_osr(&mcp, MCP3564_OSR_8192);
+	mcp3564_set_gain(&mcp, MCP3564_GAIN_4);
+	mcp3564_set_osr(&mcp, MCP3564_OSR_81920);
 	mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
 	mcp3564_update(&mcp);
 
-	generic_mux_init(&input_mux, MUX_EN_PORT, MUX_EN_PIN, &input_mux_lines, 3);
+	generic_mux_init(&input_mux, MUX_EN_PORT, MUX_EN_PIN, &input_mux_lines, 2);
 
 }
 
@@ -213,7 +229,7 @@ static void adc_init(void) {
 static void exc_init(void) {
 	/* Excitation is handled as a generic power device which can be enabled/disabled, it's voltage/polarity set. */
 	generic_power_init(&exc_power);
-	generic_power_set_vref(&exc_power, 3.0f);
+	generic_power_set_vref(&exc_power, 3.3f);
 
 	/* Enable STM32 DAC and create a stm32-dac service per channel. It is used to set the excitation power
 	 * device output voltage. */
@@ -245,6 +261,7 @@ Flash *lv_system;
 Flash *lv_test;
 
 FsSpiffs spiffs_system;
+FlashFifo fifo;
 
 static void nor_flash_init(void) {
 	/* SPI for the NOR flash is not initialised in the default GPIO setup. Do full setup here. */
@@ -278,6 +295,12 @@ static void nor_flash_init(void) {
 		 * the system volume, let's format it to make the thing working again. */
 		fs_spiffs_format(&spiffs_system, lv_system);
 	}
+
+	if (flash_fifo_init(&fifo, lv_test) == FLASH_FIFO_RET_OK) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, (Interface *)&fifo.fs, "fifo");
+	} else {
+		/** @TODO format the FIFO if init fails */
+	}
 }
 
 
@@ -303,6 +326,9 @@ static void port_setup_default_gpio(void) {
 
 	gpio_mode_setup(EXC_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, EXC_EN_PIN);
 	gpio_clear(EXC_EN_PORT, EXC_EN_PIN);
+	gpio_mode_setup(EXC_DIS_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, EXC_DIS_PIN);
+	gpio_set_output_options(EXC_DIS_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, EXC_DIS_PIN);
+	gpio_set(EXC_DIS_PORT, EXC_DIS_PIN);
 
 	gpio_mode_setup(ADC_MCLK_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, ADC_MCLK_PIN);
 	gpio_set_af(ADC_MCLK_PORT, ADC_MCLK_AF, ADC_MCLK_PIN);
@@ -316,10 +342,6 @@ static void port_setup_default_gpio(void) {
 	/* ADC CS port */
 	gpio_set(ADC_CS_PORT, ADC_CS_PIN);
 	gpio_mode_setup(ADC_CS_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, ADC_CS_PIN);
-
-	/* Enable VDDA_SW for op-amps and MUXes */
-	gpio_mode_setup(VDDA_SW_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, VDDA_SW_EN_PIN);
-	gpio_clear(VDDA_SW_EN_PORT, VDDA_SW_EN_PIN);
 
 	/* DAC outputs for the reference driver power op-amp */
 	gpio_clear(VREF1_DAC_PORT, VREF1_DAC_PIN);
@@ -336,7 +358,6 @@ static void port_setup_default_gpio(void) {
 	gpio_set(MUX_EN_PORT, MUX_EN_PIN);
 	gpio_mode_setup(MUX_A0_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A0_PIN);
 	gpio_mode_setup(MUX_A1_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A1_PIN);
-	gpio_mode_setup(MUX_A2_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A2_PIN);
 
 }
 

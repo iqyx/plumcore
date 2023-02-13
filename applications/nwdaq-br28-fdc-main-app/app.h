@@ -2,9 +2,11 @@
 
 #include "config.h"
 #include <interfaces/mq.h>
+#include <interfaces/fs.h>
 #include <services/adc-composite/adc-composite.h>
 #include <services/mq-batch/mq-batch.h>
 #include <services/mq-stats/mq-stats.h>
+#include <services/plog-packager/plog_packager.h>
 
 
 typedef enum {
@@ -14,9 +16,11 @@ typedef enum {
 
 typedef struct {
 	Mq *mq;
+	Fs *fifo_fs;
 	AdcComposite adc;
 	MqBatch mq_batch_1;
 	MqStats mq_stats_1;
+	PlogPackager raw_data_packager;
 } App;
 
 

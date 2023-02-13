@@ -44,6 +44,16 @@ static float mean(int16_t data[], size_t len) {
 	return sum / (float)len;
 }
 
+
+static float mean32(int32_t data[], size_t len) {
+	float sum = 0;
+	for (size_t i = 0; i < len; i++) {
+		sum += (float)data[i];
+	}
+	return sum / (float)len;
+}
+
+
 static float var(int16_t data[], size_t len) {
 	float m = mean(data, len);
 	float sumsq = 0;
@@ -54,8 +64,23 @@ static float var(int16_t data[], size_t len) {
 }
 
 
+static float var32(int32_t data[], size_t len) {
+	float m = mean32(data, len);
+	float sumsq = 0;
+	for (size_t i = 0; i < len; i++) {
+		sumsq += (m - (float)data[i]) * (m - (float)data[i]);
+	}
+	return sumsq / (float)len;
+}
+
+
 static float nrms(int16_t data[], size_t len) {
 	return sqrtf(var(data, len));
+}
+
+
+static float nrms32(int32_t data[], size_t len) {
+	return sqrtf(var32(data, len));
 }
 
 
@@ -119,11 +144,16 @@ static void mq_stats_task(void *p) {
 			}
 			if (self->buf.dtype == DTYPE_INT32) {
 				if (self->e & MQ_STATS_MEAN) {
-					int32_t res = 0;
-					arm_mean_q31((const q31_t *)self->buf.buf, self->buf.asize, (q31_t *)res);
+					float f = mean32((int32_t *)self->buf.buf, self->buf.asize);
 					strlcpy(new_topic, topic, MQ_STATS_MAX_TOPIC_LEN);
 					strlcat(new_topic, "/mean", MQ_STATS_MAX_TOPIC_LEN);
-					publish_int32(self->mqc, new_topic, *(int32_t *)&res);
+					publish_int32(self->mqc, new_topic, (int32_t)f);
+				}
+				if (self->e & MQ_STATS_NRMS) {
+					float f = nrms32((int32_t *)self->buf.buf, self->buf.asize);
+					strlcpy(new_topic, topic, MQ_STATS_MAX_TOPIC_LEN);
+					strlcat(new_topic, "/nrms", MQ_STATS_MAX_TOPIC_LEN);
+					publish_int32(self->mqc, new_topic, (int32_t)f);
 				}
 			}
 

@@ -166,7 +166,7 @@ enum mcp3564_irq_inactive {
 
 
 
-#define MCP3564_REG_DEFAULTS (uint32_t []){0, 0x00, 0x0c, 0x8b, 0x00, 0x73, 0x01, 0, 0, 0, 0x800000}
+#define MCP3564_REG_DEFAULTS (uint32_t []){0, 0x00, 0x0c, 0x8b, 0x00, 0x77, 0x01, 0, 0, 0, 0x800000}
 #define MCP3564_REG_SIZES (uint32_t []){4, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3}
 
 typedef struct {

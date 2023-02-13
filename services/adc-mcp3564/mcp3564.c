@@ -110,7 +110,6 @@ mcp3564_ret_t mcp3564_write_reg(Mcp3564 *self, enum mcp3564_reg reg, size_t byte
 
 mcp3564_ret_t mcp3564_update(Mcp3564 *self) {
 	for (uint32_t i = 0; i < MCP3564_REG_MAX; i++) {
-		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("reg 0x%02x = 0x%x"), i, self->regs[i]);
 		mcp3564_write_reg(self, i, MCP3564_REG_SIZES[i], self->regs[i], NULL);
 	}
 	return MCP3564_RET_OK;

@@ -12,7 +12,8 @@ const struct adc_composite_channel adc_channels[] = {
 		},
 		.ac_excitation = true,
 	}, {
-		.name = "channel/3",
+		.name = NULL,
+		// .name = "channel/3",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 3},
 			{.mux = NULL},
@@ -33,6 +34,12 @@ app_ret_t app_init(App *self) {
 		return APP_RET_FAILED;
 	}
 
+	self->fifo_fs = NULL;
+	if (iservicelocator_query_name_type(locator, "fifo", ISERVICELOCATOR_TYPE_FS, (Interface **)&self->fifo_fs) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("app: no FIFO filesystem found"));
+		return APP_RET_FAILED;
+	}
+
 	adc_composite_init(&self->adc, NULL, self->mq);
 	self->adc.adc = &mcp;
 	self->adc.channels = &adc_channels;
@@ -46,8 +53,15 @@ app_ret_t app_init(App *self) {
 
 	mq_stats_init(&self->mq_stats_1, self->mq);
 	mq_stats_start(&self->mq_stats_1, "channel/batch/1", DTYPE_INT32, 32);
-	mq_stats_enable(&self->mq_stats_1, MQ_STATS_MEAN);
+	mq_stats_enable(&self->mq_stats_1, MQ_STATS_MEAN | MQ_STATS_NRMS);
 
+	plog_packager_init(&self->raw_data_packager, self->mq);
+	plog_packager_add_filter(&self->raw_data_packager, "channel/batch/#");
+	plog_packager_add_dst_mq(&self->raw_data_packager, "pkg/channel");
+	plog_packager_add_dst_file(&self->raw_data_packager, self->fifo_fs, "fifo");
+	plog_packager_set_nonce(&self->raw_data_packager, "nonce", 5);
+	plog_packager_set_key(&self->raw_data_packager, "key", 3);
+	plog_packager_start(&self->raw_data_packager, 2048, 3072);
 
 	return APP_RET_OK;
 }

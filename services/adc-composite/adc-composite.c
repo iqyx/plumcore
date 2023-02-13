@@ -97,7 +97,7 @@ adc_composite_ret_t adc_composite_init(AdcComposite *self, Adc *adc, Mq *mq) {
 	self->mq = mq;
 
 	self->interval_ms = 500;
-	self->exc_voltage_v = 3.0f;
+	self->exc_voltage_v = 3.3f;
 
 	return ADC_COMPOSITE_RET_OK;
 }
@@ -109,7 +109,7 @@ adc_composite_ret_t adc_composite_start_cont(AdcComposite *self) {
 	}
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("starting continuous sampling"));
 
-	xTaskCreate(adc_composite_cont_task, "ws-source", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->cont_task));
+	xTaskCreate(adc_composite_cont_task, "adc-comp", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->cont_task));
 	if (self->cont_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		return ADC_COMPOSITE_RET_FAILED;
@@ -151,13 +151,13 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 		if (self->exc_power != NULL) {
 			self->exc_power->vmt->set_voltage(self->exc_power, self->exc_voltage_v);
 			/** @todo remove the shortcut */
-			gpio_clear(VREF1_SEL_PORT, VREF1_SEL_PIN);
-			gpio_clear(VREF2_SEL_PORT, VREF2_SEL_PIN);
+			gpio_set(VREF1_SEL_PORT, VREF1_SEL_PIN);
+			gpio_set(VREF2_SEL_PORT, VREF2_SEL_PIN);
 		}
 
 		/* Measure the channel using positive excitation and positive Vref mux. */
 		uint8_t status = 0;
-		int32_t v1 = 0;
+		volatile int32_t v1 = 0;
 		/** @todo measure multiple times until the input is stable */
 		mcp_measure(self->adc, &status, &v1);
 		mcp_measure(self->adc, &status, &v1);
@@ -169,8 +169,8 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 			if (self->exc_power != NULL) {
 				self->exc_power->vmt->set_voltage(self->exc_power, -self->exc_voltage_v);
 				/** @todo remove the shortcut */
-				gpio_set(VREF1_SEL_PORT, VREF1_SEL_PIN);
-				gpio_set(VREF2_SEL_PORT, VREF2_SEL_PIN);
+				gpio_clear(VREF1_SEL_PORT, VREF1_SEL_PIN);
+				gpio_clear(VREF2_SEL_PORT, VREF2_SEL_PIN);
 			}
 
 			int32_t v2 = 0;
