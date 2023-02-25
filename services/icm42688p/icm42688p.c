@@ -6,7 +6,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#include "interface_spidev.h"
+#include <interfaces/spi.h>
 #include "icm42688p.h"
 #include "u_log.h"
 #include "u_assert.h"
@@ -16,31 +16,31 @@
 
 
 
-static uint8_t read8(struct interface_spidev *spidev, icm42688p_reg_t addr) {
+static uint8_t read8(SpiDev *self, icm42688p_reg_t addr) {
 	uint8_t txbuf = addr | 0x80;
-	interface_spidev_select(spidev);
-	interface_spidev_send(spidev, &txbuf, 1);
+	self->vmt->select(self);
+	self->vmt->send(self, &txbuf, 1);
 	uint8_t rxbuf;
-	interface_spidev_receive(spidev, &rxbuf, 1);
-	interface_spidev_deselect(spidev);
+	self->vmt->receive(self, &rxbuf, 1);
+	self->vmt->deselect(self);
 	return rxbuf;
 }
 
 
-static void readn(struct interface_spidev *spidev, uint8_t *data, icm42688p_reg_t addr, size_t len) {
+static void readn(SpiDev *self, uint8_t *data, icm42688p_reg_t addr, size_t len) {
 	uint8_t txbuf = addr | 0x80;
-	interface_spidev_select(spidev);
-	interface_spidev_send(spidev, &txbuf, 1);
-	interface_spidev_receive(spidev, data, len);
-	interface_spidev_deselect(spidev);
+	self->vmt->select(self);
+	self->vmt->send(self, &txbuf, 1);
+	self->vmt->receive(self, data, len);
+	self->vmt->deselect(self);
 }
 
 
-static void write8(struct interface_spidev *spidev, icm42688p_reg_t addr, uint8_t value) {
+static void write8(SpiDev *self, icm42688p_reg_t addr, uint8_t value) {
 	uint8_t txbuf[2] = {addr & ~0x80, value};
-	interface_spidev_select(spidev);
-	interface_spidev_send(spidev, txbuf, 2);
-	interface_spidev_deselect(spidev);
+	self->vmt->select(self);
+	self->vmt->send(self, txbuf, 2);
+	self->vmt->deselect(self);
 }
 
 
@@ -48,11 +48,15 @@ icm42688p_ret_t icm42688p_detect(Icm42688p *self) {
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 0);
 	/* Try to reset the device by writing a (hopefully) non-destructive single bit. */
 	write8(self->spidev, ICM42688P_REG_DEVICE_CONFIG, 0x01);
-	vTaskDelay(10);
+	vTaskDelay(100);
 
 	self->who_am_i = read8(self->spidev, ICM42688P_REG_WHO_AM_I);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("register WHO_AM_I = %02x"), self->who_am_i);
 	if (self->who_am_i == 0x47) {
-		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("detect ok, who_am_1 = %02x"), self->who_am_i);
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("ICM-42688-P detected"));
+		return ICM42688P_RET_OK;
+	} else if (self->who_am_i == 0x6f) {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("IIM-42652 detected"));
 		return ICM42688P_RET_OK;
 	}
 	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("detection failed"));
@@ -69,14 +73,16 @@ uint16_t icm42688p_fifo_count(Icm42688p *self) {
 
 waveform_source_ret_t icm42688p_start(Icm42688p *self) {
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 0);
-	write8(self->spidev, ICM42688P_REG_PWR_MGMT0, 0x03);
+	/* Enable accelerometer low noise mode. */
+	write8(self->spidev, ICM42688P_REG_PWR_MGMT0, 0x23);
 	vTaskDelay(50);
 }
 
 
 waveform_source_ret_t icm42688p_stop(Icm42688p *self) {
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 0);
-	write8(self->spidev, ICM42688P_REG_PWR_MGMT0, 0x00);
+	/* Disable everything including the temperature sensor. */
+	write8(self->spidev, ICM42688P_REG_PWR_MGMT0, 0x20);
 	vTaskDelay(50);
 }
 
@@ -186,7 +192,7 @@ waveform_source_ret_t icm42688p_get_sample_rate(void *parent, float *sample_rate
 icm42688p_ret_t icm42688p_init_defaults(Icm42688p *self) {
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 0);
 	write8(self->spidev, ICM42688P_REG_INT_CONFIG, 0x00);
-	
+
 	/* FIFO size reported in records, data in little endian. */
 	write8(self->spidev, ICM42688P_REG_INTF_CONFIG0, 0x40);
 
@@ -210,17 +216,17 @@ icm42688p_ret_t icm42688p_init_defaults(Icm42688p *self) {
 	write8(self->spidev, ICM42688P_REG_INTF_CONFIG5, 0x02);
 
 	write8(self->spidev, ICM42688P_REG_ACCEL_UI_FILT_ORD, 0x15);
-	
+
 	return ICM42688P_RET_OK;
 }
 
 
-icm42688p_ret_t icm42688p_init(Icm42688p *self, struct interface_spidev *spidev) {
+icm42688p_ret_t icm42688p_init(Icm42688p *self, SpiDev *spidev) {
 	memset(self, 0, sizeof(Icm42688p));
 	self->spidev = spidev;
 
-	if (icm42688p_detect(self) != ICM42688P_RET_OK) {
-		return ICM42688P_RET_FAILED;
+	while (icm42688p_detect(self) != ICM42688P_RET_OK) {
+		// return ICM42688P_RET_FAILED;
 	}
 
 	waveform_source_init(&self->source);
@@ -233,7 +239,7 @@ icm42688p_ret_t icm42688p_init(Icm42688p *self, struct interface_spidev *spidev)
 	self->source.set_sample_rate = (typeof(self->source.set_sample_rate))icm42688p_set_sample_rate;
 
 	icm42688p_init_defaults(self);
-	
+
 	return ICM42688P_RET_OK;
 }
 
