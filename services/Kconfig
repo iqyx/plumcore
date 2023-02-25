@@ -138,6 +138,10 @@ menu "High level device drivers"
 	config SERVICE_GENERIC_MUX
 		bool "A generic analog/digital MUX configurable using GPIO"
 		default n
+
+	config SERVICE_SI7006
+		bool "Si7006 temperature and humidity sensor driver"
+		default n
 endmenu
 
 menu "Filesystem and memory management services"
