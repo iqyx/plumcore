@@ -7,9 +7,9 @@ objs.append(env.Object(source = [
 ]))
 
 # target and architecture specific configuration
-env.Replace(LDSCRIPT = File("plumpot_cellular.ld"))
+env.Replace(LDSCRIPT = File("incl-g104-mf.ld"))
 env.Replace(LIBOCM3 = "opencm3_stm32l4")
-env.Replace(OOCD_INTERFACE = "stlink-v2-1")
+env.Replace(OOCD_INTERFACE = "stlink")
 env.Replace(OOCD_TARGET = "stm32l4x")
 
 env.Append(CFLAGS = [

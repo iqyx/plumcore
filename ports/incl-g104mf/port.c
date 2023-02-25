@@ -59,6 +59,8 @@
 #include <services/gps-ublox/gps-ublox.h>
 #include <services/lora-rn2483/lora-rn2483.h>
 #include <services/stm32-uart/stm32-uart.h>
+#include <services/stm32-spi/stm32-spi.h>
+#include <services/si7006/si7006.h>
 
 #define MODULE_NAME CONFIG_PORT_NAME
 
@@ -82,7 +84,6 @@ uint32_t SystemCoreClock;
 SystemClock system_clock;
 Stm32Rtc rtc;
 Icm42688p accel2;
-Stm32I2c i2c1;
 Bq35100 bq35100;
 GpsUblox gps;
 
@@ -309,7 +310,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		/* Allow waking up in stop mode. */
 		USART_CR1(USART1) |= USART_CR1_UESM;
 		USART_CR3(USART1) |= USART_CR3_WUS_RXNE;
-		RCC_CCIPR |= RCC_CCIPR_USART1SEL_HSI16;
+		RCC_CCIPR |= (RCC_CCIPR_USARTxSEL_HSI16 << RCC_CCIPR_USART1SEL_SHIFT);
 
 		nvic_enable_irq(NVIC_USART1_IRQ);
 		nvic_set_priority(NVIC_USART1_IRQ, 6 * 16);
@@ -336,22 +337,28 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 	Stm32Uart lora_uart;
 	LoraModem rn2483_lora;
 
-	void port_lora_power(bool en) {
-		if (en) {
+	static power_ret_t port_lora_power_enable(Power *self, bool enable) {
+		(void)self;
+		if (enable) {
 			gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
 			gpio_set(GPIOA, GPIO0);
-			vTaskDelay(100);
 		} else {
 			gpio_clear(GPIOA, GPIO0);
 			gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO3);
 		}
+		return POWER_RET_OK;
 	}
 
+	const struct power_vmt port_lora_power_vmt = {
+		.enable = port_lora_power_enable
+	};
+
+	Power rn2483_power;
 
 	static void rn2483_lora_init(void) {
 		/* LORA_PWR_EN */
 		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO0);
-		port_lora_power(false);
+		rn2483_power.vmt = &port_lora_power_vmt;
 
 		gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
 		gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
@@ -368,8 +375,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		stm32_uart_init(&lora_uart, USART2);
 		lora_uart.uart.vmt->set_bitrate(&lora_uart.uart, 57600);
 
-		port_lora_power(true);
-		lora_modem_init(&rn2483_lora, &lora_uart.stream);
+		lora_modem_init(&rn2483_lora, &lora_uart.stream, &rn2483_power);
 		lora_modem_set_ar(&rn2483_lora, true);
 
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LORA, (Interface *)&rn2483_lora.lora, "rn2483");
@@ -395,7 +401,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		module_led_init(&led_status, "led_status");
 		module_led_set_port(&led_status, GPIOA, GPIO14);
 		// interface_led_loop(&led_status.iface, 0x111f);
-		interface_led_loop(&led_status.iface, 0xff);
+		interface_led_loop(&led_status.iface, 0xf);
 		hal_interface_set_name(&(led_status.iface.descriptor), "led_status");
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_status.iface.descriptor, "led_status");
 
@@ -415,7 +421,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
  *********************************************************************************************************************/
 
 #if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL) || defined(CONFIG_INCL_G104MF_ENABLE_RFM)
-	struct module_spibus_locm3 spi1;
+	Stm32SpiBus spi1;
 
 	static void port_spi1_init(void) {
 		/* SPI1 with three accelerometers and a radio */
@@ -423,27 +429,30 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO3 | GPIO4 | GPIO5);
 		gpio_set_af(GPIOB, GPIO_AF5, GPIO3 | GPIO4 | GPIO5);
 		rcc_periph_clock_enable(RCC_SPI1);
-		module_spibus_locm3_init(&spi1, "spi1", SPI1);
-		hal_interface_set_name(&(spi1.iface.descriptor), "spi1");
+
+		stm32_spibus_init(&spi1, SPI1);
+		spi1.bus.vmt->set_sck_freq(&spi1.bus, 10e6);
+		spi1.bus.vmt->set_mode(&spi1.bus, 0, 0);
+
 	}
 #endif
 
 
 #if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL)
-	struct module_spidev_locm3 spi1_accel2;
+	Stm32SpiDev spi1_accel2;
 
 	void port_accel2_init(void) {
 		/* ICM42688P on SPI1 bus */
 		gpio_set(GPIOB, GPIO8);
 		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
 		gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO8);
-		module_spidev_locm3_init(&spi1_accel2, "spi1_accel2", &(spi1.iface), GPIOB, GPIO8);
-		hal_interface_set_name(&(spi1_accel2.iface.descriptor), "spi1_accel2");
+
+		stm32_spidev_init(&spi1_accel2, &spi1.bus, GPIOB, GPIO8);
 
 		/* SYNC32 output */
 		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
 
-		icm42688p_init(&accel2, &spi1_accel2.iface);
+		icm42688p_init(&accel2, &spi1_accel2.dev);
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel2.source, "accel2");
 	}
 #endif
@@ -478,45 +487,6 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		interface_spidev_deselect(&spi1_rfm.iface);
 	}
 #endif
-
-
-/*********************************************************************************************************************
- * u-blox MAX-M8Q initialization & ISR
- *********************************************************************************************************************/
-
-void exti9_5_isr(void) {
-	exti_reset_request(EXTI8);
-	gps_ublox_timepulse_handler(&gps);
-}
-
-
-void port_gps_init(void) {
-	gps_ublox_init(&gps);
-	gps_ublox_set_i2c_transport(&gps, &i2c1.bus, 0x42);
-	gps.measure_clock = &rtc.clock;
-	//gps_ublox_mode(&gps, GPS_UBLOX_MODE_BACKUP);
-
-	/* Enable 1PPS interrupt when the driver is properly initialized. */
-	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO8);
-	nvic_enable_irq(NVIC_EXTI9_5_IRQ);
-	nvic_set_priority(NVIC_EXTI9_5_IRQ, 5 * 16);
-	exti_select_source(EXTI8, GPIOA);
-	exti_set_trigger(EXTI8, EXTI_TRIGGER_RISING);
-
-	#if 0
-		#include "gps-test-code.c"
-	#endif
-}
-
-
-void port_gps_power(bool en) {
-	if (en) {
-		gpio_set(GPIOH, GPIO1);
-		vTaskDelay(100);
-	} else {
-		gpio_clear(GPIOH, GPIO1);
-	}
-}
 
 
 /*********************************************************************************************************************
@@ -570,16 +540,20 @@ void port_gps_power(bool en) {
 
 
 /*********************************************************************************************************************
- * micro-SD card initialization and support functions
+ * I2C bus and battery gauge
  *********************************************************************************************************************/
 
-void port_battery_gauge_init(void) {
+Stm32I2c i2c1;
+static void port_i2c_init(void) {
 	rcc_periph_clock_enable(RCC_I2C1);
 	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6 | GPIO9);
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO6 | GPIO9);
 	gpio_set_af(GPIOB, GPIO_AF4, GPIO6 | GPIO9);
 	stm32_i2c_init(&i2c1, I2C1);
+}
 
+
+void port_battery_gauge_init(void) {
 	/* BQ35100 test */
 	if (bq35100_init(&bq35100, &i2c1.bus) == BQ35100_RET_OK) {
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&bq35100.voltage, "vbat");
@@ -593,6 +567,51 @@ void port_battery_gauge_init(void) {
 	// }
 }
 
+
+Si7006 si7006;
+static void port_temp_sensor_init(void) {
+	if (si7006_init(&si7006, &i2c1.bus) == SI7006_RET_OK) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&si7006.temperature, "temperature");
+	}
+}
+
+/*********************************************************************************************************************
+ * u-blox MAX-M8Q initialization & ISR
+ *********************************************************************************************************************/
+
+void exti9_5_isr(void) {
+	exti_reset_request(EXTI8);
+	gps_ublox_timepulse_handler(&gps);
+}
+
+
+void port_gps_init(void) {
+	gps_ublox_init(&gps);
+	gps_ublox_set_i2c_transport(&gps, &i2c1.bus, 0x42);
+	gps.measure_clock = &rtc.clock;
+	//gps_ublox_mode(&gps, GPS_UBLOX_MODE_BACKUP);
+
+	/* Enable 1PPS interrupt when the driver is properly initialized. */
+	gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, GPIO8);
+	nvic_enable_irq(NVIC_EXTI9_5_IRQ);
+	nvic_set_priority(NVIC_EXTI9_5_IRQ, 5 * 16);
+	exti_select_source(EXTI8, GPIOA);
+	exti_set_trigger(EXTI8, EXTI_TRIGGER_RISING);
+
+	#if 0
+		#include "gps-test-code.c"
+	#endif
+}
+
+
+void port_gps_power(bool en) {
+	if (en) {
+		gpio_set(GPIOH, GPIO1);
+		vTaskDelay(100);
+	} else {
+		gpio_clear(GPIOH, GPIO1);
+	}
+}
 
 /*********************************************************************************************************************
  * Default GPIO configuration. Put all peripherals in the lowest current consumption setting.
@@ -631,7 +650,7 @@ static void port_setup_default_gpio(void) {
 	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_2MHZ, GPIO6 | GPIO9);
 	gpio_set(GPIOB, GPIO6 | GPIO9);
 
-	/* ACCEL_INT */	
+	/* ACCEL_INT */
 	gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO7);
 }
 
@@ -653,6 +672,8 @@ int32_t port_init(void) {
 		led_init();
 	#endif
 
+	port_i2c_init();
+	port_temp_sensor_init();
 	port_battery_gauge_init();
 	port_gps_power(false);
 	// port_gps_init();

@@ -14,5 +14,6 @@ extern uint32_t SystemCoreClock;
 #define configUSE_TICKLESS_IDLE 1
 #define configEXPECTED_IDLE_TIME_BEFORE_SLEEP 10
 #define portSUPPRESS_TICKS_AND_SLEEP(xIdleTime) port_sleep(xIdleTime)
+#define configTOTAL_HEAP_SIZE ((size_t)(60 * 1024))
 
 
