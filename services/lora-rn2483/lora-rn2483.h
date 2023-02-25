@@ -13,12 +13,14 @@
 
 #include <interfaces/stream.h>
 #include <interfaces/lora.h>
+#include <interfaces/power.h>
 
 
 /* The size must be sufficient for a 256 B packet encoded in hex. */
 #define LORA_RESPONSE_LEN 540
 #define LORA_TX_OK_TIMEOUT 10
 #define LORA_RX_DATA_LEN 256
+#define LORA_MAX_ERRORS_BEFORE_REJOIN 10
 
 typedef enum {
 	LORA_MODEM_RET_OK = 0,
@@ -54,6 +56,7 @@ enum lora_modem_mac_state {
 
 typedef struct {
 	Stream *usart;
+	Power *power;
 	LoRa lora;
 	enum lora_mode lora_mode;
 
@@ -64,7 +67,7 @@ typedef struct {
 
 	char response_str[LORA_RESPONSE_LEN];
 	size_t response_len;
-	
+
 	uint8_t rx_data[LORA_RX_DATA_LEN];
 	size_t rx_data_len;
 	uint8_t rx_data_port;
@@ -87,7 +90,7 @@ typedef struct {
 	bool rejoin_needed;
 	bool multicast_enabled;
 
-	bool join_req;
+	volatile bool join_req;
 	bool sleeping;
 
 	uint32_t status_vdd_mV;
@@ -104,10 +107,16 @@ typedef struct {
 	char nwkskey[32 + 1];
 	char appskey[32 + 1];
 
+	/* DevEUI and AppEUI are required for OTAA rejoin. */
+	char deveui[16 + 1];
+	char appeui[16 + 1];
+
+	uint32_t error_counter;
+
 } LoraModem;
 
 
-lora_modem_ret_t lora_modem_init(LoraModem *self, Stream *usart);
+lora_modem_ret_t lora_modem_init(LoraModem *self, Stream *usart, Power *power);
 lora_modem_ret_t lora_modem_free(LoraModem *self);
 
 lora_modem_ret_t lora_modem_regain_comms(LoraModem *self);

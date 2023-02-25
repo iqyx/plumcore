@@ -35,7 +35,7 @@ static lora_ret_t lora_modem_set_appkey(LoRa *self, const char *appkey) {
 	lora_modem_clear_input(lora);
 	lora_modem_write_line(lora, cmd);
 	lora_modem_read_line(lora, lora->response_str, LORA_RESPONSE_LEN, &lora->response_len);
-	lora_ret_t ret = lora_response(response_check(lora->response_str));
+	lora_ret_t ret = lora_response(lora, response_check(lora->response_str));
 	command_unlock(lora);
 
 	return ret;
@@ -61,12 +61,13 @@ static lora_ret_t lora_modem_set_appeui(LoRa *self, const char *appeui) {
 
 	char cmd[50] = {0};
 	snprintf(cmd, sizeof(cmd), "mac set appeui %s", appeui);
+	strlcpy(lora->appeui, appeui, 16 + 1);
 
 	command_lock(lora);
 	lora_modem_clear_input(lora);
 	lora_modem_write_line(lora, cmd);
 	lora_modem_read_line(lora, lora->response_str, LORA_RESPONSE_LEN, &lora->response_len);
-	lora_ret_t ret = lora_response(response_check(lora->response_str));
+	lora_ret_t ret = lora_response(lora, response_check(lora->response_str));
 	command_unlock(lora);
 
 	return ret;
@@ -99,12 +100,13 @@ static lora_ret_t lora_modem_set_deveui(LoRa *self, const char *deveui) {
 
 	char cmd[50] = {0};
 	snprintf(cmd, sizeof(cmd), "mac set deveui %s", deveui);
+	strlcpy(lora->deveui, deveui, 16 + 1);
 
 	command_lock(lora);
 	lora_modem_clear_input(lora);
 	lora_modem_write_line(lora, cmd);
 	lora_modem_read_line(lora, lora->response_str, LORA_RESPONSE_LEN, &lora->response_len);
-	lora_ret_t ret = lora_response(response_check(lora->response_str));
+	lora_ret_t ret = lora_response(lora, response_check(lora->response_str));
 	command_unlock(lora);
 
 	return ret;
@@ -140,7 +142,7 @@ static lora_ret_t lora_modem_set_devaddr(LoRa *self, const uint8_t devaddr[4]) {
 	lora_modem_clear_input(lora);
 	lora_modem_write_line(lora, cmd);
 	lora_modem_read_line(lora, lora->response_str, LORA_RESPONSE_LEN, &lora->response_len);
-	lora_ret_t ret = lora_response(response_check(lora->response_str));
+	lora_ret_t ret = lora_response(lora, response_check(lora->response_str));
 	command_unlock(lora);
 
 	return ret;
@@ -162,7 +164,7 @@ static lora_ret_t lora_modem_set_nwkskey(LoRa *self, const char *nwkskey) {
 	lora_modem_clear_input(lora);
 	lora_modem_write_line(lora, cmd);
 	lora_modem_read_line(lora, lora->response_str, LORA_RESPONSE_LEN, &lora->response_len);
-	lora_ret_t ret = lora_response(response_check(lora->response_str));
+	lora_ret_t ret = lora_response(lora, response_check(lora->response_str));
 	command_unlock(lora);
 
 	return ret;
@@ -184,7 +186,7 @@ static lora_ret_t lora_modem_set_appskey(LoRa *self, const char *appskey) {
 	lora_modem_clear_input(lora);
 	lora_modem_write_line(lora, cmd);
 	lora_modem_read_line(lora, lora->response_str, LORA_RESPONSE_LEN, &lora->response_len);
-	lora_ret_t ret = lora_response(response_check(lora->response_str));
+	lora_ret_t ret = lora_response(lora, response_check(lora->response_str));
 	command_unlock(lora);
 
 	return ret;
@@ -201,7 +203,7 @@ static lora_ret_t lora_modem_set_datarate(LoRa *self, uint8_t datarate) {
 	lora_modem_clear_input(lora);
 	lora_modem_write_line(lora, cmd);
 	lora_modem_read_line(lora, lora->response_str, LORA_RESPONSE_LEN, &lora->response_len);
-	lora_ret_t ret = lora_response(response_check(lora->response_str));
+	lora_ret_t ret = lora_response(lora, response_check(lora->response_str));
 	command_unlock(lora);
 
 	return ret;
@@ -209,7 +211,6 @@ static lora_ret_t lora_modem_set_datarate(LoRa *self, uint8_t datarate) {
 
 
 static lora_ret_t lora_modem_get_datarate(LoRa *self, uint8_t *datarate) {
-	char cmd[50] = {0};
 	LoraModem *lora = (LoraModem *)self->parent;
 
 	command_lock(lora);
@@ -238,7 +239,7 @@ static lora_ret_t lora_modem_set_adr(LoRa *self, bool adr) {
 		lora_modem_write_line(lora, "mac set adr off");
 	}
 	lora_modem_read_line(lora, lora->response_str, LORA_RESPONSE_LEN, &lora->response_len);
-	lora_ret_t ret = lora_response(response_check(lora->response_str));
+	lora_ret_t ret = lora_response(lora, response_check(lora->response_str));
 	command_unlock(lora);
 
 	return ret;
@@ -270,7 +271,7 @@ static lora_ret_t lora_modem_join(LoRa *self) {
 	if (ret != LORA_MODEM_RET_OK) {
 		command_unlock(lora);
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("network join failed"));
-		return lora_response(ret);
+		return lora_response(lora, ret);
 	}
 
 	/* Wait for "accepted" or "denied" */
@@ -285,7 +286,7 @@ static lora_ret_t lora_modem_join(LoRa *self) {
 		command_unlock(lora);
 
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("network join ret = %d '%s'"), ret, lora->response_str);
-		return lora_response(ret);
+		return lora_response(lora, ret);
 	}
 
 	/* Nothing was received so far. */
@@ -370,13 +371,8 @@ static lora_ret_t lora_modem_send(LoRa *self, uint8_t port, const uint8_t *data,
 	lora_modem_read_line(lora, lora->response_str, LORA_RESPONSE_LEN, &lora->response_len);
 	lora_modem_ret_t ret = response_check(lora->response_str);
 	if (ret != LORA_MODEM_RET_OK) {
-
-		/* Check if joined. If not, set join request flag. */
-		if (ret == LORA_MODEM_RET_NOT_JOINED) {
-			lora->join_req = true;
-		}
 		command_unlock(lora);
-		return lora_response(ret);
+		return lora_response(lora, ret);
 	}
 
 	/* Continue if the packet was forwarded to the MAC */
@@ -413,12 +409,12 @@ static lora_ret_t lora_modem_send(LoRa *self, uint8_t port, const uint8_t *data,
 				ret = LORA_MODEM_RET_OK;
 			}
 			command_unlock(lora);
-			return lora_response(ret);
+			return lora_response(lora, ret);
 		}
 	}
 	/* Unreachable */
 	command_unlock(lora);
-	return lora_response(ret);
+	return lora_response(lora, ret);
 }
 
 

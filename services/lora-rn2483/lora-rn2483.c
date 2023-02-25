@@ -15,6 +15,7 @@
 #include <main.h>
 
 #include <interfaces/stream.h>
+#include <interfaces/power.h>
 #include "lora-rn2483.h"
 
 #define MODULE_NAME "lora-rn2483"
@@ -53,14 +54,43 @@ static lora_modem_ret_t response_check(const char *response) {
 }
 
 
-static lora_ret_t lora_response(lora_modem_ret_t ret) {
+static lora_ret_t lora_response(LoraModem *self, lora_modem_ret_t ret) {
 	switch (ret) {
-		case LORA_MODEM_RET_OK:
-		case LORA_MODEM_RET_ACCEPTED:
 		case LORA_MODEM_RET_TX_OK:
+			/* A successful transmission always clears the error counter. */
+			self->error_counter = 0;
+			return LORA_RET_OK;
+
+		case LORA_MODEM_RET_OK:
+			/* fall-through */
+		case LORA_MODEM_RET_ACCEPTED:
+			/* fall-through */
 		case LORA_MODEM_RET_RX:
 			return LORA_RET_OK;
+
+		case LORA_MODEM_RET_DENIED:
+			/* If the join was denied, either the gateway is disconnected (join response packet
+			 * was missed) or the network doesn't want us to connect. In either case, try again. */
+			/* fall-through */
+		case LORA_MODEM_RET_NOT_JOINED:
+			/* Not joined for whatever reason, try again later. */
+			self->join_req = true;
+			return LORA_RET_FAILED;
+
+		case LORA_MODEM_RET_NO_FREE_CHANNEL:
+			/* Not an error, considered a NOOP, signal failure and continue. */
+			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("no free channel, consider increasing the message interval"));
+			return LORA_RET_FAILED;
+
 		default:
+			self->error_counter++;
+			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("other error ret = %d (counter = %lu)"), ret, self->error_counter);
+			if (self->error_counter >= LORA_MAX_ERRORS_BEFORE_REJOIN) {
+				u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("rejoin requested"));
+				self->join_req = true;
+				/* And start over. No backoff algo. */
+				self->error_counter = 0;
+			}
 			return LORA_RET_FAILED;
 	}
 }
@@ -120,15 +150,21 @@ static lora_modem_ret_t get_status(LoraModem *self, uint32_t *status) {
 	command_lock(self);
 	lora_modem_clear_input(self);
 	lora_modem_write_line(self, "mac get status");
-	lora_modem_read_line(self, self->response_str, LORA_RESPONSE_LEN, &self->response_len);
-	*status = strtol(self->response_str, NULL, 16);
-	command_unlock(self);
-
-	if (self->response_len == 8) {
-		return LORA_MODEM_RET_OK;
-	} else {
+	if (lora_modem_read_line(self, self->response_str, LORA_RESPONSE_LEN, &self->response_len) != LORA_MODEM_RET_OK) {
+		/* No response was received. */
+		command_unlock(self);
 		return LORA_MODEM_RET_FAILED;
 	}
+	/* Check if the response is exactly 8 character long. Filter out garbage. */
+	if (self->response_len != 8) {
+		command_unlock(self);
+		return LORA_MODEM_RET_FAILED;
+	}
+
+	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("response %s"), self->response_str);
+	*status = strtol(self->response_str, NULL, 16);
+	command_unlock(self);
+	return LORA_MODEM_RET_OK;
 }
 
 
@@ -158,6 +194,13 @@ static void lora_status_task(void *p) {
 			self->rx_timing_updated = status & (1 << 16);
 			self->rejoin_needed = status & (1 << 17);
 			self->multicast_enabled = status & (1 << 18);
+		} else {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no response from the modem, reset"));
+			lora_modem_regain_comms(self);
+		}
+
+		if (self->rejoin_needed) {
+			self->join_req = true;
 		}
 
 /** @todo no LED support yet */
@@ -174,6 +217,9 @@ static void lora_status_task(void *p) {
 
 		if (self->join_req) {
 			self->join_req = false;
+			lora_modem_set_deveui(&self->lora, self->deveui);
+			lora_modem_set_appeui(&self->lora, self->appeui);
+			lora_modem_set_appkey(&self->lora, self->appkey);
 			lora_modem_join(&self->lora);
 		}
 
@@ -214,9 +260,10 @@ static const struct sensor_info vdd_sensor_info = {
 /*********************************************************************************************************************/
 
 
-lora_modem_ret_t lora_modem_init(LoraModem *self, Stream *usart) {
+lora_modem_ret_t lora_modem_init(LoraModem *self, Stream *usart, Power *power) {
 	memset(self, 0, sizeof(LoraModem));
 	self->usart = usart;
+	self->power = power;
 
 	lora_init(&self->lora, &lora_modem_vmt);
 	self->lora.parent = self;
@@ -238,13 +285,14 @@ lora_modem_ret_t lora_modem_init(LoraModem *self, Stream *usart) {
 	self->debug_requests = false;
 	self->debug_responses = false;
 
+	/* Reset and get the communication working. */
 	if (lora_modem_regain_comms(self) != LORA_MODEM_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("modem not responding"));
 		return LORA_MODEM_RET_FAILED;
 
 	}
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("modem version: '%s'"), self->response_str);
-	
+
 	self->can_run = true;
 	xTaskCreate(lora_status_task, "lora_status", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, NULL);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("init ok"));
@@ -274,7 +322,11 @@ lora_modem_ret_t lora_modem_free(LoraModem *self) {
 /** @todo no baudrate setting support yet */
 	/* Clear RX buffer. */
 lora_modem_ret_t lora_modem_regain_comms(LoraModem *self) {
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("%s:%d"), __func__, __LINE__);
+	if (self->power != NULL) {
+		self->power->vmt->enable(self->power, false);
+		vTaskDelay(200);
+		self->power->vmt->enable(self->power, true);
+	}
 
 	/* Perform auto baud rate detection. Change baudrate to 300 and send 0x00 (break). */
 	// usart_baudrate(self->usart, 300);
