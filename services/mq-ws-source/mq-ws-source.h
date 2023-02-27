@@ -17,6 +17,7 @@
 
 #include <interfaces/waveform_source.h>
 #include <interfaces/mq.h>
+#include <interfaces/clock.h>
 
 
 #define MQ_WS_SOURCE_MAX_TOPIC_LEN CONFIG_SERVICE_MQ_WS_SOURCE_MAX_TOPIC_LEN
@@ -75,6 +76,9 @@ typedef struct {
 	void *rxbuf;
 	uint32_t read_period_ms;
 
+	/* If set, the data will be timestamped before posting to the message queue. */
+	Clock *ts_clock;
+
 	/* Start of the linked list */
 	struct mq_ws_source_channel *first_channel;
 } MqWsSource;
@@ -102,3 +106,7 @@ mq_ws_source_ret_t mq_ws_source_stop(MqWsSource *self);
 
 
 mq_ws_source_ret_t mq_ws_source_add_channel(MqWsSource *self, uint8_t channel, const char *topic, size_t max_samples);
+
+
+mq_ws_source_ret_t mq_ws_source_set_ts_clock(MqWsSource *self, Clock *ts_clock);
+
