@@ -49,3 +49,7 @@ config LIB_CMSIS_DSP
 config LIB_ZFP
 	bool "LLNL ZFP floating point compression library"
 	default y
+
+config LIB_TINYCBOR
+	bool "CBOR encoding/decoding library TinyCbor"
+	default y
