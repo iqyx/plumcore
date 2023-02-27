@@ -48,6 +48,7 @@
 #include <interfaces/i2c-bus.h>
 #include <interfaces/stream.h>
 #include <interfaces/uart.h>
+#include <interfaces/clock.h>
 
 #include <services/cli/system_cli_tree.h>
 #include <services/stm32-system-clock/clock.h>
@@ -83,6 +84,7 @@ uint32_t SystemCoreClock;
 
 SystemClock system_clock;
 Stm32Rtc rtc;
+Clock *rtc_clock = &rtc.clock;
 Icm42688p accel2;
 Bq35100 bq35100;
 GpsUblox gps;
@@ -149,7 +151,7 @@ void port_sleep(TickType_t idle_time);
 		} else {
 			/* We cannot continue if mounting fails. There is no important data on
 			 * the system volume, let's format it to make the thing working again. */
-			// fs_spiffs_format(&spiffs_system, lv_system);
+			fs_spiffs_format(&spiffs_system, lv_system);
 		}
 
 		if (flash_fifo_init(&fifo, lv_fifo) == FLASH_FIFO_RET_OK) {
@@ -569,6 +571,7 @@ void port_battery_gauge_init(void) {
 
 
 Si7006 si7006;
+Sensor *si7006_sensor = &si7006.temperature;
 static void port_temp_sensor_init(void) {
 	if (si7006_init(&si7006, &i2c1.bus) == SI7006_RET_OK) {
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&si7006.temperature, "temperature");
