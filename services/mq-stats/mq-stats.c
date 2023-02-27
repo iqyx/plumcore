@@ -99,19 +99,17 @@ static float enob(int16_t data[], size_t len, float full_scale) {
 }
 
 
-static void publish_float(MqClient *mqc, const char *topic, float value) {
+static void publish_float(MqClient *mqc, const char *topic, float value, struct timespec *ts) {
 	NdArray array;
 	ndarray_init_view(&array, DTYPE_FLOAT, 1, &value, sizeof(float));
-	struct timespec ts = {0};
-	mqc->vmt->publish(mqc, topic, &array, &ts);
+	mqc->vmt->publish(mqc, topic, &array, ts);
 }
 
 
-static void publish_int32(MqClient *mqc, const char *topic, int32_t value) {
+static void publish_int32(MqClient *mqc, const char *topic, int32_t value, struct timespec *ts) {
 	NdArray array;
 	ndarray_init_view(&array, DTYPE_INT32, 1, &value, sizeof(int32_t));
-	struct timespec ts = {0};
-	mqc->vmt->publish(mqc, topic, &array, &ts);
+	mqc->vmt->publish(mqc, topic, &array, ts);
 }
 
 
@@ -133,13 +131,13 @@ static void mq_stats_task(void *p) {
 					float f = rms((int16_t *)self->buf.buf, self->buf.asize);
 					strlcpy(new_topic, topic, MQ_STATS_MAX_TOPIC_LEN);
 					strlcat(new_topic, "/rms", MQ_STATS_MAX_TOPIC_LEN);
-					publish_float(self->mqc, new_topic, f);
+					publish_float(self->mqc, new_topic, f, &ts);
 				}
 				if (self->e & MQ_STATS_MEAN) {
 					float f = mean((int16_t *)self->buf.buf, self->buf.asize);
 					strlcpy(new_topic, topic, MQ_STATS_MAX_TOPIC_LEN);
 					strlcat(new_topic, "/mean", MQ_STATS_MAX_TOPIC_LEN);
-					publish_float(self->mqc, new_topic, f);
+					publish_float(self->mqc, new_topic, f, &ts);
 				}
 			}
 			if (self->buf.dtype == DTYPE_INT32) {
@@ -147,13 +145,13 @@ static void mq_stats_task(void *p) {
 					float f = mean32((int32_t *)self->buf.buf, self->buf.asize);
 					strlcpy(new_topic, topic, MQ_STATS_MAX_TOPIC_LEN);
 					strlcat(new_topic, "/mean", MQ_STATS_MAX_TOPIC_LEN);
-					publish_int32(self->mqc, new_topic, (int32_t)f);
+					publish_int32(self->mqc, new_topic, (int32_t)f, &ts);
 				}
 				if (self->e & MQ_STATS_NRMS) {
 					float f = nrms32((int32_t *)self->buf.buf, self->buf.asize);
 					strlcpy(new_topic, topic, MQ_STATS_MAX_TOPIC_LEN);
 					strlcat(new_topic, "/nrms", MQ_STATS_MAX_TOPIC_LEN);
-					publish_int32(self->mqc, new_topic, (int32_t)f);
+					publish_int32(self->mqc, new_topic, (int32_t)f, &ts);
 				}
 			}
 
