@@ -255,6 +255,10 @@ menu "Communication server/client services"
 		config SERVICE_LORA_FS
 			bool "Service for accessing filesystems over LoRaWAN"
 			default y
+
+		config SERVICE_MQ_LORA_BRIDGE
+			bool "Serialise MQ messages with CBOR and send over LoRaWAN"
+			default n
 	endmenu
 
 	menu "MQTT client/server services"
