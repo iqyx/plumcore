@@ -220,6 +220,8 @@ static void lora_status_task(void *p) {
 			lora_modem_set_deveui(&self->lora, self->deveui);
 			lora_modem_set_appeui(&self->lora, self->appeui);
 			lora_modem_set_appkey(&self->lora, self->appkey);
+			/** @todo Always set ADR for now. Replace with a network configuration struct. */
+			lora_modem_set_adr(&self->lora, true);
 			lora_modem_join(&self->lora);
 		}
 
