@@ -113,7 +113,7 @@ env.Append(LINKFLAGS = [
 	"-nostartfiles",
 	"--specs=nano.specs",
 	# Adds about 9 KB to the firmware
-	#  "-Wl,-u_printf_float",
+	"-Wl,-u_printf_float",
 	"-T", env["LDSCRIPT"],
 	"-Wl,-Map=%s.map" % env["PORTFILE"],
 	"-Wl,--gc-sections",
