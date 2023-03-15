@@ -73,6 +73,7 @@ static void init_task(void *p) {
 
 
 int main(void) {
+	platform_early_init();
 	port_early_init();
 	u_log_init();
 

@@ -1,0 +1,35 @@
+config PORT_NWDAQ_BR28_FDC
+	bool "nwDaq 8-channel bridge digitiser with AC excitation and CAN-FD interface (nwdaq-br28-fdc)"
+
+	menu "Configuraton"
+		depends on PORT_NWDAQ_BR28_FDC
+
+		config PORT_NAME
+			string
+			default "nwdaq-br28-fdc"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+
+		config NWDAQ_BR28_FDC_ENABLE_SERIAL_CONSOLE
+			bool "Enable diagnostic serial console"
+			default yes
+
+		config NWDAQ_BR28_FDC_CONSOLE_SPEED
+			depends on NWDAQ_BR28_FDC_ENABLE_SERIAL_CONSOLE
+			int "Serial console speed"
+			default 115200
+
+		config NWDAQ_BR28_FDC_ENABLE_LEDS
+			bool "Enable back panel LEDs"
+			default yes
+
+		config NWDAQ_BR28_FDC_ENABLE_FLASH
+			bool "Enable NOR flash on the SPI3 interface"
+			default yes
+	endmenu

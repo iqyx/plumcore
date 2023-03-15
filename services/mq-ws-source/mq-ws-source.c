@@ -133,12 +133,15 @@ static mq_ws_source_ret_t write_channels(MqWsSource *self, size_t samples) {
 
 			/** @todo get the exact sample time from somewhere */
 			struct timespec ts = {0};
+			if (self->ts_clock && self->ts_clock->get != NULL) {
+				self->ts_clock->get(self->ts_clock->parent, &ts);
+			}
 
 			/* Publish the array and clear the channel buffer. */
 			self->mqc->vmt->publish(self->mqc, ch->topic, &array, &ts);
 			ch->samples = 0;
 		}
-		
+
 		ch = ch->next;
 	}
 	return MQ_WS_SOURCE_RET_OK;
@@ -292,11 +295,24 @@ mq_ws_source_ret_t mq_ws_source_add_channel(MqWsSource *self, uint8_t channel, c
 	/* And append it to the linked list */
 	ch->next = self->first_channel;
 	self->first_channel = ch;
-	
+
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("added topic '%s' for channel %u, buffer size %u samples"), topic, channel, max_samples);
 	return MQ_WS_SOURCE_RET_OK;
 err:
 	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("error adding topic '%s' for channel %u"), topic, channel);
 	return MQ_WS_SOURCE_RET_FAILED;
+}
+
+
+mq_ws_source_ret_t mq_ws_source_set_ts_clock(MqWsSource *self, Clock *ts_clock) {
+	if (u_assert(self != NULL) ||
+	    u_assert(ts_clock != NULL)) {
+		return MQ_WS_SOURCE_RET_FAILED;
+	}
+
+	self->ts_clock = ts_clock;
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("setting timestamping clock 0x%08x"), ts_clock);
+
+	return MQ_WS_SOURCE_RET_OK;
 }
 

@@ -148,20 +148,19 @@ ndarray_ret_t ndarray_value_to_str(NdArray *self, size_t i, char *s, size_t max)
 	switch (self->dtype) {
 		case DTYPE_CHAR:
 			snprintf(s, max - 1, "'%c'", ((char *)self->buf)[i]);
-			s[max - 1] = '\0';
 			return NDARRAY_RET_OK;
 		// case DTYPE_INT8:
 		// case DTYPE_UINT8:
 		case DTYPE_INT16:
 			snprintf(s, max - 1, "%d", ((int16_t *)self->buf)[i]);
-			s[max - 1] = '\0';
 			return NDARRAY_RET_OK;
 		// case DTYPE_UINT16:
-		// case DTYPE_INT32:
+		case DTYPE_INT32:
+			snprintf(s, max - 1, "%ld", ((int32_t *)self->buf)[i]);
+			return NDARRAY_RET_OK;
 		// case DTYPE_UINT32:
 		case DTYPE_FLOAT:
 			snprintf(s, max - 1, "%.3f", ((float *)self->buf)[i]);
-			s[max - 1] = '\0';
 			return NDARRAY_RET_OK;
 		// case DTYPE_INT64:
 		// case DTYPE_UINT64:

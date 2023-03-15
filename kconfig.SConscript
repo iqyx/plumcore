@@ -4,10 +4,11 @@ Import("env")
 Import("conf")
 Import("objs")
 
-def AddSourceIf(self, kconfig, src, inc):
+def AddSourceIf(self, kconfig, src, inc, cflags = []):
 	if conf[kconfig] == "y":
 		objs.append(env.Object(src))
 		env.Append(CPPPATH = inc)
+		env.Append(CFLAGS = cflags)
 
 
 def LoadKconfig(self, kconfig_file, config_file):

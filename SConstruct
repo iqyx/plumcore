@@ -76,6 +76,7 @@ env["CXX"] = "%s-g++" % env["TOOLCHAIN"]
 env["AR"] = "%s-ar" % env["TOOLCHAIN"]
 env["AS"] = "%s-as" % env["TOOLCHAIN"]
 env["LD"] = "%s-gcc" % env["TOOLCHAIN"]
+env["NM"] = "%s-nm" % env["TOOLCHAIN"]
 env["GDB"] = "%s-gdb" % env["TOOLCHAIN"]
 env["OBJCOPY"] = "%s-objcopy" % env["TOOLCHAIN"]
 env["OBJDUMP"] = "%s-objdump" % env["TOOLCHAIN"]
@@ -111,6 +112,7 @@ env.Append(LINKFLAGS = [
 	"--static",
 	"-nostartfiles",
 	"--specs=nano.specs",
+	# Adds about 9 KB to the firmware
 	"-Wl,-u_printf_float",
 	"-T", env["LDSCRIPT"],
 	"-Wl,-Map=%s.map" % env["PORTFILE"],

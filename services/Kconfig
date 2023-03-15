@@ -13,6 +13,10 @@ menu "Low-level platform drivers"
 			bool "STM32 ADC support"
 			default y
 
+		config SERVICE_STM32_DAC
+			bool "STM32 DAC support"
+			default y
+
 		config SERVICE_STM32_TIMER_CAPSENSE
 			bool "Support capacitive sensing using STM32 timer peripheral"
 			default n
@@ -37,6 +41,10 @@ menu "Low-level platform drivers"
 
 		config SERVICE_STM32_QSPI_FLASH
 			bool "STM32 QSPI flash memory driver"
+			default y
+
+		config SERVICE_STM32_SPI
+			bool "STM32 SPI bus driver"
 			default y
 
 		source "services/stm32-uart/Kconfig"
@@ -93,6 +101,14 @@ menu "High level device drivers"
 		default y
 		select SERVICE_STM32_ADC
 
+	config SERVICE_ADC_MCP3564
+		bool "MCP3564 ADC"
+		default n
+
+	config SERVICE_ADC_COMPOSITE
+		bool "Composite ADC device"
+		default n
+
 	config SERVICE_INERTIAL_ICM42688P
 		bool "TDK InvenSense ICM-42688-P inertial 6-DOF sensor"
 		default n
@@ -113,6 +129,18 @@ menu "High level device drivers"
 
 	config SERVICE_LORA_RN2483
 		bool "Microchip RN2483 LoRaWAN modem driver"
+		default n
+
+	config SERVICE_GENERIC_POWER
+		bool "A generic power device with various/GPIO backends"
+		default n
+
+	config SERVICE_GENERIC_MUX
+		bool "A generic analog/digital MUX configurable using GPIO"
+		default n
+
+	config SERVICE_SI7006
+		bool "Si7006 temperature and humidity sensor driver"
 		default n
 endmenu
 
@@ -156,6 +184,7 @@ menu "Data manipulation/evaluation/processing services"
 
 	config SERVICE_PLOG_PACKAGER
 		bool "Service for packaging PLOG messages into compressed blobs"
+		select LIB_HEATSHRINK
 		default y
 endmenu
 
@@ -209,6 +238,10 @@ menu "User interface services"
 		config SERVICE_CLI_SYSTEM_BOOTLOADER
 			bool "/system/bootloader bootloader configuration submenu"
 			default y
+
+		config SERVICE_CLI_SYSTEM_DEBUG
+			bool "/system/debug configuration submenu"
+			default n
 	endmenu
 
 	config SERVICE_LOGINMGR
@@ -222,6 +255,10 @@ menu "Communication server/client services"
 		config SERVICE_LORA_FS
 			bool "Service for accessing filesystems over LoRaWAN"
 			default y
+
+		config SERVICE_MQ_LORA_BRIDGE
+			bool "Serialise MQ messages with CBOR and send over LoRaWAN"
+			default n
 	endmenu
 
 	menu "MQTT client/server services"
@@ -322,6 +359,16 @@ menu "Language interpreters"
 		bool "ECMAScript language interpreter (Duktape)"
 		default n
 		select LIB_DUKTAPE
+
+	config SERVICE_SCRIPT_WREN
+		bool "wren.io language interpreter"
+		default n
+		select LIB_WREN
+
+	config SERVICE_SCRIPT_GRAVITY
+		bool "Gravity language interpreter"
+		default n
+		select LIB_GRAVITY
 
 endmenu
 

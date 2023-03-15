@@ -229,7 +229,7 @@ static stm32_rtc_ret_t stm32_rtc_init_rtc(Stm32Rtc *self) {
 		return STM32_RTC_RET_NULL;
 	}
 
-	#if defined(STM32L4)
+	#if defined(STM32L4) || defined(STM32G4)
 		PWR_CR1 |= PWR_CR1_DBP;
 	#else
 		PWR_CR |= PWR_CR_DBP;
@@ -296,7 +296,7 @@ stm32_rtc_ret_t stm32_rtc_init(Stm32Rtc *self) {
 	/* Enable the peripheral and disable backup domain write protection. */
 	rcc_periph_clock_enable(RCC_PWR);
 
-	#if defined(STM32L4)
+	#if defined(STM32L4) || defined(STM32G4)
 		PWR_CR1 |= PWR_CR1_DBP;
 	#else
 		rcc_periph_clock_enable(RCC_RTC);

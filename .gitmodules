@@ -31,3 +31,12 @@
 [submodule "lib/other/zfp"]
 	path = lib/other/zfp
 	url = https://github.com/LLNL/zfp
+[submodule "lib/script/wren"]
+	path = lib/script/wren
+	url = https://github.com/wren-lang/wren
+[submodule "lib/script/gravity"]
+	path = lib/script/gravity
+	url = https://github.com/marcobambini/gravity
+[submodule "lib/other/tinycbor"]
+	path = lib/other/tinycbor
+	url = https://github.com/intel/tinycbor

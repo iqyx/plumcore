@@ -13,6 +13,8 @@
 #include "version.h"
 #include "config.h"
 
+#include <interfaces/sensor.h>
+#include <interfaces/clock.h>
 
 #define PORT_NAME                  "incl-g104mf"
 #define PORT_BANNER                "plumCore"
@@ -62,6 +64,9 @@ extern IServiceLocator *locator;
 /** @todo */
 #include <services/bq35100/bq35100.h>
 extern Bq35100 bq35100;
+
+extern Sensor *si7006_sensor;
+extern Clock *rtc_clock;
 
 /* Old legacy modules exported directly. */
 extern struct module_led led_stat;

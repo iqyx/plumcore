@@ -56,11 +56,8 @@ def parse_pkg(pd):
 	if p.data:
 		pdata = pkg_pb2.PackageData()
 		pdata.ParseFromString(p.data)
-		# print(len(p.data))
 		if pdata.heatshrink:
-			print(len(pdata.heatshrink.msg))
 			rd = heatshrink2.decode(pdata.heatshrink.msg, window_sz2=pdata.heatshrink.window_size, lookahead_sz2=pdata.heatshrink.lookahead_size)
-			print(len(rd))
 			if rd:
 				rawdata = pkg_pb2.RawData()
 				rawdata.ParseFromString(rd)
@@ -86,7 +83,11 @@ with open(fname, "r+b") as f:
 			if found >= 0:
 				if pkg_start >= 0:
 					pkg = mm[pkg_start:found]
-					parse_pkg(pkg)
+					try:
+						parse_pkg(pkg)
+					except:
+						print('Error parsing PKG at %d bytes, ignoring (data %s...)' % (pkg_start, pkg[:16].hex()), file=sys.stderr)
+						printProgressBar(len_processed, len(mm))
 
 					len_processed += len(pkg)
 					prg_processed += len(pkg)
@@ -100,3 +101,4 @@ with open(fname, "r+b") as f:
 				parse_pkg(pkg)
 				break
 		printProgressBar(1, 1)
+		print('', file=sys.stderr)

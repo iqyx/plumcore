@@ -92,7 +92,7 @@ static stm32_qspi_flash_ret_t read(Stm32QspiFlash *self, uint8_t *buf, size_t si
 		if ((xTaskGetTickCount() - tm_st) > READ_TIMEOUT) {
 			return STM32_QSPI_FLASH_RET_TIMEOUT;
 		}
-	} while (status & QUADSPI_SR_BUSY); 
+	} while (status & QUADSPI_SR_BUSY);
 	if (len != NULL) {
 		*len = l;
 	}
@@ -356,6 +356,7 @@ static flash_ret_t flash_get_size(Flash *self, uint32_t i, size_t *size, flash_b
 			*ops = FLASH_BLOCK_OPS_READ | FLASH_BLOCK_OPS_WRITE;
 			break;
 		default:
+			/** @todo fix FLASH_RET_BAD_ARG */
 			return FLASH_RET_FAILED;
 	}
 
@@ -442,7 +443,7 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_init(Stm32QspiFlash *self) {
 	}
 	memset(self, 0, sizeof(Stm32QspiFlash));
 	quadspi_enable();
-	reset(self);	
+	reset(self);
 
 	self->lock = xSemaphoreCreateMutex();
 	if (self->lock == NULL) {
@@ -467,7 +468,7 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_init(Stm32QspiFlash *self) {
 
 	/* Now the flash parameters are known, set the correct flash size */
 	QUADSPI_DCR = ((self->info->size - 1) << QUADSPI_DCR_FSIZE_SHIFT);
-	
+
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("detected '%s %s' (id = 0x%06x)"),
 		self->info->manufacturer,
 		self->info->type,

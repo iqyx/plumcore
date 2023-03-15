@@ -55,7 +55,7 @@ endmenu
 # running on the device. The application may specify multiple services
 # to be run and even multiple instances of the same service if required.
 # Applications are configurable and may contain optional components.
-choice 
+choice
 	prompt "Application configuration"
 
 	config APP_EXTERNAL

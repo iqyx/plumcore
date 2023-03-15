@@ -15,6 +15,7 @@ typedef enum {
 	FLASH_RET_OK = 0,
 	FLASH_RET_FAILED,
 	FLASH_RET_BAD_ARG,
+	FLASH_RET_TIMEOUT,
 } flash_ret_t;
 
 typedef enum {

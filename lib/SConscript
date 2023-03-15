@@ -10,7 +10,7 @@ objs.append(env.Object(source = [
 	File(Glob("crypto/*.c")),
 	File(Glob("freertos/*.c")),
 	File(Glob("freertos/portable/%s/*.c" % env["FREERTOS_PORT"])),
-	File("freertos/portable/MemMang/heap_3.c"),
+	#  File("freertos/portable/MemMang/heap_3.c"),
 ]))
 
 env.AddSourceIf("LIB_LINEEDIT", File(Glob("cli/lineedit/*.c")), Dir("cli/lineedit"))
@@ -21,6 +21,16 @@ env.AddSourceIf("LIB_LIBUXB", File(Glob("other/uxb/*.c")), Dir("other/uxb"))
 env.AddSourceIf("LIB_SFFS", File(Glob("filesystem/sffs/*.c")), Dir("filesystem/sffs"))
 env.AddSourceIf("LIB_TREECLI", File(Glob("cli/treecli/*.c")), Dir("cli/treecli"))
 env.AddSourceIf("LIB_DUKTAPE", File(Glob("script/duktape/src-custom/duktape.c")), Dir("script/duktape/src-custom"))
+env.AddSourceIf("LIB_WREN", [File(Glob("script/wren/src/vm/*.c")), File(Glob("script/wren/src/optional/*.c"))], [Dir("script/wren/src/include"), Dir("script/wren/src/optional"), Dir("script/wren/src/vm")])
+env.AddSourceIf("LIB_GRAVITY", [
+	File(Glob("script/gravity/src/compiler/*.c")),
+	File(Glob("script/gravity/src/runtime/*.c")),
+	File(Glob("script/gravity/src/shared/*.c")),
+], [
+	Dir("script/gravity/src/compiler"),
+	Dir("script/gravity/src/runtime"),
+	Dir("script/gravity/src/shared"),
+])
 env.AddSourceIf("LIB_SPIFFS", File(Glob("filesystem/spiffs/src/*.c")), Dir("filesystem/spiffs/src"))
 env.AddSourceIf("LIB_ZFP",
 	[
@@ -48,6 +58,7 @@ env.AddSourceIf("LIB_CMSIS_DSP",
 		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_var_f32.c"),
 		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_std_q15.c"),
 		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_var_q15.c"),
+		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_mean_q31.c"),
 		File("other/cmsis/CMSIS/DSP/Source/FastMathFunctions/arm_sqrt_q15.c"),
 	], [
 		Dir("other/cmsis/CMSIS/DSP/Include"),
@@ -55,6 +66,7 @@ env.AddSourceIf("LIB_CMSIS_DSP",
 		Dir("other/cmsis/CMSIS/DSP/PrivateInclude"),
 	]
 )
+env.AddSourceIf("LIB_TINYCBOR", [File("other/tinycbor/src/cborparser.c"), File("other/tinycbor/src/cborencoder.c")], Dir("other/tinycbor/src"))
 
 
 duktape = env.Command(

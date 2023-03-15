@@ -1,0 +1,11 @@
+config APP_NWDAQ_BR28_FDC
+	bool "nwdaq-br28-fdc main application"
+
+menu "nwdaq-br28-fdc main application"
+ 	depends on APP_NWDAQ_BR28_FDC
+
+	config APP_NAME
+		string
+		default "nwdaq-br28-fdc-main-app"
+
+endmenu

@@ -39,7 +39,7 @@ static int32_t module_spibus_locm3_send(void *context, const uint8_t *txbuf, siz
 	struct module_spibus_locm3 *spibus = (struct module_spibus_locm3 *)context;
 
 	for (uint32_t i = 0; i < txlen; i++) {
-		#if defined(STM32L4)
+		#if defined(STM32L4) || defined(STM32G4)
 			spi_send8(spibus->port, txbuf[i]);
 			spi_read8(spibus->port);
 		#else
@@ -58,7 +58,7 @@ static int32_t module_spibus_locm3_receive(void *context, uint8_t *rxbuf, size_t
 	struct module_spibus_locm3 *spibus = (struct module_spibus_locm3 *)context;
 
 	for (uint32_t i = 0; i < rxlen; i++) {
-		#if defined(STM32L4)
+		#if defined(STM32L4) || defined(STM32G4)
 			spi_send8(spibus->port, 0x00);
 			rxbuf[i] = spi_read8(spibus->port);
 		#else
@@ -78,7 +78,7 @@ static int32_t module_spibus_locm3_exchange(void *context, const uint8_t *txbuf,
 	struct module_spibus_locm3 *spibus = (struct module_spibus_locm3 *)context;
 
 	for (uint32_t i = 0; i < len; i++) {
-		#if defined(STM32L4)
+		#if defined(STM32L4) || defined(STM32G4)
 			spi_send8(spibus->port, txbuf[i]);
 			rxbuf[i] = spi_read8(spibus->port);
 		#else
@@ -109,7 +109,7 @@ int32_t module_spibus_locm3_init(struct module_spibus_locm3 *spibus, const char 
 
 	/* Defaults only, can be changed using the spibus API. */
 	spi_set_master_mode(spibus->port);
-	spi_set_baudrate_prescaler(spibus->port, SPI_CR1_BR_FPCLK_DIV_2);
+	spi_set_baudrate_prescaler(spibus->port, SPI_CR1_BR_FPCLK_DIV_32);
 	spi_set_clock_polarity_0(spibus->port);
 	spi_set_clock_phase_0(spibus->port);
 	spi_set_full_duplex_mode(spibus->port);
@@ -117,7 +117,7 @@ int32_t module_spibus_locm3_init(struct module_spibus_locm3 *spibus, const char 
 	spi_enable_software_slave_management(spibus->port);
 	spi_send_msb_first(spibus->port);
 	spi_set_nss_high(spibus->port);
-	#if defined(STM32L4)
+	#if defined(STM32L4) || defined(STM32G4)
 		spi_fifo_reception_threshold_8bit(spibus->port);
 		spi_set_data_size(spibus->port, SPI_CR2_DS_8BIT);
 	#endif

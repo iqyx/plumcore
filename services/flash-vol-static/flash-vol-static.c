@@ -57,7 +57,7 @@ static flash_ret_t lv_erase(Flash *self, const size_t addr, size_t len) {
 				return FLASH_RET_FAILED;
 			}
 		}
-		
+
 		return FLASH_RET_OK;
 	}
 	return lv->parent->pv->vmt->erase(lv->parent->pv, addr + lv->start, len);
@@ -124,10 +124,10 @@ flash_vol_static_ret_t flash_vol_static_create(FlashVolStatic *self, const char 
 
 	for (size_t i = 0; i < FLASH_VOL_STATIC_LVS_MAX; i++) {
 		if (self->lvs[i].parent == NULL) {
-			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("creating LV '%s', start 0x%x, size 0x%x"),
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("creating LV '%s', start 0x%x, size %lu K"),
 				name,
 				start,
-				size
+				size / 1024
 			);
 
 			self->lvs[i].name = name;

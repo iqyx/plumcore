@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <waveform_source.h>
 
-#include "interface_spidev.h"
+#include <interfaces/spi.h>
 
 typedef enum {
 	ICM42688P_REG_DEVICE_CONFIG = 0x11,
@@ -39,7 +39,7 @@ typedef enum {
 
 typedef struct {
 	WaveformSource source;
-	struct interface_spidev *spidev;
+	SpiDev *spidev;
 	uint8_t who_am_i;
 } Icm42688p;
 
@@ -47,7 +47,7 @@ typedef struct {
 icm42688p_ret_t icm42688p_detect(Icm42688p *self);
 uint16_t icm42688p_fifo_count(Icm42688p *self);
 icm42688p_ret_t icm42688p_init_defaults(Icm42688p *self);
-icm42688p_ret_t icm42688p_init(Icm42688p *self, struct interface_spidev *spi_dev);
+icm42688p_ret_t icm42688p_init(Icm42688p *self, SpiDev *spi_dev);
 icm42688p_ret_t icm42688p_free(Icm42688p *self);
 
 /* WaveformSource API (Icm42688p.source) */

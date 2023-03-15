@@ -87,7 +87,9 @@
 #include "device_lora.h"
 
 #include "config_export.h"
-#include "system_debug.h"
+#if defined(CONFIG_SERVICE_CLI_SYSTEM_BOOTLOADER)
+	#include "system_debug.h"
+#endif
 #include "fs.h"
 
 
@@ -592,6 +594,7 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					},
 				},
+				#if defined(CONFIG_SERVICE_CLI_SYSTEM_BOOTLOADER)
 				Node {
 					Name "debug",
 					Subnodes {
@@ -612,7 +615,7 @@ const struct treecli_node *system_cli_tree = Node {
 						End
 					}
 				},
-
+				#endif
 				End
 			},
 			Commands {
