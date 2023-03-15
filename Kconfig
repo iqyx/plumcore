@@ -63,7 +63,7 @@ choice
 
 	menu "External application configuration"
 		depends on APP_EXTERNAL
-#		source "$(PLUMCORE_EXT_APP)/Kconfig"
+		source "$(PLUMCORE_EXT_APP)/Kconfig"
 	endmenu
 
 	source "applications/*/Kconfig"
