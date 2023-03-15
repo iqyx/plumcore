@@ -293,7 +293,6 @@ lora_modem_ret_t lora_modem_init(LoraModem *self, Stream *usart, Power *power) {
 		return LORA_MODEM_RET_FAILED;
 
 	}
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("modem version: '%s'"), self->response_str);
 
 	self->can_run = true;
 	xTaskCreate(lora_status_task, "lora_status", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, NULL);
@@ -324,9 +323,11 @@ lora_modem_ret_t lora_modem_free(LoraModem *self) {
 /** @todo no baudrate setting support yet */
 	/* Clear RX buffer. */
 lora_modem_ret_t lora_modem_regain_comms(LoraModem *self) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("regain comms"));
+	lora_modem_clear_input(self);
 	if (self->power != NULL) {
 		self->power->vmt->enable(self->power, false);
-		vTaskDelay(200);
+		vTaskDelay(500);
 		self->power->vmt->enable(self->power, true);
 	}
 
@@ -335,7 +336,6 @@ lora_modem_ret_t lora_modem_regain_comms(LoraModem *self) {
 	// usart_write(self->usart, (uint8_t *)"\0", 1, NULL);
 	/* Now change to the desired baudrate and send 0x55 to auto-detect it. */
 	// usart_baudrate(self->usart, 57600);
-	lora_modem_clear_input(self);
 	self->usart->vmt->write(self->usart, (void *)"\x55", 1);
 
 	uint32_t timeout = 10;
@@ -347,6 +347,7 @@ lora_modem_ret_t lora_modem_regain_comms(LoraModem *self) {
 			return LORA_MODEM_RET_FAILED;
 		}
 	} while (strncmp(self->response_str, "RN2483", 6));
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("modem version: '%s'"), self->response_str);
 
 	return LORA_MODEM_RET_OK;
 }
