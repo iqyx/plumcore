@@ -47,6 +47,10 @@ menu "Low-level platform drivers"
 			bool "STM32 SPI bus driver"
 			default y
 
+		config SERVICE_STM32_L4_PM
+			bool "Power manager for STM32L4 MCU family"
+			default y
+
 		source "services/stm32-uart/Kconfig"
 	endmenu
 endmenu
