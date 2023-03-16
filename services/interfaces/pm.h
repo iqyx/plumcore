@@ -53,6 +53,7 @@ enum pm_state {
 };
 
 typedef struct wakelock {
+	enum pm_state lock_state;
 	uint32_t lock;
 } WakeLock;
 
