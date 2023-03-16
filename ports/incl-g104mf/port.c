@@ -14,6 +14,7 @@
 #include <libopencm3/cm3/scb.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/scs.h>
+#include <libopencm3/cm3/systick.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/timer.h>
@@ -49,6 +50,7 @@
 #include <interfaces/stream.h>
 #include <interfaces/uart.h>
 #include <interfaces/clock.h>
+#include <interfaces/pm.h>
 
 #include <services/cli/system_cli_tree.h>
 #include <services/stm32-system-clock/clock.h>
@@ -62,6 +64,9 @@
 #include <services/stm32-uart/stm32-uart.h>
 #include <services/stm32-spi/stm32-spi.h>
 #include <services/si7006/si7006.h>
+
+#include <services/stm32-l4-pm/stm32-l4-pm.h>
+Stm32L4Pm mcu_pm;
 
 #define MODULE_NAME CONFIG_PORT_NAME
 
@@ -454,8 +459,9 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		/* SYNC32 output */
 		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
 
-		icm42688p_init(&accel2, &spi1_accel2.dev);
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel2.source, "accel2");
+		if (icm42688p_init(&accel2, &spi1_accel2.dev) == ICM42688P_RET_OK) {
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel2.source, "accel2");
+		}
 	}
 #endif
 
@@ -719,6 +725,13 @@ void vApplicationIdleHook(void) {
 
 #define PORT_LPTIM_ARR (0x8000)
 void vPortSetupTimerInterrupt(void) {
+	/* Setup systick for RUN and SLEEP modes (S0, S1). */
+	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
+	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
+	systick_set_reload(16e3 - 1);
+	systick_interrupt_enable();
+	systick_counter_enable();
+
 	lptimer_disable(LPTIM1);
 	lptimer_set_internal_clock_source(LPTIM1);
 	lptimer_enable_trigger(LPTIM1, LPTIM_CFGR_TRIGEN_SW);
@@ -775,16 +788,12 @@ static uint16_t lptim_time_till_now(uint32_t lptim, uint16_t last_time) {
  * FreeRTOS tickless implementation using LPTIM1
  *********************************************************************************************************************/
 
-volatile bool systick_enabled = true;
 void lptim1_isr(void) {
 	if (lptimer_get_flag(LPTIM1, LPTIM_ISR_CMPM)) {
 		lptimer_clear_flag(LPTIM1, LPTIM_ICR_CMPMCF);
-			if (systick_enabled) {
-				xPortSysTickHandler();
-				lptim_schedule_cmp(LPTIM1, 32, NULL);
-			}
-
+		/* The MCU is woken up here. Execution continues after WFI. */
 	}
+
 	if (lptimer_get_flag(LPTIM1, LPTIM_ISR_ARRM)) {
 		lptimer_clear_flag(LPTIM1, LPTIM_ICR_ARRMCF);
 			gpio_set(GPIOB, GPIO2);
@@ -838,7 +847,8 @@ void port_sleep(TickType_t idle_time) {
 		__asm volatile("cpsie i");
 
 	} else {
-		systick_enabled = false;
+		systick_counter_disable();
+
 
 		/* Enter STOP 1 mode. Set LPMS to 001, SLEEPDEEP bit and do a WFI later. */
 		SCB_SCR |= SCB_SCR_SLEEPDEEP;
@@ -862,5 +872,6 @@ void port_sleep(TickType_t idle_time) {
 
 	lptim_schedule_cmp(LPTIM1, 32, NULL);
 	__asm volatile("cpsie i");
-	systick_enabled = true;
+	systick_counter_enable();
+
 }

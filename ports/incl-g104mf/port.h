@@ -75,3 +75,8 @@ extern struct module_spidev_locm3 spi2_flash1;
 extern struct module_spi_flash flash1;
 extern struct module_rtc_locm3 rtc1;
 extern struct module_prng_simple prng;
+
+/* The STM32-L4 power manager interface implements some required IRQ handlers. It needs to know the singleton
+ * service instance which should handle those interrupts. */
+#define STM32_L4_PM_LPTIM_IRQ_DELEGATE mcu_pm
+
