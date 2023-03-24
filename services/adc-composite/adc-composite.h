@@ -18,6 +18,9 @@
 
 #define ADC_COMPOSITE_MAX_MUX 4
 
+#define VREF_MUX_CHANNEL_POS 0
+#define VREF_MUX_CHANNEL_NEG 1
+
 typedef enum  {
 	ADC_COMPOSITE_RET_OK = 0,
 	ADC_COMPOSITE_RET_FAILED,
@@ -51,7 +54,7 @@ typedef struct adc_composite {
 	float exc_voltage_v;
 
 	/* Reference voltage mux for AC excitation. Do not use if NULL. */
-	// Mux *vref_mux;
+	Mux *vref_mux;
 
 	/* Some parts of the composite ADC subsystem can be enabled on-demand using a dedicated Power device.
 	 * DO not power on/off anything if NULL. */
@@ -90,3 +93,4 @@ adc_composite_ret_t adc_composite_start_cont(AdcComposite *self);
 adc_composite_ret_t adc_composite_stop_cont(AdcComposite *self);
 adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self);
 adc_composite_ret_t adc_composite_set_exc_power(AdcComposite *self, Power *exc_power);
+adc_composite_ret_t adc_composite_set_vref_mux(AdcComposite *self, Mux *vref_mux);

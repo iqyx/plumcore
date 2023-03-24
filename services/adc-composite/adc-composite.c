@@ -150,9 +150,13 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 		/* Enable positive excitation voltage and switch the Vref mux appropriately. */
 		if (self->exc_power != NULL) {
 			self->exc_power->vmt->set_voltage(self->exc_power, self->exc_voltage_v);
-			/** @todo remove the shortcut */
-			gpio_set(VREF1_SEL_PORT, VREF1_SEL_PIN);
-			gpio_set(VREF2_SEL_PORT, VREF2_SEL_PIN);
+		}
+		/* If the reference muxing is enabled, set the mux to positive regardless of the
+		 * AC excitation setting. */
+		if (self->vref_mux != NULL) {
+			/** @todo when to disable the mux? */
+			self->vref_mux->vmt->enable(self->vref_mux, true);
+			self->vref_mux->vmt->select(self->vref_mux, VREF_MUX_CHANNEL_POS);
 		}
 
 		/* Measure the channel using positive excitation and positive Vref mux. */
@@ -164,13 +168,13 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 		mcp_measure(self->adc, &status, &v1);
 
 		if (c->ac_excitation) {
-
 			/* Switch excitation voltage and the corresponding mux to negative. */
 			if (self->exc_power != NULL) {
+				/* See the minus unary operator here. */
 				self->exc_power->vmt->set_voltage(self->exc_power, -self->exc_voltage_v);
-				/** @todo remove the shortcut */
-				gpio_clear(VREF1_SEL_PORT, VREF1_SEL_PIN);
-				gpio_clear(VREF2_SEL_PORT, VREF2_SEL_PIN);
+			}
+			if (self->vref_mux != NULL) {
+				self->vref_mux->vmt->select(self->vref_mux, VREF_MUX_CHANNEL_NEG);
 			}
 
 			int32_t v2 = 0;
@@ -201,6 +205,12 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 
 adc_composite_ret_t adc_composite_set_exc_power(AdcComposite *self, Power *exc_power) {
 	self->exc_power = exc_power;
+	return ADC_COMPOSITE_RET_OK;
+}
+
+
+adc_composite_ret_t adc_composite_set_vref_mux(AdcComposite *self, Mux *vref_mux) {
+	self->vref_mux = vref_mux;
 	return ADC_COMPOSITE_RET_OK;
 }
 

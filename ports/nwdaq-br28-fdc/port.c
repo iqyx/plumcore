@@ -201,6 +201,39 @@ const struct generic_mux_sel_line input_mux_lines[] = {
 };
 
 
+static mux_ret_t vref_mux_enable(Mux *self, bool enable) {
+	(void)self;
+	(void)enable;
+
+	return MUX_RET_OK;
+}
+
+
+static mux_ret_t vref_mux_select(Mux *self, uint32_t channel) {
+	(void)self;
+
+	if (channel == 0) {
+		/* Positive Vref mux. */
+		gpio_set(VREF1_SEL_PORT, VREF1_SEL_PIN);
+		gpio_set(VREF2_SEL_PORT, VREF2_SEL_PIN);
+		return MUX_RET_OK;
+	} else if (channel == 1) {
+		gpio_clear(VREF1_SEL_PORT, VREF1_SEL_PIN);
+		gpio_clear(VREF2_SEL_PORT, VREF2_SEL_PIN);
+		return MUX_RET_OK;
+	} else {
+		return MUX_RET_FAILED;
+	}
+}
+
+
+static const struct mux_vmt vref_mux_vmt = {
+	.enable = vref_mux_enable,
+	.select = vref_mux_select,
+};
+
+Mux vref_mux;
+
 static void adc_init(void) {
 	rcc_periph_clock_enable(RCC_SPI2);
 	/* GPIO is already initialised */
@@ -220,6 +253,9 @@ static void adc_init(void) {
 
 	generic_mux_init(&input_mux, MUX_EN_PORT, MUX_EN_PIN, &input_mux_lines, 2);
 
+	/* Vref mux init */
+	vref_mux.parent = NULL;
+	vref_mux.vmt = &vref_mux_vmt;
 }
 
 /**********************************************************************************************************************
