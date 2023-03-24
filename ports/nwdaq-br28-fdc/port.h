@@ -14,6 +14,7 @@
 #include "services/generic-power/generic-power.h"
 #include "services/generic-mux/generic-mux.h"
 #include "services/adc-mcp3564/mcp3564.h"
+#include <services/stm32-rtc/rtc.h>
 #include <interfaces/mux.h>
 
 
@@ -87,7 +88,9 @@ extern IServiceLocator *locator;
 extern GenericPower exc_power;
 extern GenericMux input_mux;
 extern Mux vref_mux;
+extern Mux mcp_mux;
 extern Mcp3564 mcp;
+extern Stm32Rtc rtc;
 
 int32_t port_early_init(void);
 #define PORT_EARLY_INIT_OK 0

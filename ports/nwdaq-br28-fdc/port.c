@@ -195,12 +195,15 @@ int32_t port_early_init(void) {
  * Main ADC initialisation
  **********************************************************************************************************************/
 
+
+/* Generic GPIO mux for channel 0-3/4-7 selection *********************************************************************/
 const struct generic_mux_sel_line input_mux_lines[] = {
 	{.port = MUX_A0_PORT, .pin = MUX_A0_PIN},
 	{.port = MUX_A1_PORT, .pin = MUX_A1_PIN},
 };
 
 
+/* Reference voltage positive/negative mux ****************************************************************************/
 static mux_ret_t vref_mux_enable(Mux *self, bool enable) {
 	(void)self;
 	(void)enable;
@@ -234,6 +237,41 @@ static const struct mux_vmt vref_mux_vmt = {
 
 Mux vref_mux;
 
+
+/* MCP3564 internal mux for selecting first/second half of inputs *****************************************************/
+static mux_ret_t mcp_mux_enable(Mux *self, bool enable) {
+	(void)self;
+	(void)enable;
+
+	return MUX_RET_OK;
+}
+
+
+static mux_ret_t mcp_mux_select(Mux *self, uint32_t channel) {
+	(void)self;
+
+	if (channel == 0) {
+		mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
+		mcp3564_update(&mcp);
+		return MUX_RET_OK;
+	} else if (channel == 1) {
+		mcp3564_set_mux(&mcp, MCP3564_MUX_CH2, MCP3564_MUX_CH3);
+		mcp3564_update(&mcp);
+		return MUX_RET_OK;
+	} else {
+		return MUX_RET_FAILED;
+	}
+}
+
+
+static const struct mux_vmt mcp_mux_vmt = {
+	.enable = mcp_mux_enable,
+	.select = mcp_mux_select,
+};
+
+Mux mcp_mux;
+
+
 static void adc_init(void) {
 	rcc_periph_clock_enable(RCC_SPI2);
 	/* GPIO is already initialised */
@@ -256,6 +294,10 @@ static void adc_init(void) {
 	/* Vref mux init */
 	vref_mux.parent = NULL;
 	vref_mux.vmt = &vref_mux_vmt;
+
+	/* MCP3564 mux init */
+	mcp_mux.parent = NULL;
+	mcp_mux.vmt = &mcp_mux_vmt;
 }
 
 /**********************************************************************************************************************

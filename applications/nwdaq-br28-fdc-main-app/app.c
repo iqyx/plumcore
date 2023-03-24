@@ -8,6 +8,7 @@ const struct adc_composite_channel adc_channels[] = {
 		.name = "channel/1",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 1},
+			{.mux = &mcp_mux, .channel = 0},
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
@@ -15,6 +16,7 @@ const struct adc_composite_channel adc_channels[] = {
 		.name = "channel/3",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 3},
+			{.mux = &mcp_mux, .channel = 0},
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
@@ -45,6 +47,7 @@ app_ret_t app_init(App *self) {
 	self->adc.interval_ms = 20;
 	adc_composite_set_exc_power(&self->adc, &exc_power.power);
 	adc_composite_set_vref_mux(&self->adc, &vref_mux);
+	adc_composite_set_clock(&self->adc, &rtc.clock);
 
 	adc_composite_start_cont(&self->adc);
 

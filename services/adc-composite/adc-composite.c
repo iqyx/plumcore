@@ -159,6 +159,11 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 			self->vref_mux->vmt->select(self->vref_mux, VREF_MUX_CHANNEL_POS);
 		}
 
+		struct timespec ts = {0};
+		if (self->clock != NULL) {
+			self->clock->get(self->clock->parent, &ts);
+		}
+
 		/* Measure the channel using positive excitation and positive Vref mux. */
 		uint8_t status = 0;
 		volatile int32_t v1 = 0;
@@ -190,9 +195,6 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 		NdArray array;
 		ndarray_init_view(&array, DTYPE_INT32, 1, &v1, sizeof(v1));
 
-		/** @todo get the exact sample time from somewhere */
-		struct timespec ts = {0};
-
 		/* Publish the array and clear the channel buffer. */
 		self->mqc->vmt->publish(self->mqc, c->name, &array, &ts);
 
@@ -214,4 +216,9 @@ adc_composite_ret_t adc_composite_set_vref_mux(AdcComposite *self, Mux *vref_mux
 	return ADC_COMPOSITE_RET_OK;
 }
 
+
+adc_composite_ret_t adc_composite_set_clock(AdcComposite *self, Clock *clock) {
+	self->clock = clock;
+	return ADC_COMPOSITE_RET_OK;
+}
 
