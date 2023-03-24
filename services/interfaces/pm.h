@@ -52,15 +52,18 @@ enum pm_state {
 	PM_STATE_SHUTDOWN = 6,
 };
 
-typedef struct wakelock {
-	enum pm_state lock_state;
+typedef struct wake_lock {
 	uint32_t lock;
 } WakeLock;
 
+typedef struct wake_lock_group {
+	uint32_t bitmask;
+} WakeLockGroup;
+
+
+
 typedef struct pm Pm;
 struct pm_vmt {
-	pm_ret_t (*acquire_wakelock)(Pm *self, WakeLock *wl, enum pm_state wl_state);
-	pm_ret_t (*release_wakelock)(Pm *self, WakeLock *wl);
 };
 
 typedef struct pm {
@@ -68,5 +71,6 @@ typedef struct pm {
 	void *parent;
 } Pm;
 
-
+pm_ret_t wakelock_acquire(WakeLockGroup *self, WakeLock *wl);
+pm_ret_t wakelock_release(WakeLockGroup *self, WakeLock *wl);
 

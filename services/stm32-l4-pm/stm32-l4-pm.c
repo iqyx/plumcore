@@ -185,23 +185,8 @@ stm32_l4_pm_ret_t stm32_l4_pm_lptimer_enable(void) {
 }
 
 
-static pm_ret_t acquire_wakelock(Pm *pm, WakeLock *wl, enum pm_state wl_state) {
-	Stm32L4Pm *self = (Stm32L4Pm *)pm->parent;
-
-	return PM_RET_FAILED;
-}
-
-
-static pm_ret_t release_wakelock(Pm *pm, WakeLock *wl) {
-	Stm32L4Pm *self = (Stm32L4Pm *)pm->parent;
-
-	return PM_RET_FAILED;
-}
-
 
 static const struct pm_vmt stm32_l4_pm_pm_vmt = {
-	.acquire_wakelock = acquire_wakelock,
-	.release_wakelock = release_wakelock
 };
 
 

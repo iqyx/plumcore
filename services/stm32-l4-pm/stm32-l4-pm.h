@@ -31,6 +31,8 @@ typedef enum {
 typedef struct {
 	volatile bool pm_ok;
 	Pm pm;
+
+	WakeLockGroup sleep_wlg;
 } Stm32L4Pm;
 
 
