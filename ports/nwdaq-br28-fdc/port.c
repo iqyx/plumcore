@@ -56,24 +56,30 @@
 #include <interfaces/i2c-bus.h>
 #include <interfaces/stream.h>
 #include <interfaces/uart.h>
+#include <interfaces/adc.h>
 
 #include <services/cli/system_cli_tree.h>
+
+/* Low level drivers for th STM32G4 family */
 #include <services/stm32-system-clock/clock.h>
 #include <services/stm32-rtc/rtc.h>
 #include <services/stm32-i2c/stm32-i2c.h>
 #include <services/stm32-uart/stm32-uart.h>
-
-#include <services/adc-mcp3564/mcp3564.h>
-#include <services/adc-composite/adc-composite.h>
+#include <services/stm32-adc/stm32-adc.h>
 #include <services/stm32-watchdog/watchdog.h>
 #include <services/stm32-dac/stm32-dac.h>
+#include <services/stm32-spi/stm32-spi.h>
+
+/* High level drivers */
+#include <services/adc-mcp3564/mcp3564.h>
+#include <services/adc-composite/adc-composite.h>
 #include <services/generic-power/generic-power.h>
 #include <services/generic-mux/generic-mux.h>
-#include <services/stm32-spi/stm32-spi.h>
 #include <services/spi-flash/spi-flash.h>
 #include <services/flash-vol-static/flash-vol-static.h>
 #include <services/fs-spiffs/fs-spiffs.h>
 #include <services/flash-fifo/flash-fifo.h>
+#include <services/adc-sensor/adc-sensor.h>
 
 /**
  * Port specific global variables and singleton instances.
@@ -131,6 +137,11 @@ int32_t port_early_init(void) {
 	/* Timer 6 needs to be initialized prior to starting the scheduler. It is
 	 * used as a reference clock for getting task statistics. */
 	rcc_periph_clock_enable(RCC_TIM6);
+
+	/* ADC is used for PCB temperature measurement */
+	rcc_periph_clock_enable(RCC_ADC1);
+	/** @todo needed fo G4? */
+	RCC_CCIPR |= 3 << 28;
 
 	return PORT_EARLY_INIT_OK;
 }
@@ -381,6 +392,29 @@ static void nor_flash_init(void) {
 	}
 }
 
+/**********************************************************************************************************************
+ * PCB temperature sensor
+ **********************************************************************************************************************/
+
+static const struct sensor_info pcb_temp_info = {
+	.description = "PCB temperature",
+	.unit = "°C"
+};
+
+Stm32Adc adc1;
+AdcSensor pcb_temp;
+static void temp_sensor_init(void) {
+	stm32_adc_init(&adc1, ADC1);
+	adc_sensor_init(&pcb_temp, &adc1.iface, 1, &pcb_temp_info);
+	pcb_temp.oversample = 16;
+	pcb_temp.div_low_fs = 4095.0f;
+	pcb_temp.div_low_high_r = 1000.0f;
+	pcb_temp.a = 0.0f;
+	pcb_temp.b = 0.25974f;
+	pcb_temp.c = -259.74f;
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&pcb_temp.iface, "pcb_temp");
+}
+
 
 void vPortSetupTimerInterrupt(void);
 void vPortSetupTimerInterrupt(void) {
@@ -437,6 +471,8 @@ static void port_setup_default_gpio(void) {
 	gpio_mode_setup(MUX_A0_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A0_PIN);
 	gpio_mode_setup(MUX_A1_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A1_PIN);
 
+	/* PCB temperature sensor */
+	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0);
 }
 
 
@@ -454,6 +490,7 @@ int32_t port_init(void) {
 	exc_init();
 	adc_init();
 	nor_flash_init();
+	temp_sensor_init();
 
 	return PORT_INIT_OK;
 }

@@ -5,9 +5,25 @@
 
 const struct adc_composite_channel adc_channels[] = {
 	{
+		.name = "channel/0",
+		.muxes = {
+			{.mux = &input_mux.mux, .channel = 0},
+			{.mux = &mcp_mux, .channel = 0},
+			{.mux = NULL},
+		},
+		.ac_excitation = true,
+	}, {
 		.name = "channel/1",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 1},
+			{.mux = &mcp_mux, .channel = 0},
+			{.mux = NULL},
+		},
+		.ac_excitation = true,
+	}, {
+		.name = "channel/2",
+		.muxes = {
+			{.mux = &input_mux.mux, .channel = 2},
 			{.mux = &mcp_mux, .channel = 0},
 			{.mux = NULL},
 		},
@@ -17,6 +33,38 @@ const struct adc_composite_channel adc_channels[] = {
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 3},
 			{.mux = &mcp_mux, .channel = 0},
+			{.mux = NULL},
+		},
+		.ac_excitation = true,
+	}, {
+		.name = "channel/4",
+		.muxes = {
+			{.mux = &input_mux.mux, .channel = 0},
+			{.mux = &mcp_mux, .channel = 1},
+			{.mux = NULL},
+		},
+		.ac_excitation = true,
+	}, {
+		.name = "channel/5",
+		.muxes = {
+			{.mux = &input_mux.mux, .channel = 1},
+			{.mux = &mcp_mux, .channel = 1},
+			{.mux = NULL},
+		},
+		.ac_excitation = true,
+	}, {
+		.name = "channel/6",
+		.muxes = {
+			{.mux = &input_mux.mux, .channel = 2},
+			{.mux = &mcp_mux, .channel = 1},
+			{.mux = NULL},
+		},
+		.ac_excitation = true,
+	}, {
+		.name = "channel/7",
+		.muxes = {
+			{.mux = &input_mux.mux, .channel = 3},
+			{.mux = &mcp_mux, .channel = 1},
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
@@ -57,6 +105,8 @@ app_ret_t app_init(App *self) {
 	mq_stats_init(&self->mq_stats_1, self->mq);
 	mq_stats_start(&self->mq_stats_1, "channel/batch/1", DTYPE_INT32, 32);
 	mq_stats_enable(&self->mq_stats_1, MQ_STATS_MEAN | MQ_STATS_NRMS);
+
+	mq_sensor_source_init(&self->pcb_temp_source, &pcb_temp.iface, "sensor/pcb-temp", self->mq, &rtc.clock, 1000);
 
 	plog_packager_init(&self->raw_data_packager, self->mq);
 	plog_packager_add_filter(&self->raw_data_packager, "channel/batch/#");
