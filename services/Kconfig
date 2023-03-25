@@ -296,6 +296,10 @@ menu "Communication server/client services"
 			bool "Service to relay data from a WaveformSource source"
 			default y
 
+		config SERVICE_MQ_SENSOR_SOURCE
+			bool "Publish sensor values periodically"
+			default y
+
 		if SERVICE_MQ_WS_SOURCE
 			config SERVICE_MQ_WS_SOURCE_MAX_TOPIC_LEN
 				int "Maximum length of the MQ topic"
