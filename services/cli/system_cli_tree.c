@@ -85,6 +85,7 @@
 	#include "device_clock.h"
 #endif
 #include "device_lora.h"
+#include "cli-applet.h"
 
 #include "config_export.h"
 #if defined(CONFIG_SERVICE_CLI_SYSTEM_BOOTLOADER)
@@ -109,7 +110,25 @@ const struct treecli_node *system_cli_tree = Node {
 				DNode {
 					Name "fsN",
 					.create = files_fsN_create,
-				}
+				},
+				End
+			}
+		},
+		Node {
+			Name "applet",
+			Commands {
+				Command {
+					Name "print",
+					.exec = applet_print,
+				},
+				End
+			},
+			DSubnodes {
+				DNode {
+					Name "appletN",
+					.create = applet_appletN_create,
+				},
+				End
 			}
 		},
 /*

@@ -70,6 +70,13 @@ choice
 endchoice
 
 
+# Applets are short running application or scripts usually with
+# user interraction (CLI, network)
+menu "Applets"
+	source "applets/*/Kconfig"
+endmenu
+
+
 # The build process itself is done in the *build* directory while
 # the artifacts are moved to the *bin* directory.
 menu "Build artifacts (firmware images)"
