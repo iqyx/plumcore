@@ -1,22 +1,9 @@
-/*
- * Create a sensor device using ADC input
+/* SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (C) 2018, Marek Koza, qyx@krtko.org
+ * Sensor device driver using an ADC input
  *
- * This file is part of uMesh node firmware (http://qyx.krtko.org/projects/umesh)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (c) 2018-2023, Marek Koza (qyx@krtko.org)
+ * All rights reserved.
  */
 
 #include <stdint.h>
@@ -24,8 +11,8 @@
 #include <string.h>
 
 #include "main.h"
-#include "interfaces/sensor.h"
-#include "interfaces/adc.h"
+#include <interfaces/sensor.h>
+#include <interfaces/adc.h>
 #include "adc-sensor.h"
 
 #ifdef MODULE_NAME
@@ -34,64 +21,64 @@
 #define MODULE_NAME "adc-sensor"
 
 
-static interface_sensor_ret_t adc_sensor_iface_info(void *context, ISensorInfo *info) {
-	if (u_assert(context != NULL) ||
-	    u_assert(info != NULL)) {
-		return INTERFACE_SENSOR_RET_FAILED;
+static sensor_ret_t adc_sensor_value_f(Sensor *sensor, float *value) {
+	AdcSensor *self = (AdcSensor *)sensor;
+
+	float f = 0.0f;
+	for (uint32_t i = 0; i < self->oversample; i++) {
+		adc_sample_t v = 0;
+		if (self->adc->vmt->convert_single(self->adc, self->input, &v) != ADC_RET_OK) {
+			return SENSOR_RET_FAILED;
+		}
+		f += (float)v;
+	}
+	f /= (float)self->oversample;
+
+	/* Resistor divider computation */
+	if (self->div_low_fs != 0.0f) {
+		f = (f * self->div_low_high_r) / (self->div_low_fs - f);
 	}
 
-	AdcSensor *self = (AdcSensor *)context;
-	memcpy(info, &self->info, sizeof(ISensorInfo));
+	/* Apply the conversion */
+	if (self->a != 0.0f || self->b != 0.0f || self->c != 0.0f) {
+		f = self->a * f * f + self->b * f + self->c;
+	}
 
-	return INTERFACE_SENSOR_RET_OK;
+	if (value != NULL) {
+		*value = f;
+	}
+
+	return SENSOR_RET_OK;
 }
 
 
-static interface_sensor_ret_t adc_sensor_iface_value(void *context, float *value) {
-	if (u_assert(context != NULL) ||
-	    u_assert(value != NULL)) {
-		return INTERFACE_SENSOR_RET_FAILED;
-	}
-
-	AdcSensor *self = (AdcSensor *)context;
-
-	/* Get ADC value in microvolts. */
-	int32_t sample = 0;
-	iadc_sample(self->adc, self->input, &sample);
-
-	*value = (float)sample / 1000000.0 * (float)self->multiplier / (float)self->divider;
-
-	return INTERFACE_SENSOR_RET_OK;
-}
+static const struct sensor_vmt adc_sensor_vmt = {
+	.value_f = adc_sensor_value_f,
+};
 
 
-adc_sensor_ret_t adc_sensor_init(AdcSensor *self, IAdc *adc, uint32_t input, ISensorInfo *info, int32_t multiplier, int32_t divider) {
-	if (u_assert(self != NULL)) {
+adc_sensor_ret_t adc_sensor_init(AdcSensor *self, Adc *adc, uint32_t input, const struct sensor_info *info) {
+	memset(self, 0, sizeof(AdcSensor));
+
+	if (adc == NULL || info == NULL) {
 		return ADC_SENSOR_RET_FAILED;
 	}
 
-	memset(self, 0, sizeof(AdcSensor));
 	self->adc = adc;
 	self->input = input;
-	self->multiplier = multiplier;
-	self->divider = divider;
-	memcpy(&self->info, info, sizeof(ISensorInfo));
+	self->oversample = 1;
 
-	interface_sensor_init(&(self->iface));
-	self->iface.vmt.info = adc_sensor_iface_info;
-	self->iface.vmt.value = adc_sensor_iface_value;
-	self->iface.vmt.context = (void *)self;
+	self->iface.vmt = &adc_sensor_vmt;
+	self->iface.info = info;
+	self->iface.parent = self;
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("module initialized"));
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("sensor initialised on channel %u"), input);
 	return ADC_SENSOR_RET_OK;
 }
 
 
 adc_sensor_ret_t adc_sensor_free(AdcSensor *self) {
-	if (u_assert(self != NULL)) {
-		return ADC_SENSOR_RET_FAILED;
-	}
-
+	(void)self;
 	return ADC_SENSOR_RET_OK;
 }
 
