@@ -1,0 +1,6 @@
+Import("env")
+Import("objs")
+Import("conf")
+
+if conf["APPLET_TEMPCO_CALIBRATION"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))

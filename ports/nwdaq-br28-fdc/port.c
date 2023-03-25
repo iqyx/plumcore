@@ -83,6 +83,7 @@
 
 /* Applets */
 #include <applets/hello-world/hello-world.h>
+#include <applets/tempco-calibration/tempco-cal.h>
 
 /**
  * Port specific global variables and singleton instances.
@@ -496,6 +497,7 @@ int32_t port_init(void) {
 	temp_sensor_init();
 
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&tempco_calibration, "tempco-calibration");
 
 	return PORT_INIT_OK;
 }

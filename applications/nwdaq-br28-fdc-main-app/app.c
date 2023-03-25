@@ -3,7 +3,7 @@
 
 #define MODULE_NAME "app"
 
-const struct adc_composite_channel adc_channels[] = {
+struct adc_composite_channel adc_channels[] = {
 	{
 		.name = "channel/0",
 		.muxes = {
@@ -12,6 +12,8 @@ const struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
+		.pregain = 43.0f,
+		.gain = 4.0f,
 	}, {
 		.name = "channel/1",
 		.muxes = {
@@ -20,6 +22,14 @@ const struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
+		.pregain = 43.0f,
+		.gain = 4.0f,
+		.offset_calib = -0.026f,
+		.gain_calib = 0.972861861f,
+
+		.temp_compensation = true,
+		.tc_a = 8.6171e-07,
+		.tc_b = -3.5892e-04,
 	}, {
 		.name = "channel/2",
 		.muxes = {
@@ -28,6 +38,8 @@ const struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
+		.pregain = 43.0f,
+		.gain = 4.0f,
 	}, {
 		.name = "channel/3",
 		.muxes = {
@@ -36,6 +48,14 @@ const struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
+		.pregain = 43.0f,
+		.gain = 4.0f,
+		.offset_calib = -0.026f,
+		.gain_calib = 0.972861861f,
+
+		.temp_compensation = true,
+		.tc_a = 2.7011e-07,
+		.tc_b = -3.3312e-04,
 	}, {
 		.name = "channel/4",
 		.muxes = {
@@ -44,6 +64,8 @@ const struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
+		.pregain = 43.0f,
+		.gain = 4.0f,
 	}, {
 		.name = "channel/5",
 		.muxes = {
@@ -52,6 +74,8 @@ const struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
+		.pregain = 43.0f,
+		.gain = 4.0f,
 	}, {
 		.name = "channel/6",
 		.muxes = {
@@ -60,6 +84,8 @@ const struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
+		.pregain = 43.0f,
+		.gain = 4.0f,
 	}, {
 		.name = "channel/7",
 		.muxes = {
@@ -68,6 +94,8 @@ const struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = true,
+		.pregain = 43.0f,
+		.gain = 4.0f,
 	}, {
 		.name = NULL,
 	},
@@ -96,6 +124,7 @@ app_ret_t app_init(App *self) {
 	adc_composite_set_exc_power(&self->adc, &exc_power.power);
 	adc_composite_set_vref_mux(&self->adc, &vref_mux);
 	adc_composite_set_clock(&self->adc, &rtc.clock);
+	adc_composite_set_device_temp(&self->adc, &pcb_temp.iface, "channel/temp");
 
 	adc_composite_start_cont(&self->adc);
 
@@ -106,7 +135,7 @@ app_ret_t app_init(App *self) {
 	mq_stats_start(&self->mq_stats_1, "channel/batch/1", DTYPE_INT32, 32);
 	mq_stats_enable(&self->mq_stats_1, MQ_STATS_MEAN | MQ_STATS_NRMS);
 
-	mq_sensor_source_init(&self->pcb_temp_source, &pcb_temp.iface, "sensor/pcb-temp", self->mq, &rtc.clock, 1000);
+	// mq_sensor_source_init(&self->pcb_temp_source, &pcb_temp.iface, "sensor/pcb-temp", self->mq, &rtc.clock, 1000);
 
 	plog_packager_init(&self->raw_data_packager, self->mq);
 	plog_packager_add_filter(&self->raw_data_packager, "channel/batch/#");

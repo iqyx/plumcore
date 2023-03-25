@@ -139,7 +139,62 @@ static void set_muxes(AdcComposite *self, const struct adc_composite_mux m[]) {
 }
 
 
+static adc_composite_ret_t process_sample(AdcComposite *self, const struct adc_composite_channel *channel, int32_t sample, struct timespec *ts) {
+	/* Adc composite is always processing results in uV/V */
+	float f = sample / 8388607.0f * 1000000.0f;
+
+	/* Apply the current gain settings. */
+	if (channel->gain != 0.0f) {
+		f /= channel->gain;
+	}
+	if (channel->pregain != 0.0f) {
+		f /= channel->pregain;
+	}
+
+	/* Perform offset and gain adjustment if requested. */
+	f += channel->offset_calib;
+	if (channel->gain_calib != 0.0f) {
+		f *= channel->gain_calib;
+	}
+
+	/* And finally do a temperature compensation if requested. */
+	if (channel->temp_compensation) {
+		f /= (channel->tc_a * self->temp_c * self->temp_c + channel->tc_b * self->temp_c + 1.0f);
+	}
+
+	NdArray array;
+	ndarray_init_view(&array, DTYPE_FLOAT, 1, &f, sizeof(f));
+
+	/* Publish the array and clear the channel buffer. */
+	self->mqc->vmt->publish(self->mqc, channel->name, &array, ts);
+}
+
+
+static adc_composite_ret_t measure_temp(AdcComposite *self) {
+	if (self->device_temp != NULL && self->device_temp->vmt->value_f != NULL) {
+		self->device_temp->vmt->value_f(self->device_temp, &self->temp_c);
+
+		if (self->temp_topic != NULL) {
+			struct timespec ts = {0};
+			if (self->clock != NULL) {
+				self->clock->get(self->clock->parent, &ts);
+			}
+
+			NdArray array;
+			ndarray_init_view(&array, DTYPE_FLOAT, 1, &self->temp_c, sizeof(float));
+
+			self->mqc->vmt->publish(self->mqc, self->temp_topic, &array, &ts);
+		}
+	} else {
+		self->temp_c = ADC_COMPOSITE_DEFAULT_TEMP_C;
+	}
+}
+
+
 adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
+	/* Measure the device temperature at the beginning of the sequence. */
+	measure_temp(self);
+
 	/* Iterate over all channels. */
 	const struct adc_composite_channel *c = *(self->channels);
 	while (c->name != NULL) {
@@ -192,11 +247,7 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 			v1 = (v1 - v2) / 2;
 		}
 
-		NdArray array;
-		ndarray_init_view(&array, DTYPE_INT32, 1, &v1, sizeof(v1));
-
-		/* Publish the array and clear the channel buffer. */
-		self->mqc->vmt->publish(self->mqc, c->name, &array, &ts);
+		process_sample(self, c, v1, &ts);
 
 		c++;
 	}
@@ -222,3 +273,8 @@ adc_composite_ret_t adc_composite_set_clock(AdcComposite *self, Clock *clock) {
 	return ADC_COMPOSITE_RET_OK;
 }
 
+adc_composite_ret_t adc_composite_set_device_temp(AdcComposite *self, Sensor *device_temp, const char *topic) {
+	self->device_temp = device_temp;
+	self->temp_topic = topic;
+	return ADC_COMPOSITE_RET_OK;
+}

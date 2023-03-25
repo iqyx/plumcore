@@ -6,7 +6,7 @@
  * All rights reserved.
  */
 
-#pragma once;
+#pragma once
 
 #include <interfaces/applet.h>
 
