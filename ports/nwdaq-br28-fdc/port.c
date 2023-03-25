@@ -81,6 +81,9 @@
 #include <services/flash-fifo/flash-fifo.h>
 #include <services/adc-sensor/adc-sensor.h>
 
+/* Applets */
+#include <applets/hello-world/hello-world.h>
+
 /**
  * Port specific global variables and singleton instances.
  */
@@ -491,6 +494,8 @@ int32_t port_init(void) {
 	adc_init();
 	nor_flash_init();
 	temp_sensor_init();
+
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
 
 	return PORT_INIT_OK;
 }
