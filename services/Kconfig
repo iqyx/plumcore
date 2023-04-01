@@ -51,6 +51,10 @@ menu "Low-level platform drivers"
 			bool "Power manager for STM32L4 MCU family"
 			default y
 
+		config SERVICE_NBUS
+			bool "NBUS sensor bus driver for STM32 FDCAN"
+			default n
+
 		source "services/stm32-uart/Kconfig"
 	endmenu
 endmenu
@@ -124,6 +128,10 @@ menu "High level device drivers"
 
 	config SERVICE_BQ35100
 		bool "TI BQ35100 primary battery gauge"
+		default n
+
+	config SERVICE_ATSHA204
+		bool "ATSHA204 Atmel CryptoAuthentication IC"
 		default n
 
 	config SERVICE_GPS_UBLOX

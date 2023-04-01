@@ -41,6 +41,7 @@
 #include <libopencm3/stm32/i2c.h>
 #include <libopencm3/stm32/exti.h>
 #include <libopencm3/stm32/flash.h>
+#include <libopencm3/stm32/fdcan.h>
 
 #include <main.h>
 #include "port.h"
@@ -69,6 +70,9 @@
 #include <services/stm32-watchdog/watchdog.h>
 #include <services/stm32-dac/stm32-dac.h>
 #include <services/stm32-spi/stm32-spi.h>
+#include <services/nbus/nbus.h>
+#include <services/nbus/nbus-root.h>
+#include <services/nbus/nbus-log.h>
 
 /* High level drivers */
 #include <services/adc-mcp3564/mcp3564.h>
@@ -147,6 +151,12 @@ int32_t port_early_init(void) {
 	/** @todo needed fo G4? */
 	RCC_CCIPR |= 3 << 28;
 
+	/* FDCAN interface */
+	rcc_periph_clock_enable(RCC_FDCAN);
+	rcc_periph_clock_enable(SCC_FDCAN);
+	/* Set PCLK as FDCAN clock */
+	RCC_CCIPR |= (RCC_CCIPR_FDCAN_PCLK << RCC_CCIPR_FDCAN_SHIFT);
+
 	return PORT_EARLY_INIT_OK;
 }
 
@@ -165,7 +175,7 @@ int32_t port_early_init(void) {
 		rcc_periph_clock_enable(RCC_USART2);
 
 		nvic_enable_irq(NVIC_USART2_IRQ);
-		nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
+		nvic_set_priority(NVIC_USART2_IRQ, 7 * 16);
 
 		/* Initialise and configure the UART */
 		stm32_uart_init(&uart2, USART2);
@@ -197,11 +207,11 @@ int32_t port_early_init(void) {
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_status.iface.descriptor, "led_status");
 
 		gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
-		module_led_init(&led_error, "led_error");
-		module_led_set_port(&led_error, GPIOC, GPIO10);
-		interface_led_loop(&led_error.iface, 0xf);
-		hal_interface_set_name(&(led_error.iface.descriptor), "led_error");
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_error.iface.descriptor, "led_error");
+		// module_led_init(&led_error, "led_error");
+		// module_led_set_port(&led_error, GPIOC, GPIO10);
+		// interface_led_loop(&led_error.iface, 0xf);
+		// hal_interface_set_name(&(led_error.iface.descriptor), "led_error");
+		// iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_error.iface.descriptor, "led_error");
 	}
 #endif
 
@@ -420,6 +430,43 @@ static void temp_sensor_init(void) {
 }
 
 
+/**********************************************************************************************************************
+ * NBUS/CAN-FD interface
+ **********************************************************************************************************************/
+
+
+Nbus nbus;
+NbusRoot root_channel;
+NbusLog log_channel;
+static void can_init(void) {
+	rcc_periph_reset_pulse(RST_FDCAN);
+	fdcan_init(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
+	fdcan_set_can(CAN1, false, false, true, false, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
+	fdcan_set_fdcan(CAN1, true, true, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
+
+	FDCAN_IE(CAN1) |= FDCAN_IE_RF0NE;
+	FDCAN_ILE(CAN1) |= FDCAN_ILE_INT0;
+	// FDCAN_ILS(CAN1) |= FDCAN_ILS_RxFIFO0;
+	// nvic_enable_irq(NVIC_FDCAN1_INTR0_IRQ);
+	fdcan_start(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
+
+	nbus_init(&nbus, CAN1);
+	/* TIL: first set the interrupt priority, THEN enable it. */
+	nvic_set_priority(NVIC_FDCAN1_INTR1_IRQ, 6 * 16);
+	nvic_enable_irq(NVIC_FDCAN1_INTR1_IRQ);
+
+	nbus_root_init(&root_channel, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
+	nbus_log_init(&log_channel, "log", &root_channel.channel);
+}
+
+
+void fdcan1_intr1_isr(void) {
+	gpio_toggle(GPIOC, GPIO10);
+	nbus_irq_handler(&nbus);
+}
+
+
+
 void vPortSetupTimerInterrupt(void);
 void vPortSetupTimerInterrupt(void) {
 	/* Initialize systick interrupt for FreeRTOS. */
@@ -477,6 +524,14 @@ static void port_setup_default_gpio(void) {
 
 	/* PCB temperature sensor */
 	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0);
+
+	/* CAN port. Enable the transceiver permanently (SHDN = L). */
+	gpio_mode_setup(CAN_SHDN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CAN_SHDN_PIN);
+	gpio_clear(CAN_SHDN_PORT, CAN_SHDN_PIN);
+	gpio_mode_setup(CAN_RX_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, CAN_RX_PIN);
+	gpio_set_af(CAN_RX_PORT, CAN_AF, CAN_RX_PIN);
+	gpio_mode_setup(CAN_TX_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, CAN_TX_PIN);
+	gpio_set_af(CAN_TX_PORT, CAN_AF, CAN_TX_PIN);
 }
 
 
@@ -495,6 +550,7 @@ int32_t port_init(void) {
 	adc_init();
 	nor_flash_init();
 	temp_sensor_init();
+	can_init();
 
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&tempco_calibration, "tempco-calibration");
