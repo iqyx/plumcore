@@ -25,11 +25,11 @@ struct adc_composite_channel adc_channels[] = {
 		.pregain = 43.0f,
 		.gain = 4.0f,
 		.offset_calib = -0.026f,
-		.gain_calib = 0.972861861f,
+		// .gain_calib = 0.972861861f,
 
-		.temp_compensation = true,
-		.tc_a = 8.6171e-07,
-		.tc_b = -3.5892e-04,
+		// .temp_compensation = true,
+		// .tc_a = 8.6171e-07,
+		// .tc_b = -3.5892e-04,
 	}, {
 		.name = "channel/2",
 		.muxes = {
@@ -51,11 +51,11 @@ struct adc_composite_channel adc_channels[] = {
 		.pregain = 43.0f,
 		.gain = 4.0f,
 		.offset_calib = -0.026f,
-		.gain_calib = 0.972861861f,
+		// .gain_calib = 0.972861861f,
 
-		.temp_compensation = true,
-		.tc_a = 2.7011e-07,
-		.tc_b = -3.3312e-04,
+		// .temp_compensation = true,
+		// .tc_a = 2.7011e-07,
+		// .tc_b = -3.3312e-04,
 	}, {
 		.name = "channel/4",
 		.muxes = {
