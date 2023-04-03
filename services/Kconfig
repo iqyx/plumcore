@@ -59,6 +59,10 @@ menu "Low-level platform drivers"
 			bool "NBUS sensor bus driver for STM32 FDCAN"
 			default n
 
+		config SERVICE_NBUS_SWITCH
+			bool "NBUS CAN-FD switch"
+			default n
+
 		source "services/stm32-uart/Kconfig"
 	endmenu
 endmenu
