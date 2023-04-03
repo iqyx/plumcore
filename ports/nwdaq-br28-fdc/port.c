@@ -70,9 +70,7 @@
 #include <services/stm32-watchdog/watchdog.h>
 #include <services/stm32-dac/stm32-dac.h>
 #include <services/stm32-spi/stm32-spi.h>
-#include <services/nbus/nbus.h>
-#include <services/nbus/nbus-root.h>
-#include <services/nbus/nbus-log.h>
+#include <services/stm32-fdcan/stm32-fdcan.h>
 
 /* High level drivers */
 #include <services/adc-mcp3564/mcp3564.h>
@@ -84,6 +82,9 @@
 #include <services/fs-spiffs/fs-spiffs.h>
 #include <services/flash-fifo/flash-fifo.h>
 #include <services/adc-sensor/adc-sensor.h>
+#include <services/nbus/nbus.h>
+#include <services/nbus/nbus-root.h>
+#include <services/nbus/nbus-log.h>
 
 /* Applets */
 #include <applets/hello-world/hello-world.h>
@@ -434,7 +435,7 @@ static void temp_sensor_init(void) {
  * NBUS/CAN-FD interface
  **********************************************************************************************************************/
 
-
+Stm32Fdcan can1;
 Nbus nbus;
 NbusRoot root_channel;
 NbusLog log_channel;
@@ -450,10 +451,12 @@ static void can_init(void) {
 	// nvic_enable_irq(NVIC_FDCAN1_INTR0_IRQ);
 	fdcan_start(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
 
-	nbus_init(&nbus, CAN1);
+	stm32_fdcan_init(&can1, CAN1);
 	/* TIL: first set the interrupt priority, THEN enable it. */
 	nvic_set_priority(NVIC_FDCAN1_INTR1_IRQ, 6 * 16);
 	nvic_enable_irq(NVIC_FDCAN1_INTR1_IRQ);
+
+	nbus_init(&nbus, &can1.iface);
 
 	nbus_root_init(&root_channel, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
 	nbus_log_init(&log_channel, "log", &root_channel.channel);
@@ -462,7 +465,7 @@ static void can_init(void) {
 
 void fdcan1_intr1_isr(void) {
 	gpio_toggle(GPIOC, GPIO10);
-	nbus_irq_handler(&nbus);
+	stm32_fdcan_irq_handler(&can1);
 }
 
 

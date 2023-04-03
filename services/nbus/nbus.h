@@ -11,6 +11,8 @@
 #include <stdint.h>
 
 #include <main.h>
+#include <interfaces/can.h>
+#include "blake2s-siv.h"
 
 typedef uint16_t nbus_channel_id_t;
 typedef uint8_t nbus_opcode_t;
@@ -32,6 +34,9 @@ struct nbus_id {
 #define NBUS_OP_DATA_MIN 0x40
 #define NBUS_OP_DATA_MAX 0xbf
 #define NBUS_OP_TRAILING 0xc0
+
+#define NBUS_KEY_SIZE 16
+#define NBUS_SIV_LEN 8
 
 enum nbus_discovery_stream {
 	NBUS_DISC_STREAM_MASK_PROBE = 1,
@@ -155,6 +160,12 @@ typedef struct nbus_channel {
 	const char * const *descriptor_strings;
 	size_t descriptor_strings_count;
 
+	/* Blake2s-SIV message authentication and ancryption */
+	uint8_t key[NBUS_KEY_SIZE];
+	uint8_t ke[B2S_KE_LEN];
+	uint8_t km[B2S_KM_LEN];
+
+
 } NbusChannel;
 
 
@@ -165,15 +176,14 @@ typedef struct nbus {
 	/* A special discovery protocol channel with ID 0 */
 	NbusChannel discovery_channel;
 
-	uint32_t can;
+	Can *can;
 
 	/* RX thread */
-	SemaphoreHandle_t rx_sem;
 	TaskHandle_t receive_task;
 } Nbus;
 
 
-nbus_ret_t nbus_init(Nbus *self, uint32_t can);
+nbus_ret_t nbus_init(Nbus *self, Can *can);
 nbus_ret_t nbus_add_channel(Nbus *self, NbusChannel *channel);
 nbus_ret_t nbus_irq_handler(Nbus *self);
 

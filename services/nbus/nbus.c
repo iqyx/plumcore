@@ -11,9 +11,11 @@
 #include <string.h>
 
 #include <libopencm3/stm32/fdcan.h>
-
 #include <main.h>
+#include <blake2.h>
+#include <interfaces/can.h>
 #include "nbus.h"
+#include "blake2s-siv.h"
 
 #define MODULE_NAME "nbus"
 
@@ -23,7 +25,7 @@
  * NBUS uses a CAN2.0b or CAN-FD frames with 29 bit identifiers arranged as:
  * ...m cccc cccc cccc cccc Rrrr oooo oooo
  *
- * - m - multicast is considered low priority, this bit is first in the ID,
+ * - m - multicast is considered low priority, this bit is the first in the ID,
  *       set to 1 to publish a multicast message
  * - c - 16 bit channel identifier
  * - R - response if R = 1
@@ -42,6 +44,13 @@
  * 0x40-0xbf - data fragment
  * 0xc0      - blake2s-SIV trailing fragment
  *             MAC (8, 16 or 32 bytes allowed)
+ *
+ * @todo
+ *
+ * - change the way descriptors are read. Transform EP0 to a C&C EP with functions
+ *   to set or get various parameters, single or multiple. Use CBOR, ideally.
+ * - introduce a TFTP protocol equivalent
+ * - introduce a bootloader configuration protocol
  */
 
 
@@ -193,10 +202,22 @@ static nbus_ret_t nbus_channel_receive(NbusChannel *self, struct nbus_id *id, vo
 				return NBUS_RET_FAILED;
 			}
 
+			if (self->peripheral) {
+				/* In the peripheral mode it is hard to decide which packets to accept
+				 * (the peripheral could have been reset in the middle).
+				 * Accept all so far. */
+				self->packet_counter = msg->counter;
+			} else {
+				/* We are in the initiator mode. Packet counter must match the previous value
+				 * stored in the packet_counter value. The pacet is invalid if there is no match. */
+				if (msg->counter != self->packet_counter) {
+					return NBUS_RET_FAILED;
+				}
+			}
+
 			self->in_progress = true;
 			self->buf_len = 0;
 			self->packet_size = msg->len;
-			self->packet_counter = msg->counter;
 			self->frame_expected = 0;
 			self->ep = ep;
 
@@ -244,7 +265,7 @@ static nbus_ret_t nbus_channel_receive(NbusChannel *self, struct nbus_id *id, vo
 
 			/* Process and return the descriptor if endpoint == 0 */
 			if (self->ep == 0 && self->multicast == false && id->response == false) {
-				return nbus_channel_rx_descriptor(self, buf, len);
+				return nbus_channel_rx_descriptor(self, self->buf, self->buf_len);
 			}
 
 			self->in_progress = false;
@@ -299,27 +320,30 @@ static uint32_t nbus_build_id(struct nbus_id *id) {
 
 
 static nbus_ret_t nbus_receive(Nbus *self) {
-	uint8_t rx_data[64] = {0};
-	uint32_t rx_id;
-	bool rx_ext_id;
-	bool rx_rtr;
-	uint8_t rx_fmi;
-	uint8_t rx_length;
-	uint16_t rx_timestamp;
+	struct can_message msg = {0};
 
-	if (fdcan_receive(CAN1, FDCAN_FIFO0, true, &rx_id, &rx_ext_id, &rx_rtr, &rx_fmi, &rx_length, rx_data, &rx_timestamp) != FDCAN_E_OK) {
-		return NBUS_RET_VOID;
+	if (self->can == NULL || self->can->vmt->receive == NULL) {
+		return NBUS_RET_FAILED;
+	}
+
+	/** @todo adjust the timeout */
+	if (self->can->vmt->receive(self->can, &msg, 10000) != CAN_RET_OK) {
+		return NBUS_RET_FAILED;
+	}
+
+	if (msg.extid == false) {
+		return NBUS_RET_FAILED;
 	}
 
 	struct nbus_id id;
-	nbus_parse_id(rx_id, &id);
+	nbus_parse_id(msg.id, &id);
 
 	NbusChannel *found = nbus_channel_find_by_id(self, id.channel);
 	if (found == NULL) {
 		return NBUS_RET_VOID;
 	}
 
-	return nbus_channel_receive(found, &id, rx_data, rx_length);
+	return nbus_channel_receive(found, &id, msg.buf, msg.len);
 }
 
 
@@ -327,32 +351,10 @@ static void nbus_receive_task(void *p) {
 	Nbus *self = (Nbus *)p;
 
 	while (true) {
-		/* Wait for the interrupt */
-		xSemaphoreTake(self->rx_sem, portMAX_DELAY);
 		nbus_receive(self);
-		// xSemaphoreGive(self->rx_sem);
 	}
 	vTaskDelete(NULL);
 }
-
-
-nbus_ret_t nbus_irq_handler(Nbus *self) {
-	if (FDCAN_IR(CAN1) & FDCAN_IR_RF0N) {
-		FDCAN_IR(CAN1) |= FDCAN_IR_RF0N;
-
-		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-		if (self->rx_sem != NULL) {
-			xSemaphoreGiveFromISR(self->rx_sem, &xHigherPriorityTaskWoken);
-		}
-		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-	}
-	if (FDCAN_IR(CAN1) & FDCAN_IR_RF0F) {
-		FDCAN_IR(CAN1) |= FDCAN_IR_RF0F;
-	}
-
-	return NBUS_RET_OK;
-}
-
 
 nbus_ret_t nbus_channel_init(NbusChannel *self, const char *name) {
 	memset(self, 0, sizeof(NbusChannel));
@@ -365,17 +367,21 @@ nbus_ret_t nbus_channel_init(NbusChannel *self, const char *name) {
 static nbus_ret_t nbus_channel_send_frame(NbusChannel *self, struct nbus_id *id, void *buf, size_t len) {
 	Nbus *nbus = self->parent;
 
-	while (!fdcan_available_tx(nbus->can)) {
-		;
+	struct can_message msg = {0};
+	msg.id = nbus_build_id(id);
+	msg.extid = true;
+	memcpy(&msg.buf, buf, len);
+	msg.len = len;
+
+	if (nbus->can == NULL || nbus->can->vmt->send == NULL) {
+		return NBUS_RET_FAILED;
 	}
 
-	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("send frame channel %u, opcode 0x%02x"), self->channel, id->opcode);
+	/** @todo adjust the timeout */
+	if (nbus->can->vmt->send(nbus->can, &msg, 1000) != CAN_RET_OK) {
+		return NBUS_RET_FAILED;
+	}
 
-	/* Always send extended ID */
-	fdcan_transmit(nbus->can, nbus_build_id(id), true, false, false, false, len, buf);
-
-
-	/** @todo check fdcan_transmit return value */
 	return NBUS_RET_OK;
 }
 
@@ -389,6 +395,9 @@ nbus_ret_t nbus_channel_send(NbusChannel *self, nbus_endpoint_t ep, void *buf, s
 		return NBUS_RET_VOID;
 	}
 
+	blake2s_state b2;
+	blake2s_init_key(&b2, NBUS_SIV_LEN, self->km, B2S_KM_LEN);
+
 	/* Send a leading frame first. */
 	struct nbus_id lf = {
 		.channel = self->channel,
@@ -396,15 +405,25 @@ nbus_ret_t nbus_channel_send(NbusChannel *self, nbus_endpoint_t ep, void *buf, s
 		.response = self->peripheral,
 		.opcode = NBUS_OP_LEADING_MIN + ep
 	};
+	if (self->peripheral == false) {
+		self->packet_counter++;
+	}
 	struct nbus_leading_frame_msg lfbuf = {
-		.counter = 0,
+		/* For a peripheral mode channel, a packet is first received from the initiator saving the
+		 * request packet counter. The response simply copies the packet counter value.
+		 * For a initiator mode, the packet_counter variable contains the next valid value to be sent
+		 * (it is incremented beforehand). When waiting for a response, we are expecting the same
+		 * value as we sent before. */
+		.counter = self->packet_counter,
 		.len = len,
 		.flags = 0
 	};
 	nbus_channel_send_frame(self, &lf, &lfbuf, sizeof(lfbuf));
+	blake2s_update(&b2, &lfbuf, sizeof(lfbuf));
 
 	/* Send the intermediate packet data. */
 	size_t rem = len;
+	uint8_t *bbuf = buf;
 	uint8_t f_id = 0;
 	while (rem) {
 		/** @todo get the maximum size of the chunk somewhere */
@@ -420,12 +439,13 @@ nbus_ret_t nbus_channel_send(NbusChannel *self, nbus_endpoint_t ep, void *buf, s
 			.response = self->peripheral,
 			.opcode = NBUS_OP_DATA_MIN + f_id
 		};
-		nbus_channel_send_frame(self, &fragment, buf, chunk);
+		nbus_channel_send_frame(self, &fragment, bbuf, chunk);
+		blake2s_update(&b2, bbuf, chunk);
 
 		/* Advance to the next chunk */
 		f_id ++;
 		rem -= chunk;
-		buf += chunk;
+		bbuf += chunk;
 	}
 
 	/* Send a trailing frame. */
@@ -435,7 +455,9 @@ nbus_ret_t nbus_channel_send(NbusChannel *self, nbus_endpoint_t ep, void *buf, s
 		.response = self->peripheral,
 		.opcode = NBUS_OP_TRAILING
 	};
-	nbus_channel_send_frame(self, &tf, "", 0);
+	uint8_t siv[NBUS_SIV_LEN] = {0};
+	blake2s_final(&b2, siv, NBUS_SIV_LEN);
+	nbus_channel_send_frame(self, &tf, siv, 8);
 
 	return NBUS_RET_OK;
 }
@@ -494,16 +516,11 @@ nbus_ret_t nbus_channel_set_long_id(NbusChannel *self, const void *long_id, size
 }
 
 
-nbus_ret_t nbus_init(Nbus *self, uint32_t can) {
+nbus_ret_t nbus_init(Nbus *self, Can *can) {
 	memset(self, 0, sizeof(Nbus));
 	self->can = can;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialising NBUS protocol driver"));
-
-	self->rx_sem = xSemaphoreCreateBinary();
-	if (self->rx_sem == NULL) {
-		goto err;
-	}
 
 	/* Create channel for the discovery protocol. This channel is statically assigned. */
 	nbus_channel_init(&self->discovery_channel, "discovery");
