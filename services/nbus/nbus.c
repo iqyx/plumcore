@@ -297,7 +297,7 @@ static NbusChannel *nbus_channel_find_by_id(Nbus *self, nbus_channel_id_t id) {
 }
 
 
-static void nbus_parse_id(uint32_t id, struct nbus_id *sid) {
+void nbus_parse_id(uint32_t id, struct nbus_id *sid) {
 	sid->channel = (id >> 12) & 0xffff;
 	sid->opcode = id & 0xff;
 	sid->multicast = (id & (1 << 28)) != 0;
@@ -305,7 +305,7 @@ static void nbus_parse_id(uint32_t id, struct nbus_id *sid) {
 }
 
 
-static uint32_t nbus_build_id(struct nbus_id *id) {
+uint32_t nbus_build_id(struct nbus_id *id) {
 	uint32_t r = 0U;
 	if (id->multicast) {
 		r += (1U << 28);

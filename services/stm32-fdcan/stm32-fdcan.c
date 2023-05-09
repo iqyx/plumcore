@@ -27,7 +27,7 @@ static can_ret_t stm32_fdcan_send(Can *can, const struct can_message *msg, uint3
 	while (!fdcan_available_tx(self->fdcan)) {
 		;
 	}
-	if (fdcan_transmit(self->fdcan, msg->id, true, false, false, false, msg->len, msg->buf) != FDCAN_E_OK) {
+	if (fdcan_transmit(self->fdcan, msg->id, true, false, false, false, msg->len, msg->buf) < 0) {
 		return CAN_RET_FAILED;
 	}
 

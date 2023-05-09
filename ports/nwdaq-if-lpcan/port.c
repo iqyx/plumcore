@@ -97,7 +97,7 @@ static void can_init(void) {
 	/*************** backplane CAN1 ******************************************/
 	rcc_periph_reset_pulse(RST_FDCAN);
 	fdcan_init(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
-	fdcan_set_can(CAN1, false, false, true, false, 1, 8, 5, (16e6 / (CAN1_BITRATE) / 16) - 1);
+	fdcan_set_can(CAN1, true, false, true, false, 1, 8, 5, (16e6 / (CAN1_BITRATE) / 16) - 1);
 	fdcan_set_fdcan(CAN1, true, true, 1, 8, 5, (16e6 / (CAN1_BITRATE) / 16) - 1);
 
 	FDCAN_IE(CAN1) |= FDCAN_IE_RF0NE;
@@ -105,6 +105,7 @@ static void can_init(void) {
 	fdcan_start(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
 	stm32_fdcan_init(&can1, CAN1);
 	/* TIL: first set the interrupt priority, THEN enable it. */
+	/* FDCAN1 has INTR0/INTR1 swapped! */
 	nvic_set_priority(NVIC_FDCAN1_INTR1_IRQ, 6 * 16);
 	nvic_enable_irq(NVIC_FDCAN1_INTR1_IRQ);
 
@@ -115,30 +116,33 @@ static void can_init(void) {
 
 	/*************** front panel CAN2 ******************************************/
 	fdcan_init(CAN2, FDCAN_CCCR_INIT_TIMEOUT);
-	fdcan_set_can(CAN2, false, false, true, false, 1, 8, 5, (16e6 / (CAN2_BITRATE) / 16) - 1);
+	fdcan_set_can(CAN2, true, false, true, false, 1, 8, 5, (16e6 / (CAN2_BITRATE) / 16) - 1);
 	fdcan_set_fdcan(CAN2, true, true, 1, 8, 5, (16e6 / (CAN2_BITRATE) / 16) - 1);
 
 	FDCAN_IE(CAN2) |= FDCAN_IE_RF0NE;
 	FDCAN_ILE(CAN2) |= FDCAN_ILE_INT0;
 	fdcan_start(CAN2, FDCAN_CCCR_INIT_TIMEOUT);
 	stm32_fdcan_init(&can2, CAN2);
-	nvic_set_priority(NVIC_FDCAN2_INTR1_IRQ, 6 * 16);
-	nvic_enable_irq(NVIC_FDCAN2_INTR1_IRQ);
+	nvic_set_priority(NVIC_FDCAN2_INTR0_IRQ, 6 * 16);
+	nvic_enable_irq(NVIC_FDCAN2_INTR0_IRQ);
 
 
 	/*************** front panel CAN3 ******************************************/
 	fdcan_init(CAN3, FDCAN_CCCR_INIT_TIMEOUT);
-	fdcan_set_can(CAN3, false, false, true, false, 1, 8, 5, (16e6 / (CAN3_BITRATE) / 16) - 1);
+	fdcan_set_can(CAN3, true, false, true, false, 1, 8, 5, (16e6 / (CAN3_BITRATE) / 16) - 1);
 	fdcan_set_fdcan(CAN3, true, true, 1, 8, 5, (16e6 / (CAN3_BITRATE) / 16) - 1);
 
 	FDCAN_IE(CAN3) |= FDCAN_IE_RF0NE;
 	FDCAN_ILE(CAN3) |= FDCAN_ILE_INT0;
 	fdcan_start(CAN3, FDCAN_CCCR_INIT_TIMEOUT);
 	stm32_fdcan_init(&can3, CAN3);
-	nvic_set_priority(NVIC_FDCAN3_INTR1_IRQ, 6 * 16);
-	nvic_enable_irq(NVIC_FDCAN3_INTR1_IRQ);
+	nvic_set_priority(NVIC_FDCAN3_INTR0_IRQ, 6 * 16);
+	nvic_enable_irq(NVIC_FDCAN3_INTR0_IRQ);
 
-	nbus_switch_init(&switch1, &can1.iface, &can2.iface, &can3.iface);
+	nbus_switch_init(&switch1);
+	nbus_switch_add_port(&switch1, &can1.iface);
+	nbus_switch_add_port(&switch1, &can2.iface);
+	nbus_switch_add_port(&switch1, &can3.iface);
 }
 
 
@@ -146,11 +150,11 @@ void fdcan1_intr1_isr(void) {
 	stm32_fdcan_irq_handler(&can1);
 }
 
-void fdcan2_intr1_isr(void) {
+void fdcan2_intr0_isr(void) {
 	stm32_fdcan_irq_handler(&can2);
 }
 
-void fdcan3_intr1_isr(void) {
+void fdcan3_intr0_isr(void) {
 	stm32_fdcan_irq_handler(&can3);
 }
 

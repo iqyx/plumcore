@@ -196,3 +196,6 @@ nbus_ret_t nbus_channel_set_descriptor_strings(NbusChannel *self, const char * c
 nbus_ret_t nbus_channel_set_short_id(NbusChannel *self, short_id_t short_id);
 nbus_ret_t nbus_channel_set_long_id(NbusChannel *self, const void *long_id, size_t len);
 
+void nbus_parse_id(uint32_t id, struct nbus_id *sid);
+uint32_t nbus_build_id(struct nbus_id *id);
+
