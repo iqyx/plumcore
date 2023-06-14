@@ -3,6 +3,8 @@
 
 #define MODULE_NAME "app"
 
+const bool acx = true;
+
 struct adc_composite_channel adc_channels[] = {
 	{
 		.name = "channel/0",
@@ -11,9 +13,10 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &mcp_mux, .channel = 0},
 			{.mux = NULL},
 		},
-		.ac_excitation = true,
-		.pregain = 43.0f,
-		.gain = 4.0f,
+		.ac_excitation = acx,
+		.pregain = 48.059f,
+		.gain = 2.0f,
+		.gain_calib = -1.0f,
 	}, {
 		.name = "channel/1",
 		.muxes = {
@@ -21,10 +24,11 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &mcp_mux, .channel = 0},
 			{.mux = NULL},
 		},
-		.ac_excitation = true,
-		.pregain = 43.0f,
-		.gain = 4.0f,
-		.offset_calib = -0.026f,
+		.ac_excitation = acx,
+		.pregain = 48.059f,
+		.gain = 2.0f,
+		.gain_calib = +1.0f,
+		// .offset_calib = -0.026f,
 		// .gain_calib = 0.972861861f,
 
 		// .temp_compensation = true,
@@ -37,9 +41,10 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &mcp_mux, .channel = 0},
 			{.mux = NULL},
 		},
-		.ac_excitation = true,
-		.pregain = 43.0f,
-		.gain = 4.0f,
+		.ac_excitation = acx,
+		.pregain = 48.059f,
+		.gain = 2.0f,
+		.gain_calib = -1.0f,
 	}, {
 		.name = "channel/3",
 		.muxes = {
@@ -47,10 +52,11 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &mcp_mux, .channel = 0},
 			{.mux = NULL},
 		},
-		.ac_excitation = true,
-		.pregain = 43.0f,
-		.gain = 4.0f,
-		.offset_calib = -0.026f,
+		.ac_excitation = acx,
+		.pregain = 48.059f,
+		.gain = 2.0f,
+		.gain_calib = +1.0f,
+		// .offset_calib = -0.026f,
 		// .gain_calib = 0.972861861f,
 
 		// .temp_compensation = true,
@@ -63,9 +69,10 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &mcp_mux, .channel = 1},
 			{.mux = NULL},
 		},
-		.ac_excitation = true,
-		.pregain = 43.0f,
-		.gain = 4.0f,
+		.ac_excitation = acx,
+		.pregain = 48.059f,
+		.gain = 2.0f,
+		.gain_calib = -1.0f,
 	}, {
 		.name = "channel/5",
 		.muxes = {
@@ -73,9 +80,10 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &mcp_mux, .channel = 1},
 			{.mux = NULL},
 		},
-		.ac_excitation = true,
-		.pregain = 43.0f,
-		.gain = 4.0f,
+		.ac_excitation = acx,
+		.pregain = 48.059f,
+		.gain = 2.0f,
+		.gain_calib = +1.0f,
 	}, {
 		.name = "channel/6",
 		.muxes = {
@@ -83,9 +91,10 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &mcp_mux, .channel = 1},
 			{.mux = NULL},
 		},
-		.ac_excitation = true,
-		.pregain = 43.0f,
-		.gain = 4.0f,
+		.ac_excitation = acx,
+		.pregain = 48.059f,
+		.gain = 2.0f,
+		.gain_calib = -1.0f,
 	}, {
 		.name = "channel/7",
 		.muxes = {
@@ -93,9 +102,10 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &mcp_mux, .channel = 1},
 			{.mux = NULL},
 		},
-		.ac_excitation = true,
-		.pregain = 43.0f,
-		.gain = 4.0f,
+		.ac_excitation = acx,
+		.pregain = 48.059f,
+		.gain = 2.0f,
+		.gain_calib = +1.0f,
 	}, {
 		.name = NULL,
 	},
@@ -128,17 +138,17 @@ app_ret_t app_init(App *self) {
 
 	adc_composite_start_cont(&self->adc);
 
-	mq_batch_init(&self->mq_batch_1, self->mq);
-	mq_batch_start(&self->mq_batch_1, DTYPE_INT32, 32, "channel/1", "channel/batch/1");
+	// mq_batch_init(&self->mq_batch_1, self->mq);
+	// mq_batch_start(&self->mq_batch_1, DTYPE_INT32, 32, "channel/1", "channel/batch/1");
 
-	mq_stats_init(&self->mq_stats_1, self->mq);
-	mq_stats_start(&self->mq_stats_1, "channel/batch/1", DTYPE_INT32, 32);
-	mq_stats_enable(&self->mq_stats_1, MQ_STATS_MEAN | MQ_STATS_NRMS);
+	// mq_stats_init(&self->mq_stats_1, self->mq);
+	// mq_stats_start(&self->mq_stats_1, "channel/batch/1", DTYPE_INT32, 32);
+	// mq_stats_enable(&self->mq_stats_1, MQ_STATS_MEAN | MQ_STATS_NRMS);
 
 	// mq_sensor_source_init(&self->pcb_temp_source, &pcb_temp.iface, "sensor/pcb-temp", self->mq, &rtc.clock, 1000);
 
 	plog_packager_init(&self->raw_data_packager, self->mq);
-	plog_packager_add_filter(&self->raw_data_packager, "channel/batch/#");
+	plog_packager_add_filter(&self->raw_data_packager, "channel/#");
 	plog_packager_add_dst_mq(&self->raw_data_packager, "pkg/channel");
 	plog_packager_add_dst_file(&self->raw_data_packager, self->fifo_fs, "fifo");
 	plog_packager_set_nonce(&self->raw_data_packager, "nonce", 5);

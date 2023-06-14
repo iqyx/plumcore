@@ -310,7 +310,7 @@ static void adc_init(void) {
 
 	mcp3564_init(&mcp, &(spi2_adc.dev));
 	mcp3564_set_stp_enable(&mcp, false);
-	mcp3564_set_gain(&mcp, MCP3564_GAIN_4);
+	mcp3564_set_gain(&mcp, MCP3564_GAIN_2);
 	mcp3564_set_osr(&mcp, MCP3564_OSR_81920);
 	mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
 	mcp3564_update(&mcp);
@@ -423,10 +423,14 @@ static void temp_sensor_init(void) {
 	adc_sensor_init(&pcb_temp, &adc1.iface, 1, &pcb_temp_info);
 	pcb_temp.oversample = 16;
 	pcb_temp.div_low_fs = 4095.0f;
-	pcb_temp.div_low_high_r = 1000.0f;
-	pcb_temp.a = 0.0f;
-	pcb_temp.b = 0.25974f;
-	pcb_temp.c = -259.74f;
+	pcb_temp.div_low_high_r = 10000.0f;
+
+	pcb_temp.ntc_r25 = 10000.0f;
+	pcb_temp.ntc_beta = 3380.0f;
+
+	// pcb_temp.a = 0.0f;
+	// pcb_temp.b = 0.25974f;
+	// pcb_temp.c = -259.74f;
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&pcb_temp.iface, "pcb_temp");
 }
 
@@ -459,7 +463,7 @@ static void can_init(void) {
 	nbus_init(&nbus, &can1.iface);
 
 	nbus_root_init(&root_channel, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
-	nbus_log_init(&log_channel, "log", &root_channel.channel);
+	nbus_log_init(&log_channel, &root_channel.channel);
 }
 
 

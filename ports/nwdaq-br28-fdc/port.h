@@ -91,7 +91,7 @@
 #define CAN_TX_PORT GPIOA
 #define CAN_TX_PIN GPIO12
 #define CAN_AF GPIO_AF9
-#define CAN_BITRATE 1000000
+#define CAN_BITRATE 250000
 
 /* STM32G4 unique 96 bit identifier */
 #define UNIQUE_ID_REG ((void *)0x1fff7590)
