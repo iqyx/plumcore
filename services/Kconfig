@@ -162,6 +162,11 @@ menu "High level device drivers"
 	config SERVICE_SI7006
 		bool "Si7006 temperature and humidity sensor driver"
 		default n
+
+	config SERVICE_INERTIAL_ADXL355
+		depends on SERVICE_STM32_SPI
+		bool "ADI ADXL355 3 axis accelerometer"
+		default n
 endmenu
 
 menu "Filesystem and memory management services"
