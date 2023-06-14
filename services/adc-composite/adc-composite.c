@@ -35,7 +35,7 @@ static void mcp_measure(Mcp3564 *self, uint8_t *status, int32_t *value) {
 	/* Wait for data ready. */
 	/** @todo timeout, remove the shortcut */
 	while (gpio_get(ADC_IRQ_PORT, ADC_IRQ_PIN)) {
-		;
+		vTaskDelay(2);
 	}
 	mcp3564_read_reg(self, MCP3564_REG_ADCDATA, 4, (uint32_t *)value, status);
 }
@@ -97,7 +97,7 @@ adc_composite_ret_t adc_composite_init(AdcComposite *self, Adc *adc, Mq *mq) {
 	self->mq = mq;
 
 	self->interval_ms = 500;
-	self->exc_voltage_v = 3.3f;
+	self->exc_voltage_v = 2.5f;
 
 	return ADC_COMPOSITE_RET_OK;
 }
@@ -200,12 +200,13 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 	while (c->name != NULL) {
 		set_muxes(self, c->muxes);
 		/** @todo compute exactly how much time is needed to stabilise the input */
-		/** @todo save the current sample time */
 
 		/* Enable positive excitation voltage and switch the Vref mux appropriately. */
 		if (self->exc_power != NULL) {
 			self->exc_power->vmt->set_voltage(self->exc_power, self->exc_voltage_v);
 		}
+
+
 		/* If the reference muxing is enabled, set the mux to positive regardless of the
 		 * AC excitation setting. */
 		if (self->vref_mux != NULL) {
@@ -222,9 +223,8 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 		/* Measure the channel using positive excitation and positive Vref mux. */
 		uint8_t status = 0;
 		volatile int32_t v1 = 0;
-		/** @todo measure multiple times until the input is stable */
-		mcp_measure(self->adc, &status, &v1);
-		mcp_measure(self->adc, &status, &v1);
+			/** @todo stable to about 10 ppm, provide proper timing here */
+		vTaskDelay(6);
 		mcp_measure(self->adc, &status, &v1);
 
 		if (c->ac_excitation) {
@@ -238,9 +238,8 @@ adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
 			}
 
 			int32_t v2 = 0;
-			/** @todo measure multiple times until the input is stable */
-			mcp_measure(self->adc, &status, &v2);
-			mcp_measure(self->adc, &status, &v2);
+			/** @todo stable to about 10 ppm, provide proper timing here */
+			vTaskDelay(6);
 			mcp_measure(self->adc, &status, &v2);
 
 			/* Aggregate the two results */
