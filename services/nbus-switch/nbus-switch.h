@@ -12,6 +12,7 @@
 
 #include <main.h>
 #include <interfaces/can.h>
+#include <services/nbus/nbus.h>
 
 
 #define NBUS_SWITCH_MAX_CHANNELS 256
@@ -42,7 +43,7 @@ struct nbus_switch_port {
 
 struct __attribute__((__packed__)) nbus_switch_channel {
 	channel_t ch;
-	bool response;
+	enum nbus_direction dir;
 	struct nbus_switch_port *port;
 	uint32_t frames;
 	uint32_t last_access;

@@ -20,12 +20,12 @@
 #define MODULE_NAME "nbus-switch"
 
 
-static nbus_switch_ret_t find_channel(NbusSwitch *self, channel_t id, bool response, struct nbus_switch_channel **ch) {
+static nbus_switch_ret_t find_channel(NbusSwitch *self, channel_t id, enum nbus_direction dir, struct nbus_switch_channel **ch) {
 	/** @todo a more performant search */
 	/* Find channel with a matching channel number. */
 	struct nbus_switch_channel *found = NULL;
 	for (uint32_t i = 0; i < NBUS_SWITCH_MAX_CHANNELS; i++) {
-		if (self->ch[i].port != NULL && self->ch[i].ch == id && self->ch[i].response == response) {
+		if (self->ch[i].port != NULL && self->ch[i].ch == id && self->ch[i].dir == dir) {
 			found = &(self->ch[i]);
 			/* We are happy with the first one. */
 			break;
@@ -87,16 +87,17 @@ static nbus_switch_ret_t nbus_switch_process(NbusSwitch *self, struct nbus_switc
 	// nbus_switch_send_multi(self, port, msg);
 	// return NBUS_SWITCH_RET_OK;
 
-	if (sid.multicast) {
+	// if (sid.direction == NBUS_DIR_PUBLISH) {
+	if (true) {
 		/* Send to all ports except @p port. */
 		nbus_switch_send_multi(self, port, msg);
 	} else {
 		/* Find the channel associated with the source of the message and add it if not found. */
 		struct nbus_switch_channel *sch = NULL;
-		if (find_channel(self, sid.channel, sid.response, &sch) != NBUS_SWITCH_RET_OK) {
+		if (find_channel(self, sid.channel, sid.direction, &sch) != NBUS_SWITCH_RET_OK) {
 			if (add_channel(self, &sch) == NBUS_SWITCH_RET_OK) {
 				sch->port = port;
-				sch->response = sid.response;
+				sch->dir = sid.direction;
 				sch->ch = sid.channel;
 				sch->frames = 0;
 			}
@@ -111,7 +112,7 @@ static nbus_switch_ret_t nbus_switch_process(NbusSwitch *self, struct nbus_switc
 		}
 
 		/* Now find the reverse direction - the destination of the current frame. */
-		if (find_channel(self, sid.channel, !sid.response, &sch) == NBUS_SWITCH_RET_OK) {
+		if (find_channel(self, sid.channel, sid.direction == NBUS_DIR_REQUEST ? NBUS_DIR_RESPONSE : NBUS_DIR_REQUEST, &sch) == NBUS_SWITCH_RET_OK) {
 			nbus_switch_send_port(self, sch->port, msg);
 			// sch->last_access = 0;
 		} else {
