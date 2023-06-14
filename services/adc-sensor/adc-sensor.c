@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "main.h"
 #include <interfaces/sensor.h>
@@ -37,6 +38,11 @@ static sensor_ret_t adc_sensor_value_f(Sensor *sensor, float *value) {
 	/* Resistor divider computation */
 	if (self->div_low_fs != 0.0f) {
 		f = (f * self->div_low_high_r) / (self->div_low_fs - f);
+	}
+
+	/* NTC temperature computation */
+	if (self->ntc_r25 != 0.0f) {
+		f = (1.0f / (1.0f / 298.16f + (1.0f / self->ntc_beta) * logf(f / self->ntc_r25))) - 273.15f;
 	}
 
 	/* Apply the conversion */

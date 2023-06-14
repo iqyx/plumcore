@@ -31,6 +31,9 @@ typedef struct {
 	/* y = ax2 + bx + c */
 	float a, b, c;
 
+	float ntc_r25;
+	float ntc_beta;
+
 	/* Resistor divider with the unknown resistance on the low side */
 	float div_low_fs;
 	float div_low_high_r;
