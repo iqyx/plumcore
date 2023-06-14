@@ -28,7 +28,7 @@
 
 stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 	i2c_peripheral_disable(self->locm3_i2c);
-	i2c_reset(self->locm3_i2c);
+	//~ i2c_reset(self->locm3_i2c);
 	i2c_enable_analog_filter(self->locm3_i2c);
 	i2c_set_digital_filter(self->locm3_i2c, 0);
 	i2c_set_speed(self->locm3_i2c, i2c_speed_sm_100k, 16);
