@@ -129,7 +129,7 @@ static mq_ws_source_ret_t write_channels(MqWsSource *self, size_t samples) {
 		if (ch->samples == ch->max_samples) {
 			/* Initialize the metadata first. */
 			NdArray array;
-			ndarray_init_view(&array, DTYPE_INT16, ch->samples, ch->buf, ch->samples * self->source_format_size);
+			ndarray_init_view(&array, self->source_dtype, ch->samples, ch->buf, ch->samples * self->source_format_size);
 
 			/** @todo get the exact sample time from somewhere */
 			struct timespec ts = {0};
