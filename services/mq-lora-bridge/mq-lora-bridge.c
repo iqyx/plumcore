@@ -120,7 +120,9 @@ static void send_task(void *p) {
 
 			/* And send it over LoRaWAN */
 			lora_ret_t ret = self->lora->vmt->send(self->lora, 1, (uint8_t *)self->hex_pbuf, strlen(self->hex_pbuf));
+			// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("send buffer over LoRa, size=%d"), strlen(self->hex_pbuf) / 2);
 			if (ret != LORA_RET_OK) {
+				u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot send the buffer"));
 				/** @todo do something if the packet was not sent */
 			}
 		}
