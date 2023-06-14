@@ -15,13 +15,10 @@
 
 
 typedef struct nbus_log {
-	short_id_t short_id;
-	NbusChannel *parent;
-	Nbus *nbus;
 	NbusChannel channel;
 
 } NbusLog;
 
 
-nbus_ret_t nbus_log_init(NbusLog *self, const char *name, NbusChannel *parent);
+nbus_ret_t nbus_log_init(NbusLog *self, NbusChannel *parent);
 nbus_ret_t nbus_log_free(NbusLog *self);

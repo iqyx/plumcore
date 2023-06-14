@@ -12,25 +12,37 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include "blake2.h"
+
 #include "nbus-root.h"
 
-
-static const char * const nbus_root_descriptor[] = {
-	"name=root",
-	"interface=none",
-};
+#define MODULE_NAME "nbus-root"
 
 
-static nbus_ret_t channel_descriptor(void *context, uint8_t id, void *buf, size_t *len) {
-	NbusRoot *self = (NbusRoot *)context;
-	switch (id) {
-		case 0 ... 1:
-			*len = strlcpy((char *)buf, nbus_root_descriptor[id], NBUS_DESCRIPTOR_LEN);
-			return NBUS_RET_OK;
-		default:
-			return NBUS_RET_FAILED;
+static void nbus_receive_task(void *p) {
+	NbusRoot *self = p;
+
+	while (true) {
+		nbus_endpoint_t ep = 0;
+		size_t len = 0;
+		nbus_ret_t ret = nbus_channel_receive(&self->channel, &ep, &self->buf, sizeof(self->buf), &len, 1000);
+		if (ret == NBUS_RET_OK) {
+			nbus_channel_send(&self->channel, ep, &self->buf, len);
+		}
 	}
-	return NBUS_RET_FAILED;
+
+	vTaskDelete(NULL);
+}
+
+
+static nbus_short_id_t prepare_short_id(const void *anything, size_t len) {
+	nbus_short_id_t short_id = 0;
+	blake2s_state b2;
+	blake2s_init(&b2, sizeof(nbus_short_id_t));
+	blake2s_update(&b2, anything, len);
+	blake2s_update(&b2, "root", 4);
+	blake2s_final(&b2, &short_id, sizeof(short_id));
+	return short_id;
 }
 
 
@@ -39,11 +51,16 @@ nbus_ret_t nbus_root_init(NbusRoot *self, Nbus *nbus, const void *anything, size
 
 	self->nbus = nbus;
 
+	/* The root channel is a bit specific, its short-id is prepared from a (presumably) unique
+	 * buffer anything. */
 	nbus_channel_init(&self->channel, "root");
-	nbus_channel_set_descriptor_strings(&self->channel, nbus_root_descriptor, 2);
-	nbus_channel_set_long_id(&self->channel, anything, len);
-	self->channel.peripheral = true;
+	nbus_channel_set_explicit_short_id(&self->channel, prepare_short_id(anything, len));
 	nbus_add_channel(self->nbus, &self->channel);
+
+	xTaskCreate(nbus_receive_task, "nbus-root-rx", configMINIMAL_STACK_SIZE + 64, (void *)self, 1, &(self->receive_task));
+	if (self->receive_task == NULL) {
+		return NBUS_RET_FAILED;
+	}
 
 	return NBUS_RET_OK;
 }

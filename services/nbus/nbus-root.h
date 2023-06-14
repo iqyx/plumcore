@@ -17,6 +17,8 @@
 typedef struct nbus_root {
 	Nbus *nbus;
 	NbusChannel channel;
+	uint8_t buf[256];
+	TaskHandle_t receive_task;
 } NbusRoot;
 
 
