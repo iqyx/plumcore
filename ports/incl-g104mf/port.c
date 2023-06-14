@@ -56,6 +56,7 @@
 #include <services/stm32-system-clock/clock.h>
 #include <services/stm32-rtc/rtc.h>
 #include <services/icm42688p/icm42688p.h>
+#include <services/adxl355/adxl355.h>
 #include <services/stm32-i2c/stm32-i2c.h>
 #include <services/spi-sd/spi-sd.h>
 #include <services/bq35100/bq35100.h>
@@ -67,6 +68,7 @@
 
 #include <services/stm32-l4-pm/stm32-l4-pm.h>
 Stm32L4Pm mcu_pm;
+
 
 #define MODULE_NAME CONFIG_PORT_NAME
 
@@ -90,7 +92,6 @@ uint32_t SystemCoreClock;
 SystemClock system_clock;
 Stm32Rtc rtc;
 Clock *rtc_clock = &rtc.clock;
-Icm42688p accel2;
 Bq35100 bq35100;
 GpsUblox gps;
 
@@ -426,7 +427,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
  * TDK ICM42688P accelerometer
  *********************************************************************************************************************/
 
-#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL) || defined(CONFIG_INCL_G104MF_ENABLE_RFM)
+#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL) || defined(CONFIG_INCL_G104MF_ENABLE_RFM) || defined(CONFIG_INCL_G104MF_ENABLE_ADXL_ACCEL)
 	Stm32SpiBus spi1;
 
 	static void port_spi1_init(void) {
@@ -437,7 +438,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		rcc_periph_clock_enable(RCC_SPI1);
 
 		stm32_spibus_init(&spi1, SPI1);
-		spi1.bus.vmt->set_sck_freq(&spi1.bus, 10e6);
+		spi1.bus.vmt->set_sck_freq(&spi1.bus, 4e6);
 		spi1.bus.vmt->set_mode(&spi1.bus, 0, 0);
 
 	}
@@ -446,6 +447,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 
 #if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL)
 	Stm32SpiDev spi1_accel2;
+	Icm42688p accel2;
 
 	void port_accel2_init(void) {
 		/* ICM42688P on SPI1 bus */
@@ -460,6 +462,29 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 
 		if (icm42688p_init(&accel2, &spi1_accel2.dev) == ICM42688P_RET_OK) {
 			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel2.source, "accel2");
+		}
+	}
+#endif
+
+#if defined(CONFIG_INCL_G104MF_ENABLE_ADXL_ACCEL)
+	Stm32SpiDev spi1_accel3;
+	Adxl355 accel3;
+
+	static void port_accel3_init(void) {
+		/* ADXL355 on SPI1 bus */
+		gpio_set(GPIOA, GPIO15);
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
+		gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO15);
+
+		/* Power on */
+		gpio_set(GPIOH, GPIO0);
+		vTaskDelay(100);
+
+		stm32_spidev_init(&spi1_accel3, &spi1.bus, GPIOA, GPIO15);
+
+		if (adxl355_init(&accel3, &spi1_accel3.dev) == ADXL355_RET_OK) {
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel3.source, "accel3");
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&accel3.die_temp, "accel3_temp");
 		}
 	}
 #endif
@@ -634,6 +659,14 @@ static void port_setup_default_gpio(void) {
 	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13);
 	gpio_set(GPIOC, GPIO13);
 
+	/* ACCEL2_CS */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
+	gpio_set(GPIOB, GPIO8);
+
+	/* ACCEL3_CS */
+	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
+	gpio_set(GPIOA, GPIO15);
+
 	/* RFM_CS */
 	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
 	gpio_set(GPIOC, GPIO15);
@@ -681,19 +714,24 @@ int32_t port_init(void) {
 	#endif
 
 	port_i2c_init();
-	port_temp_sensor_init();
+	//~ port_temp_sensor_init();
 	port_battery_gauge_init();
 	port_gps_power(false);
 	// port_gps_init();
-	port_sd_init();
+	#if defined(CONFIG_INCL_G104MF_ENABLE_MICROSD)
+		port_sd_init();
+	#endif
 	rn2483_lora_init();
 
-	#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL) || defined(CONFIG_INCL_G104MF_ENABLE_RFM)
+	#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL) || defined(CONFIG_INCL_G104MF_ENABLE_RFM) || defined(CONFIG_INCL_G104MF_ENABLE_ADXL_ACCEL)
 		port_spi1_init();
 	#endif
 
 	#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL)
 		port_accel2_init();
+	#endif
+	#if defined(CONFIG_INCL_G104MF_ENABLE_ADXL_ACCEL)
+		port_accel3_init();
 	#endif
 
 	#if defined(CONFIG_INCL_G104MF_ENABLE_RFM)
