@@ -14,10 +14,13 @@ as a name for a totally unrelated project.
 
 
 .. toctree::
-   :numbered:
+	:numbered:
 
-   doc/introduction
-   microkernel/microkernel
-   services/services
-   applications/applications
+	applets/applets
+	doc/introduction
+	microkernel/microkernel
+	services/services
+	applications/applications
+	protocols/nbus/nbus
+
 
