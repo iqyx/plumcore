@@ -112,6 +112,10 @@ menu "High level device drivers"
 		bool "SD/MMC card driver using SPI interface"
 		default n
 
+	config SERVICE_I2C_EEPROM
+		bool "I2C EEPROM memory driver"
+		default y
+
 	config SERVICE_ADC_SENSOR
 		bool "Sensor device using ADC"
 		default y
@@ -185,6 +189,10 @@ menu "Filesystem and memory management services"
 
 	config SERVICE_FLASH_FIFO
 		bool "FIFO in a flash device"
+		default y
+
+	config SERVICE_FLASH_CBOR_MIB
+		bool "MIB stored in a flash in a CBOR format"
 		default y
 endmenu
 
