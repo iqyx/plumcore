@@ -67,6 +67,10 @@ const struct treecli_node *files_fsN = Node {
 			Exec files_fsN_cat,
 		},
 		Command {
+			Name "put",
+			Exec files_fsN_put,
+		},
+		Command {
 			Name "remove",
 			Exec files_fsN_remove,
 		},
@@ -175,7 +179,7 @@ int32_t fs_print(struct treecli_parser *parser, void *exec_context) {
 	for (size_t i = 0; (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_FS, i, (Interface **)&fs)) == ISERVICELOCATOR_RET_OK; i++) {
 		const char *name = NULL;
 		iservicelocator_get_name(locator, (Interface *)fs, &name);
-	
+
 		struct fs_info info = {0};
 		fs->vmt->info(fs, &info);
 
@@ -357,15 +361,76 @@ int32_t files_fsN_cat(struct treecli_parser *parser, void *exec_context) {
 			}
 			module_cli_output(s, cli);
 			module_cli_output("\r\n", cli);
+		} else if (print_format == PRINT_FORMAT_BIN) {
+			for (size_t i = 0; i < read; i++) {
+				if (buf[i] == '\n') {
+					cli->stream->vmt->write(cli->stream, "\r", 1);
+				}
+				cli->stream->vmt->write(cli->stream, buf + i, 1);
+			}
 		}
 		read_total += read;
 	}
 	fs->vmt->close(fs, &f);
 
 	char s[32] = {0};
-	snprintf(s, sizeof(s) - 1, "Total bytes read: %u\r\n", read_total);
+	snprintf(s, sizeof(s) - 1, "\r\nTotal bytes read: %u\r\n", read_total);
 	module_cli_output(s, cli);
 
+	return 0;
+}
+
+
+int32_t files_fsN_put(struct treecli_parser *parser, void *exec_context) {
+	(void)exec_context;
+	ServiceCli *cli = (ServiceCli *)parser->context;
+
+	Fs *fs = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_FS, DNODE_INDEX(parser, -1), (Interface **)&fs) != ISERVICELOCATOR_RET_OK) {
+		return 1;
+	}
+
+	/* fname is a global, must be set beforehand */
+	File f;
+	if (fs->vmt->open(fs, &f, fname, FS_MODE_CREATE | FS_MODE_WRITEONLY | FS_MODE_TRUNCATE) != FS_RET_OK) {
+		module_cli_output("cannot open file '", cli);
+		module_cli_output(fname, cli);
+		module_cli_output("'\r\n", cli);
+		return 1;
+	}
+
+	size_t read = 0;
+	uint8_t buf[16] = {0};
+	size_t written = 0;
+	size_t written_total = 0;
+	bool eof = false;
+	while (true) {
+		stream_ret_t ret = cli->stream->vmt->read_timeout(cli->stream, buf, sizeof(buf), &read, 1000);
+		if (ret == STREAM_RET_OK) {
+			for (size_t i = 0; i < read; i++) {
+				if (buf[i] == '\r') {
+					buf[i] = '\n';
+				}
+				if (buf[i] == 0x04) {
+					read = i;
+					eof = true;
+					break;
+				}
+			}
+
+			fs->vmt->write(fs, &f, buf, read, &written);
+			written_total += written;
+		}
+		if (eof) {
+			break;
+		}
+	}
+
+	char s[32] = {0};
+	snprintf(s, sizeof(s) - 1, "Total bytes written: %u\r\n", written_total);
+	module_cli_output(s, cli);
+
+	fs->vmt->close(fs, &f);
 	return 0;
 }
 
