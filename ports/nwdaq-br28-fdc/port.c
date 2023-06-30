@@ -2,7 +2,7 @@
  *
  * nwdaq-br28-fdc port-specific configuration
  *
- * Copyright (c) 2022, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2022-2023, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -85,6 +85,7 @@
 #include <services/nbus/nbus.h>
 #include <services/nbus/nbus-root.h>
 #include <services/nbus/nbus-log.h>
+#include <services/i2c-eeprom/i2c-eeprom.h>
 
 /* Applets */
 #include <applets/hello-world/hello-world.h>
@@ -473,6 +474,19 @@ void fdcan1_intr1_isr(void) {
 }
 
 
+/**********************************************************************************************************************
+ * I2C EEPROM memory init
+ **********************************************************************************************************************/
+
+Stm32I2c i2c1;
+I2cEeprom eeprom1;
+static void port_i2c_init(void) {
+	rcc_periph_clock_enable(RCC_I2C1);
+	stm32_i2c_init(&i2c1, I2C1);
+
+	i2c_eeprom_init(&eeprom1, &i2c1.bus, 0x50, 32768, 32);
+}
+
 
 void vPortSetupTimerInterrupt(void);
 void vPortSetupTimerInterrupt(void) {
@@ -539,6 +553,15 @@ static void port_setup_default_gpio(void) {
 	gpio_set_af(CAN_RX_PORT, CAN_AF, CAN_RX_PIN);
 	gpio_mode_setup(CAN_TX_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, CAN_TX_PIN);
 	gpio_set_af(CAN_TX_PORT, CAN_AF, CAN_TX_PIN);
+
+	/* I2C1 port */
+	gpio_mode_setup(I2C1_SDA_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, I2C1_SDA_PIN);
+	gpio_set_output_options(I2C1_SDA_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, I2C1_SDA_PIN);
+	gpio_set_af(I2C1_SDA_PORT, I2C1_SDA_AF, I2C1_SDA_PIN);
+	gpio_mode_setup(I2C1_SCL_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, I2C1_SCL_PIN);
+	gpio_set_output_options(I2C1_SCL_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, I2C1_SCL_PIN);
+	gpio_set_af(I2C1_SCL_PORT, I2C1_SCL_AF, I2C1_SCL_PIN);
+
 }
 
 
@@ -558,6 +581,7 @@ int32_t port_init(void) {
 	nor_flash_init();
 	temp_sensor_init();
 	can_init();
+	port_i2c_init();
 
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&tempco_calibration, "tempco-calibration");
