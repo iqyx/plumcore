@@ -47,7 +47,7 @@ struct __attribute__((__packed__)) nbus_id {
 #define NBUS_KEY_SIZE 16
 #define NBUS_SIV_LEN 8
 
-#define NBUS_ADV_TIME 2
+#define NBUS_ADV_TIME 10
 
 struct __attribute__((__packed__)) nbus_leading_frame_msg {
 	uint32_t counter;

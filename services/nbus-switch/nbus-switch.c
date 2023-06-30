@@ -87,8 +87,8 @@ static nbus_switch_ret_t nbus_switch_process(NbusSwitch *self, struct nbus_switc
 	// nbus_switch_send_multi(self, port, msg);
 	// return NBUS_SWITCH_RET_OK;
 
-	// if (sid.direction == NBUS_DIR_PUBLISH) {
-	if (true) {
+	if (sid.direction == NBUS_DIR_PUBLISH) {
+	// if (true) {
 		/* Send to all ports except @p port. */
 		nbus_switch_send_multi(self, port, msg);
 	} else {
