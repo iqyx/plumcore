@@ -12,6 +12,7 @@ if conf["SERVICE_CLI"] == "y":
 		File("fs.c"),
 		File("device_lora.c"),
 		File("cli-applet.c"),
+		File("cli-identity.c"),
 	]))
 	if conf["SERVICE_UXB_MASTER"] == "y":
 		objs.append(env.Object(File("device_uxb.c")))
