@@ -85,6 +85,7 @@
 #include <services/nbus/nbus.h>
 #include <services/nbus/nbus-root.h>
 #include <services/nbus/nbus-log.h>
+#include <services/nbus-mq/nbus-mq.h>
 #include <services/i2c-eeprom/i2c-eeprom.h>
 
 /* Applets */
@@ -204,16 +205,16 @@ int32_t port_early_init(void) {
 		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO6);
 		module_led_init(&led_status, "led_status");
 		module_led_set_port(&led_status, GPIOB, GPIO6);
-		interface_led_loop(&led_status.iface, 0x222f);
+		interface_led_loop(&led_status.iface, 0xff);
 		hal_interface_set_name(&(led_status.iface.descriptor), "led_status");
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_status.iface.descriptor, "led_status");
 
 		gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
-		// module_led_init(&led_error, "led_error");
-		// module_led_set_port(&led_error, GPIOC, GPIO10);
-		// interface_led_loop(&led_error.iface, 0xf);
-		// hal_interface_set_name(&(led_error.iface.descriptor), "led_error");
-		// iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_error.iface.descriptor, "led_error");
+		module_led_init(&led_error, "led_error");
+		module_led_set_port(&led_error, GPIOC, GPIO10);
+		interface_led_loop(&led_error.iface, 0xf);
+		hal_interface_set_name(&(led_error.iface.descriptor), "led_error");
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_error.iface.descriptor, "led_error");
 	}
 #endif
 
@@ -442,8 +443,10 @@ static void temp_sensor_init(void) {
 
 Stm32Fdcan can1;
 Nbus nbus;
-NbusRoot root_channel;
-NbusLog log_channel;
+NbusRoot nbus_root;
+NbusLog nbus_log;
+NbusChannel *nbus_root_channel = &nbus_root.channel;
+
 static void can_init(void) {
 	rcc_periph_reset_pulse(RST_FDCAN);
 	fdcan_init(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
@@ -463,13 +466,16 @@ static void can_init(void) {
 
 	nbus_init(&nbus, &can1.iface);
 
-	nbus_root_init(&root_channel, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
-	nbus_log_init(&log_channel, &root_channel.channel);
+	nbus_root_init(&nbus_root, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
+	nbus_log_init(&nbus_log, nbus_root_channel);
 }
 
 
 void fdcan1_intr1_isr(void) {
-	gpio_toggle(GPIOC, GPIO10);
+	/* Toggle status LED directly. */
+	if (FDCAN_IR(CAN1) & FDCAN_IR_RF0N) {
+		gpio_toggle(GPIOB, GPIO6);
+	}
 	stm32_fdcan_irq_handler(&can1);
 }
 
