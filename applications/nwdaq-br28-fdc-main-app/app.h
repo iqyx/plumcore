@@ -8,6 +8,7 @@
 #include <services/mq-stats/mq-stats.h>
 #include <services/plog-packager/plog_packager.h>
 #include <services/mq-sensor-source/mq-sensor-source.h>
+#include <services/nbus-mq/nbus-mq.h>
 
 
 typedef enum {
@@ -23,6 +24,7 @@ typedef struct {
 	MqStats mq_stats_1;
 	PlogPackager raw_data_packager;
 	MqSensorSource pcb_temp_source;
+	NbusMq nbus_mq;
 } App;
 
 

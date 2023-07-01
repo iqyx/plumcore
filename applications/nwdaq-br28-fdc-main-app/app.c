@@ -4,6 +4,7 @@
 #define MODULE_NAME "app"
 
 const bool acx = true;
+extern NbusChannel *nbus_root_channel;
 
 struct adc_composite_channel adc_channels[] = {
 	{
@@ -151,9 +152,12 @@ app_ret_t app_init(App *self) {
 	plog_packager_add_filter(&self->raw_data_packager, "channel/#");
 	plog_packager_add_dst_mq(&self->raw_data_packager, "pkg/channel");
 	plog_packager_add_dst_file(&self->raw_data_packager, self->fifo_fs, "fifo");
-	plog_packager_set_nonce(&self->raw_data_packager, "nonce", 5);
-	plog_packager_set_key(&self->raw_data_packager, "key", 3);
+	plog_packager_set_nonce(&self->raw_data_packager, (uint8_t *)"nonce", 5);
+	plog_packager_set_key(&self->raw_data_packager, (uint8_t *)"key", 3);
 	plog_packager_start(&self->raw_data_packager, 2048, 3072);
+
+	nbus_mq_init(&self->nbus_mq, self->mq, nbus_root_channel, "mq");
+	nbus_mq_start(&self->nbus_mq, "channel/#");
 
 	return APP_RET_OK;
 }
