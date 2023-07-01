@@ -56,7 +56,7 @@ menu "Low-level platform drivers"
 			default y
 
 		config SERVICE_NBUS
-			bool "NBUS sensor bus driver for STM32 FDCAN"
+			bool "NBUS peripheral bus driver for STM32 FDCAN"
 			default n
 
 		config SERVICE_NBUS_SWITCH
@@ -86,6 +86,15 @@ menu "UXB extension bus interface drivers"
 		bool "UXB can interface support"
 		default y
 endmenu
+
+menu "NBUS protocol drivers"
+	depends on SERVICE_NBUS
+
+	config SERVICE_NBUS_MQ
+		bool "NBUS message queue bridge"
+		default n
+endmenu
+
 
 menu "High level device drivers"
 	config SERVICE_RADIO_RFM69
