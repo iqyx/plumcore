@@ -2,7 +2,7 @@
  *
  * nwdaq-br28-fdc port-specific configuration
  *
- * Copyright (c) 2022, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2022-2023, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -41,6 +41,7 @@
 #include <libopencm3/stm32/i2c.h>
 #include <libopencm3/stm32/exti.h>
 #include <libopencm3/stm32/flash.h>
+#include <libopencm3/stm32/fdcan.h>
 
 #include <main.h>
 #include "port.h"
@@ -56,24 +57,40 @@
 #include <interfaces/i2c-bus.h>
 #include <interfaces/stream.h>
 #include <interfaces/uart.h>
+#include <interfaces/adc.h>
 
 #include <services/cli/system_cli_tree.h>
+
+/* Low level drivers for th STM32G4 family */
 #include <services/stm32-system-clock/clock.h>
 #include <services/stm32-rtc/rtc.h>
 #include <services/stm32-i2c/stm32-i2c.h>
 #include <services/stm32-uart/stm32-uart.h>
-
-#include <services/adc-mcp3564/mcp3564.h>
-#include <services/adc-composite/adc-composite.h>
+#include <services/stm32-adc/stm32-adc.h>
 #include <services/stm32-watchdog/watchdog.h>
 #include <services/stm32-dac/stm32-dac.h>
+#include <services/stm32-spi/stm32-spi.h>
+#include <services/stm32-fdcan/stm32-fdcan.h>
+
+/* High level drivers */
+#include <services/adc-mcp3564/mcp3564.h>
+#include <services/adc-composite/adc-composite.h>
 #include <services/generic-power/generic-power.h>
 #include <services/generic-mux/generic-mux.h>
-#include <services/stm32-spi/stm32-spi.h>
 #include <services/spi-flash/spi-flash.h>
 #include <services/flash-vol-static/flash-vol-static.h>
 #include <services/fs-spiffs/fs-spiffs.h>
 #include <services/flash-fifo/flash-fifo.h>
+#include <services/adc-sensor/adc-sensor.h>
+#include <services/nbus/nbus.h>
+#include <services/nbus/nbus-root.h>
+#include <services/nbus/nbus-log.h>
+#include <services/nbus-mq/nbus-mq.h>
+#include <services/i2c-eeprom/i2c-eeprom.h>
+
+/* Applets */
+#include <applets/hello-world/hello-world.h>
+#include <applets/tempco-calibration/tempco-cal.h>
 
 /**
  * Port specific global variables and singleton instances.
@@ -132,6 +149,17 @@ int32_t port_early_init(void) {
 	 * used as a reference clock for getting task statistics. */
 	rcc_periph_clock_enable(RCC_TIM6);
 
+	/* ADC is used for PCB temperature measurement */
+	rcc_periph_clock_enable(RCC_ADC1);
+	/** @todo needed fo G4? */
+	RCC_CCIPR |= 3 << 28;
+
+	/* FDCAN interface */
+	rcc_periph_clock_enable(RCC_FDCAN);
+	rcc_periph_clock_enable(SCC_FDCAN);
+	/* Set PCLK as FDCAN clock */
+	RCC_CCIPR |= (RCC_CCIPR_FDCAN_PCLK << RCC_CCIPR_FDCAN_SHIFT);
+
 	return PORT_EARLY_INIT_OK;
 }
 
@@ -150,7 +178,7 @@ int32_t port_early_init(void) {
 		rcc_periph_clock_enable(RCC_USART2);
 
 		nvic_enable_irq(NVIC_USART2_IRQ);
-		nvic_set_priority(NVIC_USART2_IRQ, 6 * 16);
+		nvic_set_priority(NVIC_USART2_IRQ, 7 * 16);
 
 		/* Initialise and configure the UART */
 		stm32_uart_init(&uart2, USART2);
@@ -177,7 +205,7 @@ int32_t port_early_init(void) {
 		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO6);
 		module_led_init(&led_status, "led_status");
 		module_led_set_port(&led_status, GPIOB, GPIO6);
-		interface_led_loop(&led_status.iface, 0x222f);
+		interface_led_loop(&led_status.iface, 0xff);
 		hal_interface_set_name(&(led_status.iface.descriptor), "led_status");
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_status.iface.descriptor, "led_status");
 
@@ -195,10 +223,81 @@ int32_t port_early_init(void) {
  * Main ADC initialisation
  **********************************************************************************************************************/
 
+
+/* Generic GPIO mux for channel 0-3/4-7 selection *********************************************************************/
 const struct generic_mux_sel_line input_mux_lines[] = {
 	{.port = MUX_A0_PORT, .pin = MUX_A0_PIN},
 	{.port = MUX_A1_PORT, .pin = MUX_A1_PIN},
 };
+
+
+/* Reference voltage positive/negative mux ****************************************************************************/
+static mux_ret_t vref_mux_enable(Mux *self, bool enable) {
+	(void)self;
+	(void)enable;
+
+	return MUX_RET_OK;
+}
+
+
+static mux_ret_t vref_mux_select(Mux *self, uint32_t channel) {
+	(void)self;
+
+	if (channel == 0) {
+		/* Positive Vref mux. */
+		gpio_set(VREF1_SEL_PORT, VREF1_SEL_PIN);
+		gpio_set(VREF2_SEL_PORT, VREF2_SEL_PIN);
+		return MUX_RET_OK;
+	} else if (channel == 1) {
+		gpio_clear(VREF1_SEL_PORT, VREF1_SEL_PIN);
+		gpio_clear(VREF2_SEL_PORT, VREF2_SEL_PIN);
+		return MUX_RET_OK;
+	} else {
+		return MUX_RET_FAILED;
+	}
+}
+
+
+static const struct mux_vmt vref_mux_vmt = {
+	.enable = vref_mux_enable,
+	.select = vref_mux_select,
+};
+
+Mux vref_mux;
+
+
+/* MCP3564 internal mux for selecting first/second half of inputs *****************************************************/
+static mux_ret_t mcp_mux_enable(Mux *self, bool enable) {
+	(void)self;
+	(void)enable;
+
+	return MUX_RET_OK;
+}
+
+
+static mux_ret_t mcp_mux_select(Mux *self, uint32_t channel) {
+	(void)self;
+
+	if (channel == 0) {
+		mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
+		mcp3564_update(&mcp);
+		return MUX_RET_OK;
+	} else if (channel == 1) {
+		mcp3564_set_mux(&mcp, MCP3564_MUX_CH2, MCP3564_MUX_CH3);
+		mcp3564_update(&mcp);
+		return MUX_RET_OK;
+	} else {
+		return MUX_RET_FAILED;
+	}
+}
+
+
+static const struct mux_vmt mcp_mux_vmt = {
+	.enable = mcp_mux_enable,
+	.select = mcp_mux_select,
+};
+
+Mux mcp_mux;
 
 
 static void adc_init(void) {
@@ -213,13 +312,20 @@ static void adc_init(void) {
 
 	mcp3564_init(&mcp, &(spi2_adc.dev));
 	mcp3564_set_stp_enable(&mcp, false);
-	mcp3564_set_gain(&mcp, MCP3564_GAIN_4);
+	mcp3564_set_gain(&mcp, MCP3564_GAIN_2);
 	mcp3564_set_osr(&mcp, MCP3564_OSR_81920);
 	mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
 	mcp3564_update(&mcp);
 
 	generic_mux_init(&input_mux, MUX_EN_PORT, MUX_EN_PIN, &input_mux_lines, 2);
 
+	/* Vref mux init */
+	vref_mux.parent = NULL;
+	vref_mux.vmt = &vref_mux_vmt;
+
+	/* MCP3564 mux init */
+	mcp_mux.parent = NULL;
+	mcp_mux.vmt = &mcp_mux_vmt;
 }
 
 /**********************************************************************************************************************
@@ -303,6 +409,90 @@ static void nor_flash_init(void) {
 	}
 }
 
+/**********************************************************************************************************************
+ * PCB temperature sensor
+ **********************************************************************************************************************/
+
+static const struct sensor_info pcb_temp_info = {
+	.description = "PCB temperature",
+	.unit = "°C"
+};
+
+Stm32Adc adc1;
+AdcSensor pcb_temp;
+static void temp_sensor_init(void) {
+	stm32_adc_init(&adc1, ADC1);
+	adc_sensor_init(&pcb_temp, &adc1.iface, 1, &pcb_temp_info);
+	pcb_temp.oversample = 16;
+	pcb_temp.div_low_fs = 4095.0f;
+	pcb_temp.div_low_high_r = 10000.0f;
+
+	pcb_temp.ntc_r25 = 10000.0f;
+	pcb_temp.ntc_beta = 3380.0f;
+
+	// pcb_temp.a = 0.0f;
+	// pcb_temp.b = 0.25974f;
+	// pcb_temp.c = -259.74f;
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&pcb_temp.iface, "pcb_temp");
+}
+
+
+/**********************************************************************************************************************
+ * NBUS/CAN-FD interface
+ **********************************************************************************************************************/
+
+Stm32Fdcan can1;
+Nbus nbus;
+NbusRoot nbus_root;
+NbusLog nbus_log;
+NbusChannel *nbus_root_channel = &nbus_root.channel;
+
+static void can_init(void) {
+	rcc_periph_reset_pulse(RST_FDCAN);
+	fdcan_init(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
+	fdcan_set_can(CAN1, false, false, true, false, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
+	fdcan_set_fdcan(CAN1, true, true, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
+
+	FDCAN_IE(CAN1) |= FDCAN_IE_RF0NE;
+	FDCAN_ILE(CAN1) |= FDCAN_ILE_INT0;
+	// FDCAN_ILS(CAN1) |= FDCAN_ILS_RxFIFO0;
+	// nvic_enable_irq(NVIC_FDCAN1_INTR0_IRQ);
+	fdcan_start(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
+
+	stm32_fdcan_init(&can1, CAN1);
+	/* TIL: first set the interrupt priority, THEN enable it. */
+	nvic_set_priority(NVIC_FDCAN1_INTR1_IRQ, 6 * 16);
+	nvic_enable_irq(NVIC_FDCAN1_INTR1_IRQ);
+
+	nbus_init(&nbus, &can1.iface);
+
+	nbus_root_init(&nbus_root, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
+	nbus_log_init(&nbus_log, nbus_root_channel);
+}
+
+
+void fdcan1_intr1_isr(void) {
+	/* Toggle status LED directly. */
+	if (FDCAN_IR(CAN1) & FDCAN_IR_RF0N) {
+		gpio_toggle(GPIOB, GPIO6);
+	}
+	stm32_fdcan_irq_handler(&can1);
+}
+
+
+/**********************************************************************************************************************
+ * I2C EEPROM memory init
+ **********************************************************************************************************************/
+
+Stm32I2c i2c1;
+I2cEeprom eeprom1;
+static void port_i2c_init(void) {
+	rcc_periph_clock_enable(RCC_I2C1);
+	stm32_i2c_init(&i2c1, I2C1);
+
+	i2c_eeprom_init(&eeprom1, &i2c1.bus, 0x50, 32768, 32);
+}
+
 
 void vPortSetupTimerInterrupt(void);
 void vPortSetupTimerInterrupt(void) {
@@ -359,6 +549,25 @@ static void port_setup_default_gpio(void) {
 	gpio_mode_setup(MUX_A0_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A0_PIN);
 	gpio_mode_setup(MUX_A1_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, MUX_A1_PIN);
 
+	/* PCB temperature sensor */
+	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0);
+
+	/* CAN port. Enable the transceiver permanently (SHDN = L). */
+	gpio_mode_setup(CAN_SHDN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CAN_SHDN_PIN);
+	gpio_clear(CAN_SHDN_PORT, CAN_SHDN_PIN);
+	gpio_mode_setup(CAN_RX_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, CAN_RX_PIN);
+	gpio_set_af(CAN_RX_PORT, CAN_AF, CAN_RX_PIN);
+	gpio_mode_setup(CAN_TX_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, CAN_TX_PIN);
+	gpio_set_af(CAN_TX_PORT, CAN_AF, CAN_TX_PIN);
+
+	/* I2C1 port */
+	gpio_mode_setup(I2C1_SDA_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, I2C1_SDA_PIN);
+	gpio_set_output_options(I2C1_SDA_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, I2C1_SDA_PIN);
+	gpio_set_af(I2C1_SDA_PORT, I2C1_SDA_AF, I2C1_SDA_PIN);
+	gpio_mode_setup(I2C1_SCL_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, I2C1_SCL_PIN);
+	gpio_set_output_options(I2C1_SCL_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, I2C1_SCL_PIN);
+	gpio_set_af(I2C1_SCL_PORT, I2C1_SCL_AF, I2C1_SCL_PIN);
+
 }
 
 
@@ -376,6 +585,12 @@ int32_t port_init(void) {
 	exc_init();
 	adc_init();
 	nor_flash_init();
+	temp_sensor_init();
+	can_init();
+	port_i2c_init();
+
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&tempco_calibration, "tempco-calibration");
 
 	return PORT_INIT_OK;
 }

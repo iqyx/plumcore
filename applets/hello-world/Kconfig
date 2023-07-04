@@ -1,0 +1,11 @@
+config APPLET_HELLO_WORLD
+	bool "Hello world test applet"
+
+menu "App1 application configuration"
+	depends on APPLET_HELLO_WORLD
+
+	config APPLET_HELLO_WORLD_GREETING
+		string "Greeting string"
+		default "Welcome to the Hello world applet"
+
+endmenu

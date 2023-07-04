@@ -102,6 +102,7 @@ objs.append(SConscript("system/SConscript"))
 SConscript("lib/SConscript")
 SConscript("protocols/SConscript")
 objs.append(SConscript("services/SConscript"))
+objs.append(SConscript("applets/SConscript"))
 
 
 # Required to allow including things like "services/cli.h"

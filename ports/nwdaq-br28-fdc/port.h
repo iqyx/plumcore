@@ -14,6 +14,9 @@
 #include "services/generic-power/generic-power.h"
 #include "services/generic-mux/generic-mux.h"
 #include "services/adc-mcp3564/mcp3564.h"
+#include <services/stm32-rtc/rtc.h>
+#include <services/adc-sensor/adc-sensor.h>
+#include <interfaces/mux.h>
 
 
 #define PORT_NAME                  "nwdaq-b28-fdc"
@@ -81,11 +84,37 @@
 #define FLASH_CS_PORT GPIOC
 #define FLASH_CS_PIN GPIO11
 
+#define I2C1_SDA_PORT GPIOB
+#define I2C1_SDA_PIN GPIO7
+#define I2C1_SDA_AF GPIO_AF4
+
+#define I2C1_SCL_PORT GPIOA
+#define I2C1_SCL_PIN GPIO15
+#define I2C1_SCL_AF GPIO_AF4
+
+
+#define CAN_SHDN_PORT GPIOA
+#define CAN_SHDN_PIN GPIO10
+#define CAN_RX_PORT GPIOA
+#define CAN_RX_PIN GPIO11
+#define CAN_TX_PORT GPIOA
+#define CAN_TX_PIN GPIO12
+#define CAN_AF GPIO_AF9
+#define CAN_BITRATE 250000
+
+/* STM32G4 unique 96 bit identifier */
+#define UNIQUE_ID_REG ((void *)0x1fff7590)
+#define UNIQUE_ID_REG_LEN 12
+
 
 extern IServiceLocator *locator;
 extern GenericPower exc_power;
 extern GenericMux input_mux;
+extern Mux vref_mux;
+extern Mux mcp_mux;
 extern Mcp3564 mcp;
+extern Stm32Rtc rtc;
+extern AdcSensor pcb_temp;
 
 int32_t port_early_init(void);
 #define PORT_EARLY_INIT_OK 0

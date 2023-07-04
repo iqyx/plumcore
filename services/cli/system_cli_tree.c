@@ -85,6 +85,8 @@
 	#include "device_clock.h"
 #endif
 #include "device_lora.h"
+#include "cli-applet.h"
+#include "cli-identity.h"
 
 #include "config_export.h"
 #if defined(CONFIG_SERVICE_CLI_SYSTEM_BOOTLOADER)
@@ -109,7 +111,25 @@ const struct treecli_node *system_cli_tree = Node {
 				DNode {
 					Name "fsN",
 					.create = files_fsN_create,
-				}
+				},
+				End
+			}
+		},
+		Node {
+			Name "applet",
+			Commands {
+				Command {
+					Name "print",
+					.exec = applet_print,
+				},
+				End
+			},
+			DSubnodes {
+				DNode {
+					Name "appletN",
+					.create = applet_appletN_create,
+				},
+				End
 			}
 		},
 /*
@@ -616,6 +636,35 @@ const struct treecli_node *system_cli_tree = Node {
 					}
 				},
 				#endif
+				Node {
+					Name "identity",
+					Commands {
+						Command {
+							Name "print",
+							Exec identity_print,
+						},
+						Command {
+							Name "export",
+							Exec identity_export,
+						},
+						End
+					},
+					Values {
+						Value {
+							Name "name",
+							.set = identity_generic_set,
+							.get_set_context = (void *)&identity_device_name,
+							Type TREECLI_VALUE_STR,
+						},
+						Value {
+							Name "serial-number",
+							.set = identity_generic_set,
+							.get_set_context = (void *)&identity_serial_number,
+							Type TREECLI_VALUE_STR,
+						},
+						End
+					}
+				},
 				End
 			},
 			Commands {
@@ -630,6 +679,10 @@ const struct treecli_node *system_cli_tree = Node {
 				Command {
 					Name "poweroff",
 					Exec ucli_system_poweroff,
+				},
+				Command {
+					Name "export",
+					Exec default_export,
 				},
 				End
 			},

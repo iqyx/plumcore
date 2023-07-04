@@ -35,7 +35,7 @@ static void mcp_measure(Mcp3564 *self, uint8_t *status, int32_t *value) {
 	/* Wait for data ready. */
 	/** @todo timeout, remove the shortcut */
 	while (gpio_get(ADC_IRQ_PORT, ADC_IRQ_PIN)) {
-		;
+		vTaskDelay(2);
 	}
 	mcp3564_read_reg(self, MCP3564_REG_ADCDATA, 4, (uint32_t *)value, status);
 }
@@ -97,7 +97,7 @@ adc_composite_ret_t adc_composite_init(AdcComposite *self, Adc *adc, Mq *mq) {
 	self->mq = mq;
 
 	self->interval_ms = 500;
-	self->exc_voltage_v = 3.3f;
+	self->exc_voltage_v = 2.5f;
 
 	return ADC_COMPOSITE_RET_OK;
 }
@@ -139,58 +139,114 @@ static void set_muxes(AdcComposite *self, const struct adc_composite_mux m[]) {
 }
 
 
+static adc_composite_ret_t process_sample(AdcComposite *self, const struct adc_composite_channel *channel, int32_t sample, struct timespec *ts) {
+	/* Adc composite is always processing results in uV/V */
+	float f = sample / 8388607.0f * 1000000.0f;
+
+	/* Apply the current gain settings. */
+	if (channel->gain != 0.0f) {
+		f /= channel->gain;
+	}
+	if (channel->pregain != 0.0f) {
+		f /= channel->pregain;
+	}
+
+	/* Perform offset and gain adjustment if requested. */
+	f += channel->offset_calib;
+	if (channel->gain_calib != 0.0f) {
+		f *= channel->gain_calib;
+	}
+
+	/* And finally do a temperature compensation if requested. */
+	if (channel->temp_compensation) {
+		f /= (channel->tc_a * self->temp_c * self->temp_c + channel->tc_b * self->temp_c + 1.0f);
+	}
+
+	NdArray array;
+	ndarray_init_view(&array, DTYPE_FLOAT, 1, &f, sizeof(f));
+
+	/* Publish the array and clear the channel buffer. */
+	self->mqc->vmt->publish(self->mqc, channel->name, &array, ts);
+}
+
+
+static adc_composite_ret_t measure_temp(AdcComposite *self) {
+	if (self->device_temp != NULL && self->device_temp->vmt->value_f != NULL) {
+		self->device_temp->vmt->value_f(self->device_temp, &self->temp_c);
+
+		if (self->temp_topic != NULL) {
+			struct timespec ts = {0};
+			if (self->clock != NULL) {
+				self->clock->get(self->clock->parent, &ts);
+			}
+
+			NdArray array;
+			ndarray_init_view(&array, DTYPE_FLOAT, 1, &self->temp_c, sizeof(float));
+
+			self->mqc->vmt->publish(self->mqc, self->temp_topic, &array, &ts);
+		}
+	} else {
+		self->temp_c = ADC_COMPOSITE_DEFAULT_TEMP_C;
+	}
+}
+
+
 adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self) {
+	/* Measure the device temperature at the beginning of the sequence. */
+	measure_temp(self);
+
 	/* Iterate over all channels. */
 	const struct adc_composite_channel *c = *(self->channels);
 	while (c->name != NULL) {
 		set_muxes(self, c->muxes);
 		/** @todo compute exactly how much time is needed to stabilise the input */
-		/** @todo save the current sample time */
 
 		/* Enable positive excitation voltage and switch the Vref mux appropriately. */
 		if (self->exc_power != NULL) {
 			self->exc_power->vmt->set_voltage(self->exc_power, self->exc_voltage_v);
-			/** @todo remove the shortcut */
-			gpio_set(VREF1_SEL_PORT, VREF1_SEL_PIN);
-			gpio_set(VREF2_SEL_PORT, VREF2_SEL_PIN);
+		}
+
+
+		/* If the reference muxing is enabled, set the mux to positive regardless of the
+		 * AC excitation setting. */
+		if (self->vref_mux != NULL) {
+			/** @todo when to disable the mux? */
+			self->vref_mux->vmt->enable(self->vref_mux, true);
+			self->vref_mux->vmt->select(self->vref_mux, VREF_MUX_CHANNEL_POS);
+		}
+
+		struct timespec ts = {0};
+		if (self->clock != NULL) {
+			self->clock->get(self->clock->parent, &ts);
 		}
 
 		/* Measure the channel using positive excitation and positive Vref mux. */
 		uint8_t status = 0;
 		volatile int32_t v1 = 0;
-		/** @todo measure multiple times until the input is stable */
-		mcp_measure(self->adc, &status, &v1);
-		mcp_measure(self->adc, &status, &v1);
+			/** @todo stable to about 10 ppm, provide proper timing here */
+		vTaskDelay(6);
 		mcp_measure(self->adc, &status, &v1);
 
 		if (c->ac_excitation) {
-
 			/* Switch excitation voltage and the corresponding mux to negative. */
 			if (self->exc_power != NULL) {
+				/* See the minus unary operator here. */
 				self->exc_power->vmt->set_voltage(self->exc_power, -self->exc_voltage_v);
-				/** @todo remove the shortcut */
-				gpio_clear(VREF1_SEL_PORT, VREF1_SEL_PIN);
-				gpio_clear(VREF2_SEL_PORT, VREF2_SEL_PIN);
+			}
+			if (self->vref_mux != NULL) {
+				self->vref_mux->vmt->select(self->vref_mux, VREF_MUX_CHANNEL_NEG);
 			}
 
 			int32_t v2 = 0;
-			/** @todo measure multiple times until the input is stable */
-			mcp_measure(self->adc, &status, &v2);
-			mcp_measure(self->adc, &status, &v2);
+			/** @todo stable to about 10 ppm, provide proper timing here */
+			vTaskDelay(6);
 			mcp_measure(self->adc, &status, &v2);
 
 			/* Aggregate the two results */
 			v1 = (v1 - v2) / 2;
 		}
 
-		NdArray array;
-		ndarray_init_view(&array, DTYPE_INT32, 1, &v1, sizeof(v1));
-
-		/** @todo get the exact sample time from somewhere */
-		struct timespec ts = {0};
-
-		/* Publish the array and clear the channel buffer. */
-		self->mqc->vmt->publish(self->mqc, c->name, &array, &ts);
+		process_sample(self, c, v1, &ts);
 
 		c++;
 	}
@@ -205,3 +261,19 @@ adc_composite_ret_t adc_composite_set_exc_power(AdcComposite *self, Power *exc_p
 }
 
 
+adc_composite_ret_t adc_composite_set_vref_mux(AdcComposite *self, Mux *vref_mux) {
+	self->vref_mux = vref_mux;
+	return ADC_COMPOSITE_RET_OK;
+}
+
+
+adc_composite_ret_t adc_composite_set_clock(AdcComposite *self, Clock *clock) {
+	self->clock = clock;
+	return ADC_COMPOSITE_RET_OK;
+}
+
+adc_composite_ret_t adc_composite_set_device_temp(AdcComposite *self, Sensor *device_temp, const char *topic) {
+	self->device_temp = device_temp;
+	self->temp_topic = topic;
+	return ADC_COMPOSITE_RET_OK;
+}

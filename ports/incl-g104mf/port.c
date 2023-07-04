@@ -14,6 +14,7 @@
 #include <libopencm3/cm3/scb.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/scs.h>
+#include <libopencm3/cm3/systick.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/timer.h>
@@ -49,11 +50,13 @@
 #include <interfaces/stream.h>
 #include <interfaces/uart.h>
 #include <interfaces/clock.h>
+#include <interfaces/pm.h>
 
 #include <services/cli/system_cli_tree.h>
 #include <services/stm32-system-clock/clock.h>
 #include <services/stm32-rtc/rtc.h>
 #include <services/icm42688p/icm42688p.h>
+#include <services/adxl355/adxl355.h>
 #include <services/stm32-i2c/stm32-i2c.h>
 #include <services/spi-sd/spi-sd.h>
 #include <services/bq35100/bq35100.h>
@@ -62,6 +65,10 @@
 #include <services/stm32-uart/stm32-uart.h>
 #include <services/stm32-spi/stm32-spi.h>
 #include <services/si7006/si7006.h>
+
+#include <services/stm32-l4-pm/stm32-l4-pm.h>
+Stm32L4Pm mcu_pm;
+
 
 #define MODULE_NAME CONFIG_PORT_NAME
 
@@ -85,13 +92,11 @@ uint32_t SystemCoreClock;
 SystemClock system_clock;
 Stm32Rtc rtc;
 Clock *rtc_clock = &rtc.clock;
-Icm42688p accel2;
 Bq35100 bq35100;
 GpsUblox gps;
 
 #define RCC_CCIPR_LPTIM1SEL_LSE (3 << 18)
 volatile uint16_t last_tick;
-volatile uint16_t lptim1_ext;
 
 void vPortSetupTimerInterrupt(void);
 void port_sleep(TickType_t idle_time);
@@ -422,7 +427,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
  * TDK ICM42688P accelerometer
  *********************************************************************************************************************/
 
-#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL) || defined(CONFIG_INCL_G104MF_ENABLE_RFM)
+#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL) || defined(CONFIG_INCL_G104MF_ENABLE_RFM) || defined(CONFIG_INCL_G104MF_ENABLE_ADXL_ACCEL)
 	Stm32SpiBus spi1;
 
 	static void port_spi1_init(void) {
@@ -433,7 +438,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		rcc_periph_clock_enable(RCC_SPI1);
 
 		stm32_spibus_init(&spi1, SPI1);
-		spi1.bus.vmt->set_sck_freq(&spi1.bus, 10e6);
+		spi1.bus.vmt->set_sck_freq(&spi1.bus, 4e6);
 		spi1.bus.vmt->set_mode(&spi1.bus, 0, 0);
 
 	}
@@ -442,6 +447,7 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 
 #if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL)
 	Stm32SpiDev spi1_accel2;
+	Icm42688p accel2;
 
 	void port_accel2_init(void) {
 		/* ICM42688P on SPI1 bus */
@@ -454,8 +460,32 @@ static int64_t timespec_diff(struct timespec *time1, struct timespec *time2) {
 		/* SYNC32 output */
 		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
 
-		icm42688p_init(&accel2, &spi1_accel2.dev);
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel2.source, "accel2");
+		if (icm42688p_init(&accel2, &spi1_accel2.dev) == ICM42688P_RET_OK) {
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel2.source, "accel2");
+		}
+	}
+#endif
+
+#if defined(CONFIG_INCL_G104MF_ENABLE_ADXL_ACCEL)
+	Stm32SpiDev spi1_accel3;
+	Adxl355 accel3;
+
+	static void port_accel3_init(void) {
+		/* ADXL355 on SPI1 bus */
+		gpio_set(GPIOA, GPIO15);
+		gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
+		gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_50MHZ, GPIO15);
+
+		/* Power on */
+		gpio_set(GPIOH, GPIO0);
+		vTaskDelay(100);
+
+		stm32_spidev_init(&spi1_accel3, &spi1.bus, GPIOA, GPIO15);
+
+		if (adxl355_init(&accel3, &spi1_accel3.dev) == ADXL355_RET_OK) {
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel3.source, "accel3");
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&accel3.die_temp, "accel3_temp");
+		}
 	}
 #endif
 
@@ -629,6 +659,14 @@ static void port_setup_default_gpio(void) {
 	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13);
 	gpio_set(GPIOC, GPIO13);
 
+	/* ACCEL2_CS */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO8);
+	gpio_set(GPIOB, GPIO8);
+
+	/* ACCEL3_CS */
+	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
+	gpio_set(GPIOA, GPIO15);
+
 	/* RFM_CS */
 	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO15);
 	gpio_set(GPIOC, GPIO15);
@@ -676,19 +714,24 @@ int32_t port_init(void) {
 	#endif
 
 	port_i2c_init();
-	port_temp_sensor_init();
+	//~ port_temp_sensor_init();
 	port_battery_gauge_init();
 	port_gps_power(false);
 	// port_gps_init();
-	port_sd_init();
+	#if defined(CONFIG_INCL_G104MF_ENABLE_MICROSD)
+		port_sd_init();
+	#endif
 	rn2483_lora_init();
 
-	#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL) || defined(CONFIG_INCL_G104MF_ENABLE_RFM)
+	#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL) || defined(CONFIG_INCL_G104MF_ENABLE_RFM) || defined(CONFIG_INCL_G104MF_ENABLE_ADXL_ACCEL)
 		port_spi1_init();
 	#endif
 
 	#if defined(CONFIG_INCL_G104MF_ENABLE_TDK_ACCEL)
 		port_accel2_init();
+	#endif
+	#if defined(CONFIG_INCL_G104MF_ENABLE_ADXL_ACCEL)
+		port_accel3_init();
 	#endif
 
 	#if defined(CONFIG_INCL_G104MF_ENABLE_RFM)
@@ -703,164 +746,38 @@ int32_t port_init(void) {
 		#endif
 	#endif
 
+	stm32_l4_pm_init(&mcu_pm);
 	port_check_debug();
 
 	return PORT_INIT_OK;
 }
 
 
-void vApplicationIdleHook(void);
-void vApplicationIdleHook(void) {
-}
-
 /*********************************************************************************************************************
  * Low power timer (LPTIM) for FreeRTOS timing
  *********************************************************************************************************************/
 
-#define PORT_LPTIM_ARR (0x8000)
 void vPortSetupTimerInterrupt(void) {
-	lptimer_disable(LPTIM1);
-	lptimer_set_internal_clock_source(LPTIM1);
-	lptimer_enable_trigger(LPTIM1, LPTIM_CFGR_TRIGEN_SW);
-	lptimer_set_prescaler(LPTIM1, LPTIM_CFGR_PRESC_1);
+	/* Setup systick for RUN and SLEEP modes (S0, S1). */
+	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
+	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
+	systick_set_reload(16e3 - 1);
+	systick_interrupt_enable();
+	systick_counter_enable();
 
-	lptimer_enable(LPTIM1);
-	lptimer_set_period(LPTIM1, PORT_LPTIM_ARR - 1);
-	lptimer_set_compare(LPTIM1, 0 + 31);
-	lptimer_enable_irq(LPTIM1, LPTIM_IER_CMPMIE);
-	nvic_set_priority(NVIC_LPTIM1_IRQ, 5 * 16);
-	nvic_enable_irq(NVIC_LPTIM1_IRQ);
-	lptimer_start_counter(LPTIM1, LPTIM_CR_CNTSTRT);
+	stm32_l4_pm_lptimer_enable();
 }
 
 void port_task_timer_init(void) {
-	/* LPTIM1 us used for task statistics. It is already initialized. */
+	/* LPTIM1 is used for task statistics. It is already initialized. */
 }
 
 
 uint32_t port_task_timer_get_value(void) {
-	return lptim_get_extended();
+	return stm32_l4_pm_clock(&mcu_pm);
 }
 
 
-static void lptim_schedule_cmp(uint32_t lptim, uint16_t increment_ticks, uint16_t *current_ticks) {
-	uint16_t this_tick = 0;
-	while (this_tick != lptimer_get_counter(lptim)) {
-		this_tick = lptimer_get_counter(lptim);
-	}
-	uint16_t next_tick = (this_tick + increment_ticks) % PORT_LPTIM_ARR;
-
-	/* Cannot write 0xffff to the compare register. Cheat a bit in this case. */
-	if (next_tick == 0xffff) {
-		next_tick = 0;
-	}
-	lptimer_set_compare(lptim, next_tick);
-	if (current_ticks != NULL) {
-		*current_ticks = this_tick;
-	}
-}
 
 
-static uint16_t lptim_time_till_now(uint32_t lptim, uint16_t last_time) {
-	uint16_t time_now = 0;
-	while (time_now != lptimer_get_counter(lptim)) {
-		time_now = lptimer_get_counter(lptim);
-	}
 
-	return time_now - last_time;
-}
-
-
-/*********************************************************************************************************************
- * FreeRTOS tickless implementation using LPTIM1
- *********************************************************************************************************************/
-
-volatile bool systick_enabled = true;
-void lptim1_isr(void) {
-	if (lptimer_get_flag(LPTIM1, LPTIM_ISR_CMPM)) {
-		lptimer_clear_flag(LPTIM1, LPTIM_ICR_CMPMCF);
-			if (systick_enabled) {
-				xPortSysTickHandler();
-				lptim_schedule_cmp(LPTIM1, 32, NULL);
-			}
-
-	}
-	if (lptimer_get_flag(LPTIM1, LPTIM_ISR_ARRM)) {
-		lptimer_clear_flag(LPTIM1, LPTIM_ICR_ARRMCF);
-			gpio_set(GPIOB, GPIO2);
-			lptim1_ext++;
-			gpio_clear(GPIOB, GPIO2);
-	}
-}
-
-
-uint32_t lptim_get_extended(void) {
-	uint16_t e = lptim1_ext;
-	uint16_t b = lptimer_get_counter(LPTIM1);
-	uint16_t e2 = lptim1_ext;
-	if (e != e2) {
-		if (b > 32768) {
-			return (e << 16) | b;
-		} else {
-			return (e2 << 16) | b;
-		}
-	}
-	return (e << 16) | b;
-}
-
-
-static void port_wait_sleep(void) {
-	while (
-		((USART_CR1(USART1) & USART_CR1_UE) && ((USART_ISR(USART1) & USART_ISR_TC) == 0)) ||
-		((USART_CR1(USART2) & USART_CR1_UE) && ((USART_ISR(USART2) & USART_ISR_TC) == 0))
-	) {
-		;
-	}
-}
-
-void port_sleep(TickType_t idle_time) {
-	eSleepModeStatus sleep_status;
-
-	/* Wait until all IO transmissions are completed.
-	 * Going to sleep in the middle of a tx/rx would corrupt the data. */
-	port_wait_sleep();
-
-	if (idle_time > 1000) {
-		idle_time = 1000;
-	}
-
-	__asm volatile("cpsid i");
-	__asm volatile("dsb");
-	__asm volatile("isb");
-
-	sleep_status = eTaskConfirmSleepModeStatus();
-	if (sleep_status == eAbortSleep) {
-		__asm volatile("cpsie i");
-
-	} else {
-		systick_enabled = false;
-
-		/* Enter STOP 1 mode. Set LPMS to 001, SLEEPDEEP bit and do a WFI later. */
-		SCB_SCR |= SCB_SCR_SLEEPDEEP;
-		PWR_CR1 &= ~PWR_CR1_LPMS_MASK;
-		PWR_CR1 |= PWR_CR1_LPMS_STOP_1;
-
-		/* Wake up in the future. Next tick is calculated and properly cropped inside */
-		uint16_t time_before_sleep = 0;
-		lptim_schedule_cmp(LPTIM1, idle_time * 32, &time_before_sleep);
-
-		__asm volatile("dsb");
-		__asm volatile("wfi");
-		__asm volatile("isb");
-
-		uint16_t ticks_completed = lptim_time_till_now(LPTIM1, time_before_sleep) / 32;
-		if (ticks_completed > idle_time) {
-			ticks_completed = idle_time;
-		}
-		vTaskStepTick(ticks_completed);
-	}
-
-	lptim_schedule_cmp(LPTIM1, 32, NULL);
-	__asm volatile("cpsie i");
-	systick_enabled = true;
-}

@@ -225,8 +225,8 @@ icm42688p_ret_t icm42688p_init(Icm42688p *self, SpiDev *spidev) {
 	memset(self, 0, sizeof(Icm42688p));
 	self->spidev = spidev;
 
-	while (icm42688p_detect(self) != ICM42688P_RET_OK) {
-		// return ICM42688P_RET_FAILED;
+	if (icm42688p_detect(self) != ICM42688P_RET_OK) {
+		return ICM42688P_RET_FAILED;
 	}
 
 	waveform_source_init(&self->source);

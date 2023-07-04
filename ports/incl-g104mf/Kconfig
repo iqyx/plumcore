@@ -76,7 +76,11 @@ config PORT_INCL_G104MF
 			default y
 
 		config INCL_G104MF_ENABLE_TDK_ACCEL
-			bool "Enable ICM-42688 accelerometer (SPI2)"
+			bool "Enable ICM-42688 accelerometer"
+			default y
+
+		config INCL_G104MF_ENABLE_ADXL_ACCEL
+			bool "Enable ADXL355 accelerometer"
 			default y
 
 		config INCL_G104MF_ENABLE_MICROSD

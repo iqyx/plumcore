@@ -10,8 +10,6 @@
 
 #include <stdint.h>
 
-#include <main.h>
-
 
 typedef enum {
 	SENSOR_RET_OK = 0,

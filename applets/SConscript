@@ -1,0 +1,16 @@
+import os
+Import("env")
+
+objs = []
+
+env.Append(CPPPATH = [
+	Dir("."),
+])
+
+for d in next(os.walk("."))[1]:
+	f = os.path.join(d, "SConscript")
+	if os.path.isfile(f):
+		SConscript(f)
+
+Return("objs")
+

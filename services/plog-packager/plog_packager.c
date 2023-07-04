@@ -322,7 +322,7 @@ static plog_packager_ret_t package_add_message(struct plog_packager_package *sel
 		package_publish(self);
 		package_prepare(self);
 	}
-	
+
 	pb_ostream_t stream = {nanopb_write_callback_compressed, self, self->data_size - self->data_used, 0};
 
 	/* Message header */
@@ -397,7 +397,7 @@ plog_packager_ret_t plog_packager_start(PlogPackager *self, size_t msg_size, siz
 	self->hs_window_size = 8;
 	self->hs_lookahead_size = 5;
 	self->hs_encoder = heatshrink_encoder_alloc(self->hs_window_size, self->hs_lookahead_size);
-	
+
 	if (self->hs_encoder == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot allocate compression encoder"));
 		return PLOG_PACKAGER_RET_FAILED;

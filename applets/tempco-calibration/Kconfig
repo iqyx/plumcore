@@ -1,0 +1,7 @@
+config APPLET_TEMPCO_CALIBRATION
+	bool "Output adc-composite temperature coeff calibration data as a CSV"
+
+menu "tempco-calibration configuration"
+	depends on APPLET_TEMPCO_CALIBRATION
+
+endmenu

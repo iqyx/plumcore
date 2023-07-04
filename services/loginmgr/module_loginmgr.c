@@ -32,6 +32,10 @@
 #include "lineedit.h"
 #include "port.h"
 
+#include <interfaces/fs.h>
+
+#define MODULE_NAME "loginmgr"
+
 /**
  * @todo login manager cound have two different stream interfaces, one for the CLI console itself and the other one
  *       for a log writer. Before the login manager is initialized, log writer is directed to the same stream interface
@@ -386,46 +390,31 @@ int32_t module_loginmgr_print_welcome(struct module_loginmgr *loginmgr) {
 		return MODULE_LOGINMGR_PRINT_WELCOME_FAILED;
 	}
 
-	char s[93];
-	module_loginmgr_print_handler("\x1b[34m" "\x1b[1m", (void *)loginmgr);
+	Fs *fs = NULL;
+	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_FS, (Interface **)&fs) != ISERVICELOCATOR_RET_OK) {
+		goto err;
+	}
+	File f;
+	if (fs->vmt->open(fs, &f, "issue", FS_MODE_READONLY) != FS_RET_OK) {
+		goto err;
+	}
 
-	/* Line 1 */
-	module_loginmgr_string_line(s, sizeof(s) - 1, 1);
-	module_loginmgr_print_handler(s, (void *)loginmgr);
-	module_loginmgr_print_handler("\r\n", (void *)loginmgr);
+	size_t read = 0;
+	uint8_t buf[64];
+	while (fs->vmt->read(fs, &f, buf, sizeof(buf), &read) == FS_RET_OK) {
+		for (size_t i = 0; i < read; i++) {
+			if (buf[i] == '\n') {
+				loginmgr->host->vmt->write(loginmgr->host, "\r", 1);
+			}
+			loginmgr->host->vmt->write(loginmgr->host, buf + i, 1);
+		}
+	}
+	fs->vmt->close(fs, &f);
+	loginmgr->host->vmt->write(loginmgr->host, "\r\n", 2);
 
-	/* Line 2 */
-	module_loginmgr_string_line(s, sizeof(s) - 1, 2);
-	module_loginmgr_string_overlay(s, "     _____         _   _____ ", 2);
-	module_loginmgr_print_handler(s, (void *)loginmgr);
-	module_loginmgr_print_handler("\r\n", (void *)loginmgr);
-
-	/* Line 3 */
-	module_loginmgr_string_line(s, sizeof(s) - 1, 2);
-	module_loginmgr_string_overlay(s, " _ _|     |___ ___| |_|   __|_ _ _", 2);
-	module_loginmgr_string_overlay(s, PORT_BANNER ", " PORT_NAME " platform", 40);
-	module_loginmgr_print_handler(s, (void *)loginmgr);
-	module_loginmgr_print_handler("\r\n", (void *)loginmgr);
-
-	/* Line 4 */
-	module_loginmgr_string_line(s, sizeof(s) - 1, 2);
-	module_loginmgr_string_overlay(s, "| | | | | | -_|_ -|   |   __| | | |", 2);
-	module_loginmgr_string_overlay(s, UMESH_VERSION, 40);
-	module_loginmgr_print_handler(s, (void *)loginmgr);
-	module_loginmgr_print_handler("\r\n", (void *)loginmgr);
-
-	/* Line 5 */
-	module_loginmgr_string_line(s, sizeof(s) - 1, 2);
-	module_loginmgr_string_overlay(s, "|___|_|_|_|___|___|_|_|__|  |_____|", 2);
-	module_loginmgr_string_overlay(s, "build date " UMESH_BUILD_DATE, 40);
-	module_loginmgr_print_handler(s, (void *)loginmgr);
-	module_loginmgr_print_handler("\r\n", (void *)loginmgr);
-
-	/* Line 6 */
-	module_loginmgr_string_line(s, sizeof(s) - 1, 3);
-	module_loginmgr_print_handler(s, (void *)loginmgr);
-	module_loginmgr_print_handler("\r\n\r\n", (void *)loginmgr);
-
-	module_loginmgr_print_handler("\x1b[0m", (void *)loginmgr);
 	return MODULE_LOGINMGR_PRINT_WELCOME_OK;
+err:
+	u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot access 'issue' file on 'system'"));
+
+	return MODULE_LOGINMGR_PRINT_WELCOME_FAILED;
 }

@@ -13,10 +13,17 @@
 #include <interfaces/mux.h>
 #include <interfaces/adc.h>
 #include <interfaces/power.h>
+#include <interfaces/sensor.h>
 #include <services/adc-mcp3564/mcp3564.h>
 #include <interfaces/mq.h>
+#include <interfaces/clock.h>
 
 #define ADC_COMPOSITE_MAX_MUX 4
+
+#define VREF_MUX_CHANNEL_POS 0
+#define VREF_MUX_CHANNEL_NEG 1
+
+#define ADC_COMPOSITE_DEFAULT_TEMP_C (25.0f)
 
 typedef enum  {
 	ADC_COMPOSITE_RET_OK = 0,
@@ -34,6 +41,16 @@ struct adc_composite_channel {
 	const struct adc_composite_mux muxes[ADC_COMPOSITE_MAX_MUX];
 	const char *name;
 	bool ac_excitation;
+
+	float gain;
+	float pregain;
+
+	float offset_calib;
+	float gain_calib;
+
+	bool temp_compensation;
+	float tc_a;
+	float tc_b;
 };
 
 enum adc_composite_state {
@@ -51,7 +68,7 @@ typedef struct adc_composite {
 	float exc_voltage_v;
 
 	/* Reference voltage mux for AC excitation. Do not use if NULL. */
-	// Mux *vref_mux;
+	Mux *vref_mux;
 
 	/* Some parts of the composite ADC subsystem can be enabled on-demand using a dedicated Power device.
 	 * DO not power on/off anything if NULL. */
@@ -81,6 +98,12 @@ typedef struct adc_composite {
 	Mq *mq;
 	MqClient *mqc;
 
+	Clock *clock;
+
+	/* Temperature compensation */
+	Sensor *device_temp;
+	float temp_c;
+	const char *temp_topic;
 
 } AdcComposite;
 
@@ -90,3 +113,8 @@ adc_composite_ret_t adc_composite_start_cont(AdcComposite *self);
 adc_composite_ret_t adc_composite_stop_cont(AdcComposite *self);
 adc_composite_ret_t adc_composite_start_sequence(AdcComposite *self);
 adc_composite_ret_t adc_composite_set_exc_power(AdcComposite *self, Power *exc_power);
+adc_composite_ret_t adc_composite_set_vref_mux(AdcComposite *self, Mux *vref_mux);
+adc_composite_ret_t adc_composite_set_clock(AdcComposite *self, Clock *clock);
+adc_composite_ret_t adc_composite_set_device_temp(AdcComposite *self, Sensor *device_temp, const char *topic);
+
+
