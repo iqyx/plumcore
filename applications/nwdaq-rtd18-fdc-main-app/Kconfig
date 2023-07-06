@@ -1,0 +1,11 @@
+config APP_NWDAQ_RTD18_FDC
+	bool "nwdaq-rtd18-fdc main application"
+
+menu "nwdaq-rtd18-fdc main application"
+ 	depends on APP_NWDAQ_RTD18_FDC
+
+	config APP_NAME
+		string
+		default "nwdaq-rtd18-fdc-main-app"
+
+endmenu

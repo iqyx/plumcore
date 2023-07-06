@@ -1,0 +1,35 @@
+config PORT_NWDAQ_RTD18_FDC
+	bool "nwDaq 8-channel RTD digitiser with CAN-FD interface (nwdaq-rtd18-fdc)"
+
+	menu "Configuraton"
+		depends on PORT_NWDAQ_RTD18_FDC
+
+		config PORT_NAME
+			string
+			default "nwdaq-rtd18-fdc"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+
+		config NWDAQ_RTD18_FDC_ENABLE_SERIAL_CONSOLE
+			bool "Enable diagnostic serial console"
+			default yes
+
+		config NWDAQ_RTD18_FDC_CONSOLE_SPEED
+			depends on NWDAQ_RTD18_FDC_ENABLE_SERIAL_CONSOLE
+			int "Serial console speed"
+			default 115200
+
+		config NWDAQ_RTD18_FDC_ENABLE_LEDS
+			bool "Enable back panel LEDs"
+			default yes
+
+		config NWDAQ_RTD18_FDC_ENABLE_FLASH
+			bool "Enable NOR flash on the SPI3 interface"
+			default yes
+	endmenu
