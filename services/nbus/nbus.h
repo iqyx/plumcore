@@ -144,6 +144,8 @@ typedef struct nbus_channel {
 	bool channel_id_valid;
 	nbus_short_id_t short_id;
 	const char *name;
+	const char *interface;
+	const char *version;
 
 	/* Packet instances. */
 	NbusTxPacket txpacket;
@@ -153,6 +155,8 @@ typedef struct nbus_channel {
 	CborRpc ccrpc;
 	struct cbor_rpc_handler name_handler;
 	struct cbor_rpc_handler parent_handler;
+	struct cbor_rpc_handler interface_handler;
+	struct cbor_rpc_handler version_handler;
 
 	/* A monotonically increasing counter. The calue is increased by one
 	 * every time a discovery probe response message is sent. */
@@ -201,6 +205,7 @@ nbus_ret_t nbus_channel_receive(NbusChannel *self, nbus_endpoint_t *ep, void *bu
 
 nbus_ret_t nbus_channel_set_explicit_short_id(NbusChannel *self, nbus_short_id_t short_id);
 nbus_ret_t nbus_channel_set_parent(NbusChannel *self, NbusChannel *parent);
+nbus_ret_t nbus_channel_set_interface(NbusChannel *self, const char *interface, const char *version);
 
 void nbus_parse_id(uint32_t id, struct nbus_id *sid);
 uint32_t nbus_build_id(struct nbus_id *id);
