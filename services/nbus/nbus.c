@@ -437,7 +437,7 @@ static void nbus_receive_task(void *p) {
 
 static cbor_rpc_ret_t nbus_channel_cc_read_name(CborRpc *self, char *buf, size_t buf_size) {
 	NbusChannel *channel = self->parent;
-	strncpy(buf, channel->name, buf_size);
+	strlcpy(buf, channel->name, buf_size);
 	return CBOR_RPC_RET_OK;
 }
 
@@ -447,7 +447,29 @@ static cbor_rpc_ret_t nbus_channel_cc_read_parent(CborRpc *self, char *buf, size
 	if (channel->parent != NULL) {
 		snprintf(buf, buf_size, "%08lx", channel->parent->short_id);
 	} else {
-		strcpy(buf, "");
+		strlcpy(buf, "", buf_size);
+	}
+	return CBOR_RPC_RET_OK;
+}
+
+
+static cbor_rpc_ret_t nbus_channel_cc_read_interface(CborRpc *self, char *buf, size_t buf_size) {
+	NbusChannel *channel = self->parent;
+	if (channel->interface != NULL) {
+		strlcpy(buf, channel->interface, buf_size);
+	} else {
+		strlcpy(buf, "", buf_size);
+	}
+	return CBOR_RPC_RET_OK;
+}
+
+
+static cbor_rpc_ret_t nbus_channel_cc_read_version(CborRpc *self, char *buf, size_t buf_size) {
+	NbusChannel *channel = self->parent;
+	if (channel->version != NULL) {
+		strlcpy(buf, channel->version, buf_size);
+	} else {
+		strlcpy(buf, "", buf_size);
 	}
 	return CBOR_RPC_RET_OK;
 }
@@ -459,15 +481,25 @@ nbus_ret_t nbus_channel_init(NbusChannel *self, const char *name) {
 	cbor_rpc_init(&self->ccrpc);
 	self->ccrpc.parent = self;
 
-	self->name_handler.name = "name";
-	self->name_handler.htype = CBOR_RPC_HTYPE_STRING;
+	self->name_handler.name = "n";
+	self->name_handler.htype = CBOR_RPC_HTYPE_STRING,
 	self->name_handler.v_string.read = &nbus_channel_cc_read_name;
 	cbor_rpc_add_handler(&self->ccrpc, &self->name_handler);
 
-	self->parent_handler.name = "parent";
-	self->parent_handler.htype = CBOR_RPC_HTYPE_STRING;
+	self->parent_handler.name = "p";
+	self->parent_handler.htype = CBOR_RPC_HTYPE_STRING,
 	self->parent_handler.v_string.read = &nbus_channel_cc_read_parent;
 	cbor_rpc_add_handler(&self->ccrpc, &self->parent_handler);
+
+	self->interface_handler.name = "if";
+	self->interface_handler.htype = CBOR_RPC_HTYPE_STRING,
+	self->interface_handler.v_string.read = &nbus_channel_cc_read_interface;
+	cbor_rpc_add_handler(&self->ccrpc, &self->interface_handler);
+
+	self->version_handler.name = "v";
+	self->version_handler.htype = CBOR_RPC_HTYPE_STRING,
+	self->version_handler.v_string.read = &nbus_channel_cc_read_version;
+	cbor_rpc_add_handler(&self->ccrpc, &self->version_handler);
 
 	/* RX packet instance is created only once. */
 	nbus_rxpacket_init(&self->rxpacket, NBUS_CHANNEL_MTU);
@@ -541,6 +573,13 @@ nbus_ret_t nbus_channel_set_parent(NbusChannel *self, NbusChannel *parent) {
 	blake2s_final(&b2, &self->short_id, sizeof(self->short_id));
 
 	self->parent = parent;
+	return NBUS_RET_OK;
+}
+
+
+nbus_ret_t nbus_channel_set_interface(NbusChannel *self, const char *interface, const char *version) {
+	self->interface = interface;
+	self->version = version;
 	return NBUS_RET_OK;
 }
 

@@ -17,12 +17,30 @@
 #include "blake2.h"
 #include "nbus-mq.h"
 
+/** @todo remove! */
+#include "cli/cli-identity.h"
+
 #define MODULE_NAME "nbus-mq"
 
 
 static nbus_mq_ret_t prepare_buffer(NbusMq *self, struct nbus_mq_msg_buffer *buf) {
 	buf->state = NBUS_MQ_MB_STATE_ACTIVE;
 	buf->len = 0;
+
+	/* Encode header. */
+	uint8_t cbor[128];
+	CborEncoder encoder;
+	cbor_encoder_init(&encoder, cbor, sizeof(cbor), 0);
+	cbor_encode_text_stringz(&encoder, "h");
+	cbor_encode_text_stringz(&encoder, identity_device_name);
+	cbor_encode_text_stringz(&encoder, "d");
+	size_t cbor_len = cbor_encoder_get_buffer_size(&encoder, cbor);
+
+	/* Start a top level CBOR map */
+	buf->data[buf->len++] = 0xbf;
+
+	memcpy(buf->data + buf->len, cbor, cbor_len);
+	buf->len += cbor_len;
 
 	/* Start a CBOR array */
 	buf->data[buf->len++] = 0x9f;
@@ -31,7 +49,10 @@ static nbus_mq_ret_t prepare_buffer(NbusMq *self, struct nbus_mq_msg_buffer *buf
 
 
 static nbus_mq_ret_t close_buffer(NbusMq *self, struct nbus_mq_msg_buffer *buf) {
-	/* Close the last container (array). */
+	/* Close the array container. */
+	buf->data[buf->len++] = 0xff;
+
+	/* Close the map container. */
 	buf->data[buf->len++] = 0xff;
 
 	buf->state = NBUS_MQ_MB_STATE_FULL;
@@ -107,8 +128,8 @@ static nbus_mq_ret_t save_msg_to_buffer(NbusMq *self, const char *topic, NdArray
 		/* Ok nope, no buffer to save the message to */
 		return NBUS_MQ_RET_FAILED;
 	}
-	/* Always keep one byte for finishing the array and 2 bytes for start/finish of the map. */
-	if ((1 + cbor_len + 2 + b->len) > NBUS_MQ_MSG_BUFFER_SIZE) {
+	/* Always keep 2bytes for finishing both array and map and 2 bytes for start/finish of the current value map. */
+	if ((2 + cbor_len + 2 + b->len) > NBUS_MQ_MSG_BUFFER_SIZE) {
 		/* We had some buffer but unfortunately there was not enough space.
 		 * Try to find a new one. */
 		close_buffer(self, b);
@@ -168,8 +189,8 @@ static void nbus_task(void *p) {
 				nbus_channel_send(&self->channel, ep, b->data, b->len);
 				b->state = NBUS_MQ_MB_STATE_EMPTY;
 			} else {
-				/* Send an empty array */
-				nbus_channel_send(&self->channel, ep, "\x9f\xff", 2);
+				/* Send an empty map to indicate we have nothing to send. */
+				nbus_channel_send(&self->channel, ep, "\xbf\xff", 2);
 			}
 		}
 	}
@@ -185,6 +206,7 @@ nbus_mq_ret_t nbus_mq_init(NbusMq *self, Mq *mq, NbusChannel *parent, const char
 
 	nbus_channel_init(&self->channel, name);
 	nbus_channel_set_parent(&self->channel, parent);
+	nbus_channel_set_interface(&self->channel, "mq", "1.0.0");
 	nbus_add_channel(parent->nbus, &self->channel);
 
 	xTaskCreate(nbus_task, "nbus-mq", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->nbus_task));
