@@ -13,87 +13,65 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		/* Normally the result is in ppm of the ADC reference. In our case we are measuring
-		 * ratiometric to the Rref = 1.2k. Set pregain to 100 to get results in Ohms. */
-		.pregain = 833.333f,
+		 * ratiometric to the Rref = 1.2k. Set pregain to 833 to get results in Ohms. */
+		.pregain = -833.333f,
 		.gain = 1.0f,
-
-		.offset_calib = 0.252f,
-		.gain_calib = -0.992200419f,
 	}, {
 		.name = "channel/1",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 1},
 			{.mux = NULL},
 		},
-		.pregain = 833.333f,
-		.gain = 4.0f,
-		.gain_calib = +1.0f,
-		// .offset_calib = -0.026f,
-		// .gain_calib = 0.972861861f,
-
-		// .temp_compensation = true,
-		// .tc_a = 8.6171e-07,
-		// .tc_b = -3.5892e-04,
+		.pregain = -833.333f,
+		.gain = 1.0f,
 	}, {
 		.name = "channel/2",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 2},
 			{.mux = NULL},
 		},
-		.pregain = 100.0f,
-		.gain = 4.0f,
-		.gain_calib = -1.0f,
+		.pregain = -833.333f,
+		.gain = 1.0f,
 	}, {
 		.name = "channel/3",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 3},
 			{.mux = NULL},
 		},
-		.pregain = 100.0f,
-		.gain = 4.0f,
-		.gain_calib = +1.0f,
-		// .offset_calib = -0.026f,
-		// .gain_calib = 0.972861861f,
-
-		// .temp_compensation = true,
-		// .tc_a = 2.7011e-07,
-		// .tc_b = -3.3312e-04,
+		.pregain = -833.333f,
+		.gain = 1.0f,
 	}, {
 		.name = "channel/4",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 4},
 			{.mux = NULL},
 		},
-		.pregain = 100.0f,
-		.gain = 4.0f,
-		.gain_calib = -1.0f,
+		.pregain = -833.333f,
+		.gain = 1.0f,
 	}, {
 		.name = "channel/5",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 5},
 			{.mux = NULL},
 		},
-		.pregain = 100.0f,
-		.gain = 4.0f,
-		.gain_calib = +1.0f,
+		.pregain = -833.333f,
+		.gain = 1.0f,
 	}, {
 		.name = "channel/6",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 6},
 			{.mux = NULL},
 		},
-		.pregain = 100.0f,
-		.gain = 4.0f,
-		.gain_calib = -1.0f,
+		.pregain = -833.333f,
+		.gain = 1.0f,
 	}, {
 		.name = "channel/7",
 		.muxes = {
 			{.mux = &input_mux.mux, .channel = 7},
 			{.mux = NULL},
 		},
-		.pregain = 100.0f,
-		.gain = 4.0f,
-		.gain_calib = +1.0f,
+		.pregain = -833.333f,
+		.gain = 1.0f,
 	}, {
 		.name = NULL,
 	},
