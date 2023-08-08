@@ -262,15 +262,34 @@ static void nor_flash_init(void) {
 	spi3.bus.vmt->set_mode(&spi3.bus, 0, 0);
 	stm32_spidev_init(&spi3_flash, &spi3.bus, FLASH_CS_PORT, FLASH_CS_PIN);
 
-	spi_flash_init(&nor_flash, &spi3_flash.dev);
+	if (spi_flash_init(&nor_flash, &spi3_flash.dev) != SPI_FLASH_RET_OK) {
+		/* Do not continue with filesystem init. */
+		return;
+	}
 
-	flash_vol_static_init(&lvs, &nor_flash.flash);
-	flash_vol_static_create(&lvs, "boot", 0x0, 0x80000, &lv_boot);
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_boot, "boot");
-	flash_vol_static_create(&lvs, "system", 0x80000, 0x80000, &lv_system);
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_system, "system");
-	flash_vol_static_create(&lvs, "test", 0x100000, 0x100000, &lv_test);
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_test, "test");
+	/* nwdaq-rtd18-fdc support populating smaller flash memories (8 Mbit, 16 Mbit, 32 mbit).
+	 * Get the flash size and compute partition sizes accordingly. */
+	flash_block_ops_t ops = {0};
+	size_t size = 0;
+	nor_flash.flash.vmt->get_size(&nor_flash.flash, 0, &size, &ops);
+
+	if (size >= 0x200000) {
+		flash_vol_static_init(&lvs, &nor_flash.flash);
+		flash_vol_static_create(&lvs, "boot", 0x0, 0x80000, &lv_boot);
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_boot, "boot");
+		flash_vol_static_create(&lvs, "system", 0x80000, 0x80000, &lv_system);
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_system, "system");
+		flash_vol_static_create(&lvs, "test", 0x100000, 0x100000, &lv_test);
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_test, "test");
+	} else {
+		flash_vol_static_init(&lvs, &nor_flash.flash);
+		flash_vol_static_create(&lvs, "boot", 0x0, 0x40000, &lv_boot);
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_boot, "boot");
+		flash_vol_static_create(&lvs, "system", 0x40000, 0x40000, &lv_system);
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_system, "system");
+		flash_vol_static_create(&lvs, "test", 0x80000, 0x80000, &lv_test);
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_test, "test");
+	}
 
 	fs_spiffs_init(&spiffs_system);
 	if (fs_spiffs_mount(&spiffs_system, lv_system) == FS_SPIFFS_RET_OK) {
