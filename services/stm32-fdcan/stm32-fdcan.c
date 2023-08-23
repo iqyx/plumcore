@@ -51,6 +51,12 @@ static can_ret_t stm32_fdcan_receive(Can *can, struct can_message *msg, uint32_t
 	msg->len = rx_length;
 	msg->timestamp = rx_timestamp;
 
+	/* Check if the fifo is empty. If not, set the semaphore again. */
+	uint32_t frames = (FDCAN_RXFIS(self->fdcan, FDCAN_FIFO0) >> FDCAN_RXFIFO_FL_SHIFT) & FDCAN_RXFIFO_FL_MASK;
+	if (frames > 0) {
+		xSemaphoreGive(self->rx_sem);
+	}
+
 	return CAN_RET_OK;
 }
 
