@@ -46,7 +46,11 @@ struct adc_composite_channel {
 	float pregain;
 
 	float offset_calib;
-	float gain_calib;
+
+	bool gain_compensation;
+	float gc_a;
+	float gc_b;
+	float gc_c;
 
 	bool temp_compensation;
 	float tc_a;
@@ -92,8 +96,10 @@ typedef struct adc_composite {
 	size_t buf_size;
 
 	volatile enum adc_composite_state state;
-	uint32_t interval_ms;
 	TaskHandle_t cont_task;
+
+	uint32_t interval_ms;
+	uint32_t seq_trailer_ms;
 
 	Mq *mq;
 	MqClient *mqc;

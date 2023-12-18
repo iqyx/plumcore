@@ -41,6 +41,43 @@ static void mcp_measure(Mcp3564 *self, uint8_t *status, int32_t *value) {
 }
 
 
+static bool adc_composite_wait_check(AdcComposite *self, struct timespec *wait_ts) {
+	struct timespec now = {0};
+	if (self->clock->get(self->clock->parent, &now) != CLOCK_RET_OK) {
+		/* Break the wait loop if anything bad happens. */
+		return true;
+	}
+	if (now.tv_sec >= wait_ts->tv_sec) {
+		return true;
+	}
+	return false;
+}
+
+
+static adc_composite_ret_t adc_composite_wait_sequence(AdcComposite *self) {
+	if (self->clock == NULL) {
+		/* Cannot wait without a clock. */
+		return ADC_COMPOSITE_RET_FAILED;
+	}
+
+	struct timespec ts = {0};
+	if (self->clock->get(self->clock->parent, &ts) != CLOCK_RET_OK) {
+		return ADC_COMPOSITE_RET_FAILED;
+	}
+
+	/* Do not consider second fractions. */
+	ts.tv_nsec = 0;
+	ts.tv_sec += self->interval_ms / 1000;
+	ts.tv_sec -= ts.tv_sec % (self->interval_ms / 1000);
+
+	while (!adc_composite_wait_check(self, &ts)) {
+		vTaskDelay(100);
+	}
+
+	return ADC_COMPOSITE_RET_OK;
+}
+
+
 static void adc_composite_cont_task(void *p) {
 	AdcComposite *self = (AdcComposite *)p;
 
@@ -68,9 +105,9 @@ static void adc_composite_cont_task(void *p) {
 
 	self->state = ADC_COMPOSITE_RUN_CONT;
 	while (self->state != ADC_COMPOSITE_RUN_CONT_REQ_STOP) {
+		adc_composite_wait_sequence(self);
 		adc_composite_start_sequence(self);
-
-		vTaskDelay(self->interval_ms);
+		vTaskDelay(self->seq_trailer_ms);
 	}
 err:
 	self->state = ADC_COMPOSITE_STOP;
@@ -96,7 +133,8 @@ adc_composite_ret_t adc_composite_init(AdcComposite *self, Adc *adc, Mq *mq) {
 	// self->adc = adc;
 	self->mq = mq;
 
-	self->interval_ms = 500;
+	self->interval_ms = 1000;
+	self->seq_trailer_ms = 10;
 	self->exc_voltage_v = 2.5f;
 
 	return ADC_COMPOSITE_RET_OK;
@@ -151,10 +189,11 @@ static adc_composite_ret_t process_sample(AdcComposite *self, const struct adc_c
 		f /= channel->pregain;
 	}
 
-	/* Perform offset and gain adjustment if requested. */
+	/* Perform offset and gain adjustment if requested. Gain compensation is used to
+	 * correct the nonlinearity too. */
 	f += channel->offset_calib;
-	if (channel->gain_calib != 0.0f) {
-		f *= channel->gain_calib;
+	if (channel->gain_compensation) {
+		f /= (channel->gc_a * channel->gc_a * f + channel->gc_b * f + channel->gc_c);
 	}
 
 	/* And finally do a temperature compensation if requested. */
