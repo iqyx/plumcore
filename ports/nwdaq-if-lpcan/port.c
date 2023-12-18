@@ -2,7 +2,7 @@
  *
  * nwdaq-if-canlp port-specific configuration
  *
- * Copyright (c) 2022, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2022-2023, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -113,7 +113,6 @@ static void can_init(void) {
 	// nbus_root_init(&root_channel, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
 	// nbus_log_init(&log_channel, "log", &root_channel.channel);
 
-
 	/*************** front panel CAN2 ******************************************/
 	fdcan_init(CAN2, FDCAN_CCCR_INIT_TIMEOUT);
 	fdcan_set_can(CAN2, true, false, true, false, 1, 8, 5, (16e6 / (CAN2_BITRATE) / 16) - 1);
@@ -126,36 +125,19 @@ static void can_init(void) {
 	nvic_set_priority(NVIC_FDCAN2_INTR0_IRQ, 6 * 16);
 	nvic_enable_irq(NVIC_FDCAN2_INTR0_IRQ);
 
-
-	/*************** front panel CAN3 ******************************************/
-	fdcan_init(CAN3, FDCAN_CCCR_INIT_TIMEOUT);
-	fdcan_set_can(CAN3, true, false, true, false, 1, 8, 5, (16e6 / (CAN3_BITRATE) / 16) - 1);
-	fdcan_set_fdcan(CAN3, true, true, 1, 8, 5, (16e6 / (CAN3_BITRATE) / 16) - 1);
-
-	FDCAN_IE(CAN3) |= FDCAN_IE_RF0NE;
-	FDCAN_ILE(CAN3) |= FDCAN_ILE_INT0;
-	fdcan_start(CAN3, FDCAN_CCCR_INIT_TIMEOUT);
-	stm32_fdcan_init(&can3, CAN3);
-	nvic_set_priority(NVIC_FDCAN3_INTR0_IRQ, 6 * 16);
-	nvic_enable_irq(NVIC_FDCAN3_INTR0_IRQ);
-
 	nbus_switch_init(&switch1);
 	nbus_switch_add_port(&switch1, &can1.iface);
 	nbus_switch_add_port(&switch1, &can2.iface);
-	nbus_switch_add_port(&switch1, &can3.iface);
 }
 
 
+/* INTR0 and INTR1 swapped in libopencm3! */
 void fdcan1_intr1_isr(void) {
 	stm32_fdcan_irq_handler(&can1);
 }
 
 void fdcan2_intr0_isr(void) {
 	stm32_fdcan_irq_handler(&can2);
-}
-
-void fdcan3_intr0_isr(void) {
-	stm32_fdcan_irq_handler(&can3);
 }
 
 
@@ -187,17 +169,10 @@ static void port_setup_default_gpio(void) {
 	gpio_mode_setup(CAN2_TX_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, CAN2_TX_PIN);
 	gpio_set_af(CAN2_TX_PORT, CAN2_AF, CAN2_TX_PIN);
 
-	/* CAN3 */
-	gpio_mode_setup(CAN3_SHDN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CAN3_SHDN_PIN);
-	gpio_clear(CAN3_SHDN_PORT, CAN3_SHDN_PIN);
-	gpio_mode_setup(CAN3_RX_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, CAN3_RX_PIN);
-	gpio_set_af(CAN3_RX_PORT, CAN3_AF, CAN3_RX_PIN);
-	gpio_mode_setup(CAN3_TX_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, CAN3_TX_PIN);
-	gpio_set_af(CAN3_TX_PORT, CAN3_AF, CAN3_TX_PIN);
-
 	/* LEDs */
-	gpio_mode_setup(LED_P1_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_P1_PIN);
-	gpio_mode_setup(LED_P2_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_P2_PIN);
+	gpio_mode_setup(LED_WH_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_WH_PIN);
+	gpio_mode_setup(LED_GN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_GN_PIN);
+	gpio_mode_setup(LED_RD_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_RD_PIN);
 }
 
 
