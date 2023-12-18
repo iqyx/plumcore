@@ -15,9 +15,13 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = acx,
-		.pregain = 48.059f,
+		.pregain = -48.059f,
 		.gain = 2.0f,
-		.gain_calib = -1.0f,
+
+		// .gain_compensation = true,
+		.gc_a = 1.9105e-11,
+		.gc_b = 7.6116e-11,
+		.gc_c = 1.0106,
 	}, {
 		.name = "channel/1",
 		.muxes = {
@@ -28,13 +32,11 @@ struct adc_composite_channel adc_channels[] = {
 		.ac_excitation = acx,
 		.pregain = 48.059f,
 		.gain = 2.0f,
-		.gain_calib = +1.0f,
-		// .offset_calib = -0.026f,
-		// .gain_calib = 0.972861861f,
 
-		// .temp_compensation = true,
-		// .tc_a = 8.6171e-07,
-		// .tc_b = -3.5892e-04,
+		// .gain_compensation = true,
+		.gc_a = 1.9075e-11,
+		.gc_b = -3.4251e-11,
+		.gc_c = 1.0106,
 	}, {
 		.name = "channel/2",
 		.muxes = {
@@ -43,9 +45,13 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = acx,
-		.pregain = 48.059f,
+		.pregain = -48.059f,
 		.gain = 2.0f,
-		.gain_calib = -1.0f,
+
+		// .gain_compensation = true,
+		.gc_a = 1.9087e-11,
+		.gc_b = -1.3319e-10,
+		.gc_c = 1.0107,
 	}, {
 		.name = "channel/3",
 		.muxes = {
@@ -56,13 +62,11 @@ struct adc_composite_channel adc_channels[] = {
 		.ac_excitation = acx,
 		.pregain = 48.059f,
 		.gain = 2.0f,
-		.gain_calib = +1.0f,
-		// .offset_calib = -0.026f,
-		// .gain_calib = 0.972861861f,
 
-		// .temp_compensation = true,
-		// .tc_a = 2.7011e-07,
-		// .tc_b = -3.3312e-04,
+		// .gain_compensation = true,
+		.gc_a = 1.9102e-11,
+		.gc_b = -1.1416e-10,
+		.gc_c = 1.0107,
 	}, {
 		.name = "channel/4",
 		.muxes = {
@@ -71,9 +75,13 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = acx,
-		.pregain = 48.059f,
+		.pregain = -48.059f,
 		.gain = 2.0f,
-		.gain_calib = -1.0f,
+
+		// .gain_compensation = true,
+		.gc_a = 1.9088e-11,
+		.gc_b = -1.2179e-10,
+		.gc_c = 1.0105,
 	}, {
 		.name = "channel/5",
 		.muxes = {
@@ -84,7 +92,11 @@ struct adc_composite_channel adc_channels[] = {
 		.ac_excitation = acx,
 		.pregain = 48.059f,
 		.gain = 2.0f,
-		.gain_calib = +1.0f,
+
+		// .gain_compensation = true,
+		.gc_a = 1.9082e-11,
+		.gc_b = -2.3217e-10,
+		.gc_c = 1.0105,
 	}, {
 		.name = "channel/6",
 		.muxes = {
@@ -93,9 +105,13 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = NULL},
 		},
 		.ac_excitation = acx,
-		.pregain = 48.059f,
+		.pregain = -48.059f,
 		.gain = 2.0f,
-		.gain_calib = -1.0f,
+
+		// .gain_compensation = true,
+		.gc_a = 1.9095e-11,
+		.gc_b = -4.5670e-11,
+		.gc_c = 1.0106,
 	}, {
 		.name = "channel/7",
 		.muxes = {
@@ -106,7 +122,11 @@ struct adc_composite_channel adc_channels[] = {
 		.ac_excitation = acx,
 		.pregain = 48.059f,
 		.gain = 2.0f,
-		.gain_calib = +1.0f,
+
+		// .gain_compensation = true,
+		.gc_a = 1.9079e-11,
+		.gc_b = 1.8267e-10,
+		.gc_c = 1.0107,
 	}, {
 		.name = NULL,
 	},
@@ -131,7 +151,7 @@ app_ret_t app_init(App *self) {
 	adc_composite_init(&self->adc, NULL, self->mq);
 	self->adc.adc = &mcp;
 	self->adc.channels = &adc_channels;
-	self->adc.interval_ms = 20;
+	self->adc.interval_ms = 5000;
 	adc_composite_set_exc_power(&self->adc, &exc_power.power);
 	adc_composite_set_vref_mux(&self->adc, &vref_mux);
 	adc_composite_set_clock(&self->adc, &rtc.clock);

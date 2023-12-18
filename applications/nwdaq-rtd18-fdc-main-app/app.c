@@ -14,7 +14,7 @@ struct adc_composite_channel adc_channels[] = {
 		},
 		/* Normally the result is in ppm of the ADC reference. In our case we are measuring
 		 * ratiometric to the Rref = 1.2k. Set pregain to 833 to get results in Ohms. */
-		.pregain = -833.333f,
+		.pregain = -500.0f,
 		.gain = 1.0f,
 	}, {
 		.name = "channel/1",
@@ -22,7 +22,7 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &input_mux.mux, .channel = 1},
 			{.mux = NULL},
 		},
-		.pregain = -833.333f,
+		.pregain = -500.0f,
 		.gain = 1.0f,
 	}, {
 		.name = "channel/2",
@@ -30,7 +30,7 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &input_mux.mux, .channel = 2},
 			{.mux = NULL},
 		},
-		.pregain = -833.333f,
+		.pregain = -500.0f,
 		.gain = 1.0f,
 	}, {
 		.name = "channel/3",
@@ -38,7 +38,7 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &input_mux.mux, .channel = 3},
 			{.mux = NULL},
 		},
-		.pregain = -833.333f,
+		.pregain = -500.0f,
 		.gain = 1.0f,
 	}, {
 		.name = "channel/4",
@@ -46,7 +46,7 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &input_mux.mux, .channel = 4},
 			{.mux = NULL},
 		},
-		.pregain = -833.333f,
+		.pregain = -500.0f,
 		.gain = 1.0f,
 	}, {
 		.name = "channel/5",
@@ -54,7 +54,7 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &input_mux.mux, .channel = 5},
 			{.mux = NULL},
 		},
-		.pregain = -833.333f,
+		.pregain = -500.0f,
 		.gain = 1.0f,
 	}, {
 		.name = "channel/6",
@@ -62,7 +62,7 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &input_mux.mux, .channel = 6},
 			{.mux = NULL},
 		},
-		.pregain = -833.333f,
+		.pregain = -500.0f,
 		.gain = 1.0f,
 	}, {
 		.name = "channel/7",
@@ -70,7 +70,7 @@ struct adc_composite_channel adc_channels[] = {
 			{.mux = &input_mux.mux, .channel = 7},
 			{.mux = NULL},
 		},
-		.pregain = -833.333f,
+		.pregain = -500.0f,
 		.gain = 1.0f,
 	}, {
 		.name = NULL,
@@ -96,7 +96,7 @@ app_ret_t app_init(App *self) {
 	adc_composite_init(&self->adc, NULL, self->mq);
 	self->adc.adc = &mcp;
 	self->adc.channels = &adc_channels;
-	self->adc.interval_ms = 20;
+	self->adc.interval_ms = 5000;
 	adc_composite_set_clock(&self->adc, &rtc.clock);
 	adc_composite_set_device_temp(&self->adc, &pcb_temp.iface, "channel/temp");
 
