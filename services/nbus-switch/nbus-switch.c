@@ -111,12 +111,21 @@ static nbus_switch_ret_t nbus_switch_process(NbusSwitch *self, struct nbus_switc
 			sch->frames++;
 		}
 
-		/* Now find the reverse direction - the destination of the current frame. */
-		if (find_channel(self, sid.channel, sid.direction == NBUS_DIR_REQUEST ? NBUS_DIR_RESPONSE : NBUS_DIR_REQUEST, &sch) == NBUS_SWITCH_RET_OK) {
-			nbus_switch_send_port(self, sch->port, msg);
-			// sch->last_access = 0;
+		/* Now find the reverse direction - the forwarding destination of the current frame. */
+		if (find_channel(
+			self,
+			sid.channel,
+			sid.direction == NBUS_DIR_REQUEST ? NBUS_DIR_RESPONSE : NBUS_DIR_REQUEST,
+			&sch
+		) == NBUS_SWITCH_RET_OK) {
+			/* Ho ho ho, hold your horses. Do not forward the frame if both the source and
+			 * the destination port are the same. */
+			if (port != sch->port) {
+				nbus_switch_send_port(self, sch->port, msg);
+			}
+			sch->last_access = 0;
 		} else {
-			/* Not found yet. Do not add it because we don't have that information yet.
+			/* Not found. Do not add it because we don't have the required information yet.
 			 * Broadcast the frame instead and wait for the response. */
 			nbus_switch_send_multi(self, port, msg);
 		}
@@ -141,8 +150,6 @@ static void nbus_switch_housekeeping_task(void *p) {
 	NbusSwitch *self = (NbusSwitch *)p;
 
 	while (true) {
-		gpio_toggle(GPIOB, GPIO14);
-
 		for (uint32_t i = 0; i < NBUS_SWITCH_MAX_CHANNELS; i++) {
 			if (self->ch[i].port != NULL) {
 				self->ch[i].last_access++;
@@ -163,7 +170,7 @@ static void nbus_switch_receive_task(void *p) {
 	NbusSwitch *self = port->parent;
 
 	while (true) {
-		gpio_toggle(GPIOB, GPIO15);
+		gpio_toggle(LED_WH_PORT, LED_WH_PIN);
 
 		/** @todo adjust the timeout */
 		struct can_message msg = {0};
