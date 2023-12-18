@@ -22,12 +22,18 @@
 static can_ret_t stm32_fdcan_send(Can *can, const struct can_message *msg, uint32_t timeout_ms) {
 	Stm32Fdcan *self = (Stm32Fdcan *)can;
 
+	if (FDCAN_PSR(self->fdcan) & FDCAN_PSR_BO) {
+		FDCAN_CCCR(self->fdcan) &= ~FDCAN_CCCR_INIT;
+		return CAN_RET_BUS_OFF;
+	}
+
 	/** @todo replace with  semaphore wait */
 	(void)timeout_ms;
 	while (!fdcan_available_tx(self->fdcan)) {
 		;
 	}
 	if (fdcan_transmit(self->fdcan, msg->id, true, false, false, false, msg->len, msg->buf) < 0) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("transmit error"));
 		return CAN_RET_FAILED;
 	}
 

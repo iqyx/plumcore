@@ -16,6 +16,7 @@
 typedef enum {
 	CAN_RET_OK = 0,
 	CAN_RET_FAILED,
+	CAN_RET_BUS_OFF,
 } can_ret_t;
 
 struct can_message {

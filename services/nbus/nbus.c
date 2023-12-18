@@ -522,7 +522,11 @@ static nbus_ret_t nbus_channel_send_frame(NbusChannel *self, struct nbus_id *id,
 	}
 
 	/** @todo adjust the timeout */
-	if (nbus->can->vmt->send(nbus->can, &msg, 1000) != CAN_RET_OK) {
+	can_ret_t ret = nbus->can->vmt->send(nbus->can, &msg, 1000);
+	if (ret != CAN_RET_OK) {
+		if (ret == CAN_RET_BUS_OFF) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("CAN in a BUS_OFF state"));
+		}
 		return NBUS_RET_FAILED;
 	}
 
