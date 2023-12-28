@@ -217,6 +217,10 @@ menu "System services"
 	config SERVICE_PLOCATOR
 		bool "System service locator service"
 		default y
+
+	config SERVICE_CRASH_MGR
+		bool "Crash manager and debug service"
+		default n
 endmenu
 
 menu "Data manipulation/evaluation/processing services"
