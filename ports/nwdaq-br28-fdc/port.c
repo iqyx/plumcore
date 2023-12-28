@@ -88,6 +88,9 @@
 #include <services/nbus-mq/nbus-mq.h>
 #include <services/i2c-eeprom/i2c-eeprom.h>
 
+/* System services */
+#include <services/crash-mgr/crash-mgr.h>
+
 /* Applets */
 #include <applets/hello-world/hello-world.h>
 #include <applets/tempco-calibration/tempco-cal.h>
@@ -571,6 +574,12 @@ static void port_setup_default_gpio(void) {
 }
 
 
+const struct crash_mgr_region memdump_regions[] = {
+		{(void *)0x20000000, 0x10000},
+		{NULL, 0}
+};
+
+
 int32_t port_init(void) {
 	port_setup_default_gpio();
 	#if defined(CONFIG_NWDAQ_BR28_FDC_ENABLE_SERIAL_CONSOLE)
@@ -588,6 +597,12 @@ int32_t port_init(void) {
 	temp_sensor_init();
 	can_init();
 	port_i2c_init();
+
+	crash_mgr = (CrashMgr *)0x20014000;
+	/* SRAM2 + CCM is 32K */
+	crash_mgr_init(crash_mgr, 0x8000);
+	crash_mgr_save_coredump(crash_mgr, &spiffs_system.iface, "coredump.cbcd");
+	crash_mgr_enable_memdump(crash_mgr, memdump_regions);
 
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&tempco_calibration, "tempco-calibration");
