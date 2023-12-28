@@ -16,11 +16,12 @@ as a name for a totally unrelated project.
 .. toctree::
 	:numbered:
 
-	applets/applets
 	doc/introduction
 	microkernel/microkernel
 	services/services
 	applications/applications
+	applets/applets
 	protocols/nbus/nbus
+	doc/conceptual/conceptual
 
 
