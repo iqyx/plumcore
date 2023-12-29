@@ -1,0 +1,15 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["LIB_LINEEDIT"] == "y":
+
+	env.Git('https://github.com/iqyx/lineedit', branch='develop')
+
+	objs.append(env.Object([
+		"src/lineedit.c",
+	]))
+	
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR']),
+	])

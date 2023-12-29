@@ -13,13 +13,13 @@ objs.append(env.Object(source = [
 	#  File("freertos/portable/MemMang/heap_3.c"),
 ]))
 
-env.AddSourceIf("LIB_LINEEDIT", File(Glob("cli/lineedit/*.c")), Dir("cli/lineedit"))
+# env.AddSourceIf("LIB_LINEEDIT", File(Glob("cli/lineedit/*.c")), Dir("cli/lineedit"))
 env.AddSourceIf("LIB_WOLFMQTT", File(Glob("other/wolfmqtt/src/*.c")), Dir("other/wolfmqtt"))
 env.AddSourceIf("LIB_NANOPB", File(Glob("other/nanopb/*.c")), Dir("other/nanopb"))
 # env.AddSourceIf("LIB_HEATSHRINK", [File("other/heatshrink/heatshrink_encoder.c"), File("other/heatshrink/heatshrink_decoder.c")], Dir("other/heatshrink"))
 env.AddSourceIf("LIB_LIBUXB", File(Glob("other/uxb/*.c")), Dir("other/uxb"))
 env.AddSourceIf("LIB_SFFS", File(Glob("filesystem/sffs/*.c")), Dir("filesystem/sffs"))
-env.AddSourceIf("LIB_TREECLI", File(Glob("cli/treecli/*.c")), Dir("cli/treecli"))
+# env.AddSourceIf("LIB_TREECLI", File(Glob("cli/treecli/*.c")), Dir("cli/treecli"))
 env.AddSourceIf("LIB_DUKTAPE", File(Glob("script/duktape/src-custom/duktape.c")), Dir("script/duktape/src-custom"))
 env.AddSourceIf("LIB_WREN", [File(Glob("script/wren/src/vm/*.c")), File(Glob("script/wren/src/optional/*.c"))], [Dir("script/wren/src/include"), Dir("script/wren/src/optional"), Dir("script/wren/src/vm")])
 env.AddSourceIf("LIB_GRAVITY", [
