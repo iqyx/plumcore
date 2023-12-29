@@ -1,0 +1,73 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+import os
+import git
+import tqdm
+from colorama import Fore, Style
+
+env.Replace(LIB_DEFAULT_REPO_DIR = "src/")
+
+def stamp(fn):
+	with open(fn, 'w') as f:
+		pass 
+
+class git_clone_progress(git.RemoteProgress):
+	def __init__(self):
+		super().__init__()
+		# self._bar = tqdm.tqdm()
+
+	def update(self, op_code, cur_count, max_count=None, message=''):
+		pass
+		# self._bar.total = max_count
+		# self._bar.n = cur_count
+		# self._bar.set_description(message)
+		# self._bar.refresh()
+		# print(op_code)
+
+		
+def Git(self, url, dir=env['LIB_DEFAULT_REPO_DIR'], branch=None):
+	if os.path.exists('.downloaded.stamp'):
+		return
+
+	print(f'{Fore.BLUE}{Style.BRIGHT}Cloning git repo{Style.RESET_ALL} {url} into {dir}...', end='')
+
+	try:
+		repo = git.Repo.clone_from(url, dir, progress=git_clone_progress(), branch=branch)
+	except:
+		print(f' {Fore.RED}{Style.BRIGHT}failed{Style.RESET_ALL}')
+		return
+	print()
+	stamp('.downloaded.stamp')
+
+
+
+env.AddMethod(Git)
+
+def Patch(self, patch, dir=env['LIB_DEFAULT_REPO_DIR']):
+	if os.path.exists('.patched.stamp'):
+		return
+
+	# The patch file name is library SConscript file relative, but Git needs it as repository-relative
+	abspatch = os.path.abspath(patch)
+
+	print(f'{Fore.BLUE}{Style.BRIGHT}Patching{Style.RESET_ALL} with {patch}...', end='')
+
+	try:
+		r = git.Repo(dir)
+		r.git.apply([str(abspatch)])
+	except git.GitCommandError:
+		print(f' {Fore.RED}{Style.BRIGHT}failed{Style.RESET_ALL}')
+		return
+	print()
+	stamp('.patched.stamp')
+
+env.AddMethod(Patch)
+
+
+for d in next(os.walk("."))[1]:
+	f = os.path.join(d, "SConscript")
+	if os.path.isfile(f):
+		SConscript(f)
+

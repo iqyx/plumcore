@@ -31,3 +31,9 @@ config.h
 
 # ignore documentation builddirectory
 doc/build
+
+# ignore repositories with downloaded libraries
+lib2/*/src
+
+# ignore stamps marking library source preparation steps
+lib2/*/*.stamp

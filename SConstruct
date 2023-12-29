@@ -100,6 +100,7 @@ objs.append(env.Object(source = [
 objs.append(SConscript("uhal/SConscript"))
 objs.append(SConscript("system/SConscript"))
 SConscript("lib/SConscript")
+SConscript("lib2/SConscript")
 SConscript("protocols/SConscript")
 objs.append(SConscript("services/SConscript"))
 objs.append(SConscript("applets/SConscript"))
