@@ -7,10 +7,6 @@
 [submodule "lib/other/wolfmqtt"]
 	path = lib/other/wolfmqtt
 	url = https://github.com/wolfSSL/wolfMQTT.git
-[submodule "lib/script/duktape"]
-	path = lib/script/duktape
-	url = https://github.com/svaarala/duktape
-	ignore = dirty
 [submodule "lib/filesystem/spiffs"]
 	path = lib/filesystem/spiffs
 	url = https://github.com/pellepl/spiffs
