@@ -28,6 +28,3 @@
 [submodule "lib/script/gravity"]
 	path = lib/script/gravity
 	url = https://github.com/marcobambini/gravity
-[submodule "lib/other/tinycbor"]
-	path = lib/other/tinycbor
-	url = https://github.com/intel/tinycbor
