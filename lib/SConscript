@@ -16,7 +16,7 @@ objs.append(env.Object(source = [
 env.AddSourceIf("LIB_LINEEDIT", File(Glob("cli/lineedit/*.c")), Dir("cli/lineedit"))
 env.AddSourceIf("LIB_WOLFMQTT", File(Glob("other/wolfmqtt/src/*.c")), Dir("other/wolfmqtt"))
 env.AddSourceIf("LIB_NANOPB", File(Glob("other/nanopb/*.c")), Dir("other/nanopb"))
-env.AddSourceIf("LIB_HEATSHRINK", [File("other/heatshrink/heatshrink_encoder.c"), File("other/heatshrink/heatshrink_decoder.c")], Dir("other/heatshrink"))
+# env.AddSourceIf("LIB_HEATSHRINK", [File("other/heatshrink/heatshrink_encoder.c"), File("other/heatshrink/heatshrink_decoder.c")], Dir("other/heatshrink"))
 env.AddSourceIf("LIB_LIBUXB", File(Glob("other/uxb/*.c")), Dir("other/uxb"))
 env.AddSourceIf("LIB_SFFS", File(Glob("filesystem/sffs/*.c")), Dir("filesystem/sffs"))
 env.AddSourceIf("LIB_TREECLI", File(Glob("cli/treecli/*.c")), Dir("cli/treecli"))
