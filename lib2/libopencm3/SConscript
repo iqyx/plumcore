@@ -1,0 +1,21 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["LIB_LIBOPENCM3"] == "y":
+
+	env.Git('https://github.com/libopencm3/libopencm3', branch='master')
+	env.Patch([
+		'add-stm32-g4-exti.patch',
+		'add-stm32-g4-rtc-iwdg.patch',
+		'stm32-fix-quadspi.patch',
+		'stm32-fix-quadspi.patch',
+	])
+
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/include'),
+	])
+
+	env.Append(LIBPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/lib'),
+	])

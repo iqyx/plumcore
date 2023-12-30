@@ -53,3 +53,7 @@ config LIB_ZFP
 config LIB_TINYCBOR
 	bool "CBOR encoding/decoding library TinyCbor"
 	default y
+
+config LIB_LIBOPENCM3
+	bool "libopencm3 library"
+	default y
