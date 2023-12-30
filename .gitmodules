@@ -4,10 +4,6 @@
 [submodule "lib/other/wolfmqtt"]
 	path = lib/other/wolfmqtt
 	url = https://github.com/wolfSSL/wolfMQTT.git
-[submodule "lib/filesystem/spiffs"]
-	path = lib/filesystem/spiffs
-	url = https://github.com/pellepl/spiffs
-	ignore = dirty
 [submodule "lib/other/cmsis"]
 	path = lib/other/cmsis
 	url = https://github.com/ARM-software/CMSIS_5

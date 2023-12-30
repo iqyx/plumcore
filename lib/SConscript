@@ -31,7 +31,7 @@ env.AddSourceIf("LIB_SFFS", File(Glob("filesystem/sffs/*.c")), Dir("filesystem/s
 	# Dir("script/gravity/src/runtime"),
 	# Dir("script/gravity/src/shared"),
 # ])
-env.AddSourceIf("LIB_SPIFFS", File(Glob("filesystem/spiffs/src/*.c")), Dir("filesystem/spiffs/src"))
+#  env.AddSourceIf("LIB_SPIFFS", File(Glob("filesystem/spiffs/src/*.c")), Dir("filesystem/spiffs/src"))
 env.AddSourceIf("LIB_ZFP",
 	[
 		File(Glob("other/zfp/src/*.c")),
