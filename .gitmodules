@@ -18,6 +18,3 @@
 [submodule "lib/other/zfp"]
 	path = lib/other/zfp
 	url = https://github.com/LLNL/zfp
-[submodule "lib/script/wren"]
-	path = lib/script/wren
-	url = https://github.com/wren-lang/wren
