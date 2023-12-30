@@ -22,15 +22,15 @@ env.AddSourceIf("LIB_SFFS", File(Glob("filesystem/sffs/*.c")), Dir("filesystem/s
 # env.AddSourceIf("LIB_TREECLI", File(Glob("cli/treecli/*.c")), Dir("cli/treecli"))
 env.AddSourceIf("LIB_DUKTAPE", File(Glob("script/duktape/src-custom/duktape.c")), Dir("script/duktape/src-custom"))
 env.AddSourceIf("LIB_WREN", [File(Glob("script/wren/src/vm/*.c")), File(Glob("script/wren/src/optional/*.c"))], [Dir("script/wren/src/include"), Dir("script/wren/src/optional"), Dir("script/wren/src/vm")])
-env.AddSourceIf("LIB_GRAVITY", [
-	File(Glob("script/gravity/src/compiler/*.c")),
-	File(Glob("script/gravity/src/runtime/*.c")),
-	File(Glob("script/gravity/src/shared/*.c")),
-], [
-	Dir("script/gravity/src/compiler"),
-	Dir("script/gravity/src/runtime"),
-	Dir("script/gravity/src/shared"),
-])
+# env.AddSourceIf("LIB_GRAVITY", [
+	# File(Glob("script/gravity/src/compiler/*.c")),
+	# File(Glob("script/gravity/src/runtime/*.c")),
+	# File(Glob("script/gravity/src/shared/*.c")),
+# ], [
+	# Dir("script/gravity/src/compiler"),
+	# Dir("script/gravity/src/runtime"),
+	# Dir("script/gravity/src/shared"),
+# ])
 env.AddSourceIf("LIB_SPIFFS", File(Glob("filesystem/spiffs/src/*.c")), Dir("filesystem/spiffs/src"))
 env.AddSourceIf("LIB_ZFP",
 	[
