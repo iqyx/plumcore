@@ -1,4 +1,5 @@
-STM32 RTC clock driver service
+=======================================
+STM32 RTC peripheral clock driver
 =======================================
 
 

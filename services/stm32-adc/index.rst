@@ -1,5 +1,5 @@
 ===================================================
-ADC peripheral driver for the STM32 MCU family
+STM32 12 bit SAR ADC driver
 ===================================================
 
 

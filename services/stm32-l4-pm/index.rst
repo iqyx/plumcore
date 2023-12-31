@@ -1,4 +1,5 @@
-Power manager for the STM32L4 low-power MCU family
+============================================================
+STM32L4 low-power MCU family power manager 
 ============================================================
 
 

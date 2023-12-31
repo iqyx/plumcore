@@ -1,5 +1,5 @@
 ====================================
-Power source/sink device
+Power source/sink device interface
 ====================================
 
 

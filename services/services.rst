@@ -29,12 +29,18 @@ Low level device drivers
 
 .. toctree::
 
-   stm32-adc/stm32-adc
-   stm32-i2c/stm32-i2c
-   stm32-rtc/stm32-rtc
-   stm32-system-clock/stm32-system-clock
-   stm32-timer-capsense/stm32-timer-capsense
-   stm32-watchdog/stm32-watchdog
+	stm32-adc/index
+	stm32-dac/index
+	stm32-fdcan/index
+	stm32-i2c/index
+	stm32-l4-pm/index
+	stm32-qspi-flash/index
+	stm32-rtc/index
+	stm32-spi/index
+	stm32-system-clock/index
+	stm32-timer-capsense/index
+	stm32-uart/index
+	stm32-watchdog/index
 
 
 
@@ -43,11 +49,15 @@ High level (second level) device drivers
 
 .. toctree::
 
-   adc-sensor/adc-sensor
-   bq35100/bq35100
-   gps-ublox/gps-ublox
-   gsm-quectel/gsm-quectel
-   icm42688p/icm42688p
+	adc-sensor/adc-sensor
+	bq35100/bq35100
+	gps-ublox/index
+	gsm-quectel/gsm-quectel
+	icm42688p/icm42688p
+	adxl355/index
+	si7006/index
+	
+
 
 
 DAQ and data processing services
@@ -55,7 +65,13 @@ DAQ and data processing services
 
 .. toctree::
 
-   data-process/data-process
+	data-process/data-process
+	mq-batch/index
+	mq-lora-bridge/index
+	mq-periodogram/index
+	mq-sensor-source/index
+	mq-stats/index
+	mq-ws-source/index
 
 
 
@@ -64,7 +80,13 @@ Volume and filesystem access
 
 .. toctree::
 
-   fs-spiffs/fs-spiffs
+	fs-spiffs/fs-spiffs
+	flash-cbor-mib/index
+	flash-fifo/index
+	flash-nvm/index
+	flash-test/index
+	flash-vol-static/index
+	lora-fs/index	
 
 
 Communication protocols
@@ -72,7 +94,8 @@ Communication protocols
 
 .. toctree::
 
-   mqtt-tcpip/mqtt-tcpip
+	mqtt-tcpip/mqtt-tcpip
+	nbus/nbus
 
 
 Communication server/clients
@@ -80,9 +103,9 @@ Communication server/clients
 
 .. toctree::
 
-   mqtt-file-download/mqtt-file-download
-   mqtt-file-server/mqtt-file-server
-   mqtt-sensor-upload/mqtt-sensor-upload
+	mqtt-file-download/mqtt-file-download
+	mqtt-file-server/mqtt-file-server
+	mqtt-sensor-upload/mqtt-sensor-upload
 
 
 User interface services
@@ -90,8 +113,8 @@ User interface services
 
 .. toctree::
 
-   loginmgr/loginmgr
-   cli/cli
+	loginmgr/loginmgr
+	cli/cli
 
 
 Generic system services
@@ -99,6 +122,6 @@ Generic system services
 
 .. toctree::
 
-   plocator/plocator
+	plocator/plocator
 
    

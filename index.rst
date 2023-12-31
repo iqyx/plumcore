@@ -18,11 +18,13 @@ as a name for a totally unrelated project.
 
 	doc/introduction
 	doc/concepts
-	microkernel/microkernel
+	microkernel/index
 	services/services
+	services/interfaces/index
 	applications/applications
 	applets/applets
 	protocols/nbus/nbus
+	ports/index
 	doc/conceptual/conceptual
 	doc/coding-style
 
