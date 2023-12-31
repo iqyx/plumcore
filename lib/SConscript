@@ -16,11 +16,6 @@ env.AddSourceIf("LIB_ZFP",
 )
 
 
-duktape = env.Command(
-	source = None,
-	target = [File("script/duktape/src-custom/duktape.h"), File("script/duktape/src-custom/duktape.c")],
-	action = "python lib/script/duktape/tools/configure.py --output-directory lib/script/duktape/src-custom --source-directory lib/script/duktape/src-input --config-metadata lib/script/duktape/config --option-file lib/script/duktape/config/examples/low_memory.yaml -DDUK_USE_FASTINT --rom-support",
-)
 
 
 # nanopb requirement for large fields

@@ -1,0 +1,26 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["LIB_DUKTAPE"] == "y":
+
+	# env.Git('https://github.com/intel/tinycbor', branch='main')
+
+	# TODO: rewrite filenames
+	duktape = env.Command(
+		source = None,
+		target = [
+			File(env['LIB_DEFAULT_REPO_DIR'] + '/src-custom/duktape.c'),
+			File(env['LIB_DEFAULT_REPO_DIR'] + '/src-custom/duktape.h')
+		],
+		action = "python lib2/duktape/src/tools/configure.py --output-directory lib2/duktape/src/src-custom --source-directory lib2/duktape/src-input --config-metadata lib2/duktape/config --option-file lib2/duktape/config/examples/low_memory.yaml -DDUK_USE_FASTINT --rom-support",
+	)
+
+	objs.append(env.Object([
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/src-custom/duktape.c'),
+	]))
+	
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/src-custom'),
+	])
+
