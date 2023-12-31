@@ -6,7 +6,6 @@ Import("objs")
 
 env.AddSourceIf("LIB_WOLFMQTT", File(Glob("other/wolfmqtt/src/*.c")), Dir("other/wolfmqtt"))
 env.AddSourceIf("LIB_NANOPB", File(Glob("other/nanopb/*.c")), Dir("other/nanopb"))
-env.AddSourceIf("LIB_LIBUXB", File(Glob("other/uxb/*.c")), Dir("other/uxb"))
 env.AddSourceIf("LIB_ZFP",
 	[
 		File(Glob("other/zfp/src/*.c")),

@@ -14,10 +14,6 @@ config LIB_HEATSHRINK
 	bool "Heatshrink LZSS compression/decompression library"
 	default n
 
-config LIB_LIBUXB
-	bool "UXB bus master library for STM32"
-	default y
-
 config LIB_TREECLI
 	bool "treecli tree-structured command line interface library"
 	default y
