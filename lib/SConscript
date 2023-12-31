@@ -4,28 +4,8 @@ Import("env")
 Import("conf")
 Import("objs")
 
-env.AddSourceIf("LIB_NANOPB", File(Glob("other/nanopb/*.c")), Dir("other/nanopb"))
 
-# nanopb requirement for large fields
-env.Append(CFLAGS = ["-DPB_FIELD_16BIT"])
 
-def build_proto(target, source, env):
-	for s in source:
-		os.system("lib/other/nanopb/generator/nanopb_generator.py %s" % s)
-
-def modify_proto_targets(target, source, env):
-	target = []
-	for s in source:
-		b = os.path.splitext(str(s))[0]
-		target.append(File(b + ".pb.h"))
-		target.append(File(b + ".pb.c"))
-	return target, source
-
-proto_builder = Builder(
-	action = Action(build_proto, env["PROTOCCOMSTR"]),
-	emitter = modify_proto_targets,
-)
-env.Append(BUILDERS = {'Proto' : proto_builder})
 
 
 
