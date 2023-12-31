@@ -2,10 +2,6 @@ config LIB_LINEEDIT
 	bool "lineedit (single-line editor library with command history)"
 	default y
 
-config LIB_WOLFMQTT
-	bool "WolfMQTT library"
-	default n
-
 config LIB_NANOPB
 	bool "NanoPB protocol buffers library"
 	default y

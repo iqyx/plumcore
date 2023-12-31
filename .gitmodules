@@ -1,6 +1,3 @@
 [submodule "lib/other/nanopb"]
 	path = lib/other/nanopb
 	url = https://github.com/nanopb/nanopb.git
-[submodule "lib/other/wolfmqtt"]
-	path = lib/other/wolfmqtt
-	url = https://github.com/wolfSSL/wolfMQTT.git
