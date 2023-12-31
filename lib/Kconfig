@@ -57,3 +57,11 @@ config LIB_LIBOPENCM3
 config LIB_PLUMCORE_CRYPTOLIB
 	bool "plumCore cryptographic primitives and routines"
 	default y
+
+config LIB_FEC_GOLAY
+	bool "fec-golay library for Golay forward error correction"
+	default y
+
+config LIB_PLUMCORE_LOG
+	bool "plumCore logging library"
+	default y

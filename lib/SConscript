@@ -4,30 +4,9 @@ Import("env")
 Import("conf")
 Import("objs")
 
-objs.append(env.Object(source = [
-	File(Glob("fec/*.c")),
-	File(Glob("log/*.c")),
-]))
-
-# env.AddSourceIf("LIB_LINEEDIT", File(Glob("cli/lineedit/*.c")), Dir("cli/lineedit"))
 env.AddSourceIf("LIB_WOLFMQTT", File(Glob("other/wolfmqtt/src/*.c")), Dir("other/wolfmqtt"))
 env.AddSourceIf("LIB_NANOPB", File(Glob("other/nanopb/*.c")), Dir("other/nanopb"))
-# env.AddSourceIf("LIB_HEATSHRINK", [File("other/heatshrink/heatshrink_encoder.c"), File("other/heatshrink/heatshrink_decoder.c")], Dir("other/heatshrink"))
 env.AddSourceIf("LIB_LIBUXB", File(Glob("other/uxb/*.c")), Dir("other/uxb"))
-# env.AddSourceIf("LIB_SFFS", File(Glob("filesystem/sffs/*.c")), Dir("filesystem/sffs"))
-# env.AddSourceIf("LIB_TREECLI", File(Glob("cli/treecli/*.c")), Dir("cli/treecli"))
-#  env.AddSourceIf("LIB_DUKTAPE", File(Glob("script/duktape/src-custom/duktape.c")), Dir("script/duktape/src-custom"))
-# env.AddSourceIf("LIB_WREN", [File(Glob("script/wren/src/vm/*.c")), File(Glob("script/wren/src/optional/*.c"))], [Dir("script/wren/src/include"), Dir("script/wren/src/optional"), Dir("script/wren/src/vm")])
-# env.AddSourceIf("LIB_GRAVITY", [
-	# File(Glob("script/gravity/src/compiler/*.c")),
-	# File(Glob("script/gravity/src/runtime/*.c")),
-	# File(Glob("script/gravity/src/shared/*.c")),
-# ], [
-	# Dir("script/gravity/src/compiler"),
-	# Dir("script/gravity/src/runtime"),
-	# Dir("script/gravity/src/shared"),
-# ])
-#  env.AddSourceIf("LIB_SPIFFS", File(Glob("filesystem/spiffs/src/*.c")), Dir("filesystem/spiffs/src"))
 env.AddSourceIf("LIB_ZFP",
 	[
 		File(Glob("other/zfp/src/*.c")),
@@ -62,7 +41,6 @@ env.AddSourceIf("LIB_CMSIS_DSP",
 		Dir("other/cmsis/CMSIS/DSP/PrivateInclude"),
 	]
 )
-# env.AddSourceIf("LIB_TINYCBOR", [File("other/tinycbor/src/cborparser.c"), File("other/tinycbor/src/cborencoder.c")], Dir("other/tinycbor/src"))
 
 
 duktape = env.Command(
@@ -71,16 +49,6 @@ duktape = env.Command(
 	action = "python lib/script/duktape/tools/configure.py --output-directory lib/script/duktape/src-custom --source-directory lib/script/duktape/src-input --config-metadata lib/script/duktape/config --option-file lib/script/duktape/config/examples/low_memory.yaml -DDUK_USE_FASTINT --rom-support",
 )
 
-env.Append(CPPPATH = [
-	Dir("fec"),
-	Dir("log"),
-	#  Dir("libopencm3/include"),
-
-])
-
-#  env.Append(LIBPATH = [
-	#  Dir("libopencm3/lib"),
-#  ])
 
 # nanopb requirement for large fields
 env.Append(CFLAGS = ["-DPB_FIELD_16BIT"])
