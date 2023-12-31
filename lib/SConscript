@@ -8,9 +8,6 @@ objs.append(env.Object(source = [
 	File(Glob("fec/*.c")),
 	File(Glob("log/*.c")),
 	File(Glob("crypto/*.c")),
-	File(Glob("freertos/*.c")),
-	File(Glob("freertos/portable/%s/*.c" % env["FREERTOS_PORT"])),
-	#  File("freertos/portable/MemMang/heap_3.c"),
 ]))
 
 # env.AddSourceIf("LIB_LINEEDIT", File(Glob("cli/lineedit/*.c")), Dir("cli/lineedit"))
@@ -79,8 +76,6 @@ env.Append(CPPPATH = [
 	Dir("fec"),
 	Dir("log"),
 	Dir("crypto"),
-	Dir("freertos/include"),
-	Dir("freertos/portable/%s" % env["FREERTOS_PORT"]),
 	#  Dir("libopencm3/include"),
 
 ])

@@ -64,12 +64,8 @@ if conf["OUTPUT_FILE_PORT_PREFIX"] == "y":
 if conf["OUTPUT_FILE_VERSION_SUFFIX"] == "y":
 	env["PORTFILE"] += "-" + env["VERSION"]
 
-
+# Must be included beforehand, it defines the toolchain used
 SConscript("platforms/SConscript")
-SConscript("ports/SConscript")
-SConscript("doc.SConscript")
-SConscript("applications/SConscript")
-
 
 env["CC"] = "%s-gcc" % env["TOOLCHAIN"]
 env["CXX"] = "%s-g++" % env["TOOLCHAIN"]
@@ -96,6 +92,11 @@ objs.append(env.Object(source = [
 	File(Glob("hal/modules/*.c")),
 	File(Glob("hal/interfaces/*.c")),
 ]))
+
+SConscript("ports/SConscript")
+SConscript("doc.SConscript")
+SConscript("applications/SConscript")
+SConscript("microkernel/freertos/SConscript")
 
 objs.append(SConscript("uhal/SConscript"))
 objs.append(SConscript("system/SConscript"))
