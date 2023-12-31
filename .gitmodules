@@ -4,6 +4,3 @@
 [submodule "lib/other/wolfmqtt"]
 	path = lib/other/wolfmqtt
 	url = https://github.com/wolfSSL/wolfMQTT.git
-[submodule "lib/other/zfp"]
-	path = lib/other/zfp
-	url = https://github.com/LLNL/zfp
