@@ -2,6 +2,10 @@ Import("env")
 Import("conf")
 Import("objs")
 
+LOCM3_TARGETS = {
+	'stm32g4': 'lib/stm32/g4',
+}
+
 if conf["LIB_LIBOPENCM3"] == "y":
 
 	env.Git('https://github.com/libopencm3/libopencm3', branch='master')
@@ -9,8 +13,8 @@ if conf["LIB_LIBOPENCM3"] == "y":
 		'add-stm32-g4-exti.patch',
 		'add-stm32-g4-rtc-iwdg.patch',
 		'stm32-fix-quadspi.patch',
-		'stm32-fix-quadspi.patch',
 	])
+	env.Make(LOCM3_TARGETS[conf['MCU_FAMILY']], cwd=Dir(env['LIB_DEFAULT_REPO_DIR']))
 
 	env.Append(CPPPATH = [
 		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/include'),

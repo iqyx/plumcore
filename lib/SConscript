@@ -6,6 +6,7 @@ import os
 import git
 import tqdm
 from colorama import Fore, Style
+import subprocess
 
 env.Replace(LIB_DEFAULT_REPO_DIR = "src/")
 
@@ -16,14 +17,14 @@ def stamp(fn):
 class git_clone_progress(git.RemoteProgress):
 	def __init__(self):
 		super().__init__()
-		self._bar = tqdm.tqdm()
+		# self._bar = tqdm.tqdm()
 
 	def update(self, op_code, cur_count, max_count=None, message=''):
 		pass
-		self._bar.total = max_count
-		self._bar.n = cur_count
-		self._bar.set_description(message)
-		self._bar.refresh()
+		# self._bar.total = max_count
+		# self._bar.n = cur_count
+		# self._bar.set_description(message)
+		# self._bar.refresh()
 		#  print(op_code)
 
 
@@ -44,12 +45,15 @@ def Git(self, url, dir=env['LIB_DEFAULT_REPO_DIR'], branch=None):
 
 env.AddMethod(Git)
 
-def Patch(self, patch, dir=env['LIB_DEFAULT_REPO_DIR']):
+def Patch(self, ppatch, dir=env['LIB_DEFAULT_REPO_DIR']):
 	if os.path.exists('.patched.stamp'):
 		return
 
+	if type(ppatch) is not list:
+		ppatch = [ppatch]
+
 	r = git.Repo(dir)
-	for p in patch:
+	for p in ppatch:
 		# The patch file name is library SConscript file relative, but Git needs it as repository-relative
 		abspatch = os.path.abspath(p)
 		print(f'{Fore.BLUE}{Style.BRIGHT}Patching{Style.RESET_ALL} with {p}...')
@@ -64,6 +68,20 @@ def Patch(self, patch, dir=env['LIB_DEFAULT_REPO_DIR']):
 	stamp('.patched.stamp')
 
 env.AddMethod(Patch)
+
+
+def Make(self, target, cwd='.'):
+	if os.path.exists('.compiled.stamp'):
+		return
+
+	print(f'{Fore.BLUE}{Style.BRIGHT}Compiling{Style.RESET_ALL} library target {target} (in {str(cwd)})...')
+
+	r = subprocess.run(['make', target], cwd=str(cwd), stdout=subprocess.PIPE)
+	print(r.stdout.decode())
+	
+	stamp('.compiled.stamp')
+
+env.AddMethod(Make)
 
 
 for d in next(os.walk("."))[1]:

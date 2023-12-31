@@ -28,12 +28,13 @@ version.h
 # ignore generated configuration files
 .config
 config.h
+.config.old
 
 # ignore documentation builddirectory
 doc/build
 
 # ignore repositories with downloaded libraries
-lib2/*/src
+lib/*/src
 
 # ignore stamps marking library source preparation steps
-lib2/*/*.stamp
+lib/*/*.stamp
