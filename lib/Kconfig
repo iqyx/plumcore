@@ -34,8 +34,8 @@ config LIB_SPIFFS
 	bool "SPIFFS NOR flash memory filesystem library"
 	default y
 
-config LIB_CMSIS_DSP
-	bool "ARM CMSIS library (DSP part)"
+config LIB_CMSIS
+	bool "ARM CMSIS library"
 	default y
 
 config LIB_ZFP

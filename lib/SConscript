@@ -14,32 +14,6 @@ env.AddSourceIf("LIB_ZFP",
 		Dir("other/zfp/include"),
 	]
 )
-env.AddSourceIf("LIB_CMSIS_DSP",
-	[
-		File("other/cmsis/CMSIS/DSP/Source/SupportFunctions/SupportFunctions.c"),
-		File("other/cmsis/CMSIS/DSP/Source/CommonTables/arm_const_structs.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_cfft_radix8_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_bitreversal2.c"),
-		File("other/cmsis/CMSIS/DSP/Source/CommonTables/arm_common_tables.c"),
-		File("other/cmsis/CMSIS/DSP/Source/FilteringFunctions/arm_iir_lattice_init_q15.c"),
-		File("other/cmsis/CMSIS/DSP/Source/FilteringFunctions/arm_iir_lattice_q15.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_rfft_fast_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_rfft_fast_init_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_cfft_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_cfft_init_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/ComplexMathFunctions/arm_cmplx_mag_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_std_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_var_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_std_q15.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_var_q15.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_mean_q31.c"),
-		File("other/cmsis/CMSIS/DSP/Source/FastMathFunctions/arm_sqrt_q15.c"),
-	], [
-		Dir("other/cmsis/CMSIS/DSP/Include"),
-		Dir("other/cmsis/CMSIS/Core/Include"),
-		Dir("other/cmsis/CMSIS/DSP/PrivateInclude"),
-	]
-)
 
 
 duktape = env.Command(

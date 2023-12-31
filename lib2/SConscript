@@ -34,7 +34,7 @@ def Git(self, url, dir=env['LIB_DEFAULT_REPO_DIR'], branch=None):
 	print(f'{Fore.BLUE}{Style.BRIGHT}Cloning git repo{Style.RESET_ALL} {url} into {dir}...')
 
 	try:
-		repo = git.Repo.clone_from(url, dir, progress=git_clone_progress(), branch=branch)
+		repo = git.Repo.clone_from(url, dir, progress=git_clone_progress(), branch=branch, depth=1)
 	except:
 		print(f'..{Fore.RED}{Style.BRIGHT}failed{Style.RESET_ALL}')
 		return
