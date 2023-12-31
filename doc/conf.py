@@ -13,10 +13,11 @@ extensions = [
 numfig = True
 autosectionlabel_prefix_document = True
 templates_path = ['templates']
-exclude_patterns = ['build', 'static', 'lib/script/duktape']
+exclude_patterns = ['build', 'static', 'lib2/duktape', 'lib/other/zfp']
 
 html_theme = 'sphinx_rtd_theme'
 html_title = 'plumCore IoT/DAQ framework'
+html_logo = 'static/plum.png'
 html_theme_options = {
 	'globaltoc_collapse': False,
  	'globaltoc_includehidden': True,

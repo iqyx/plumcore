@@ -2,9 +2,6 @@
 Applets
 ==================================
 
-Introduction
-========================
-
 Over time it became clear that some use cases may benefit from using a small helper programs to perform simple
 housekeeping tasks, usually run by the user. Plumcore was challenged to run them occasionally, on demand, without
 introducing much burden to the running system. The obvious place to run them was directly in the CLI service. Which

@@ -17,11 +17,13 @@ as a name for a totally unrelated project.
 	:numbered:
 
 	doc/introduction
+	doc/concepts
 	microkernel/microkernel
 	services/services
 	applications/applications
 	applets/applets
 	protocols/nbus/nbus
 	doc/conceptual/conceptual
+	doc/coding-style
 
 

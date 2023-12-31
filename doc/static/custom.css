@@ -1,10 +1,3 @@
-html {
-	font-size: 130%;
-}
-
-body {
-	margin: 0;
-}
 
 @page { 
 	size: auto A4 portrait;
@@ -12,26 +5,20 @@ body {
 	margin-bottom: 20mm;
 }
 
-h2, h3 {
-	page-break-before: always;
+h1 {
+	page-break-after: always;
 }
 
 .align-left {
 	float: left;
-/*	padding-right: 2em;*/
-}
-
-.tag-button {
-    background-image: none;
-    border: 1px solid #ccc;
-    border-radius: .3em;
-    padding: .5em .7em;
-    text-decoration: none;
-    background-color: #eee;
 }
 
 .wy-nav-content {
 	max-width: 100% !important;
+}
+
+.wy-side-nav-search, .wy-nav-top {
+	background-color: #4e4a4a;
 }
 
 /*
