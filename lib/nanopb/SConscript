@@ -6,7 +6,7 @@ import os
 
 def build_proto(target, source, env):
 	for s in source:
-		os.system("lib/other/nanopb/generator/nanopb_generator.py %s" % s)
+		os.system(str(env['NANOPB_GENERATOR']) + ' ' + str(s))
 
 def modify_proto_targets(target, source, env):
 	target = []
@@ -29,6 +29,7 @@ if conf["LIB_TINYCBOR"] == "y":
 		Dir(env['LIB_DEFAULT_REPO_DIR']),
 	])
 
+	env.Append(NANOPB_GENERATOR = File(env['LIB_DEFAULT_REPO_DIR'] + '/generator/nanopb_generator.py'))
 	proto_builder = Builder(
 		action = Action(build_proto, env["PROTOCCOMSTR"]),
 		emitter = modify_proto_targets,
