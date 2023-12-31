@@ -13,7 +13,7 @@ extensions = [
 numfig = True
 autosectionlabel_prefix_document = True
 templates_path = ['templates']
-exclude_patterns = ['build', 'static', 'lib2/duktape', 'lib/other/zfp']
+exclude_patterns = ['build', 'static', 'lib/duktape', 'lib/zfp']
 
 html_theme = 'sphinx_rtd_theme'
 html_title = 'plumCore IoT/DAQ framework'
