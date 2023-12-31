@@ -1,0 +1,35 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["LIB_CMSIS"] == "y":
+
+	env.Git('https://github.com/ARM-software/CMSIS_5', branch='NN/2.0.0')
+
+	env.Append(CFLAGS = ['-D__ARM_FEATURE_MVE=0'])
+	objs.append(env.Object([
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/SupportFunctions/SupportFunctions.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/CommonTables/arm_const_structs.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/TransformFunctions/arm_cfft_radix8_f32.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/TransformFunctions/arm_bitreversal2.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/CommonTables/arm_common_tables.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/FilteringFunctions/arm_iir_lattice_init_q15.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/FilteringFunctions/arm_iir_lattice_q15.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/TransformFunctions/arm_rfft_fast_f32.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/TransformFunctions/arm_rfft_fast_init_f32.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/TransformFunctions/arm_cfft_f32.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/TransformFunctions/arm_cfft_init_f32.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/ComplexMathFunctions/arm_cmplx_mag_f32.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/StatisticsFunctions/arm_std_f32.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/StatisticsFunctions/arm_var_f32.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/StatisticsFunctions/arm_std_q15.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/StatisticsFunctions/arm_var_q15.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/StatisticsFunctions/arm_mean_q31.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/FastMathFunctions/arm_sqrt_q15.c'),
+	]))
+	
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Include'),
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/Core/Include'),
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/PrivateInclude'),
+	])

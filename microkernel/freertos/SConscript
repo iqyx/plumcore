@@ -1,0 +1,16 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["KERNEL_FREERTOS"] == "y":
+
+	objs.append(env.Object(source = [
+		File(Glob("src/*.c")),
+		File(Glob("src/portable/%s/*.c" % env["FREERTOS_PORT"])),
+	]))
+
+	env.Append(CPPPATH = [
+		Dir("src/include"),
+		Dir("src/portable/%s" % env["FREERTOS_PORT"]),
+	])
+

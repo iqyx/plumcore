@@ -1,0 +1,17 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["LIB_TINYCBOR"] == "y":
+
+	env.Git('https://github.com/intel/tinycbor', branch='main')
+	env.Patch('add-create-byte-string-array.patch')
+
+	objs.append(env.Object([
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/src/cborparser.c'),
+		File(env['LIB_DEFAULT_REPO_DIR'] + '/src/cborencoder.c'),
+	]))
+	
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/src'),
+	])

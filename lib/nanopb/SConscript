@@ -1,0 +1,37 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+import os
+
+def build_proto(target, source, env):
+	for s in source:
+		os.system(str(env['NANOPB_GENERATOR']) + ' ' + str(s))
+
+def modify_proto_targets(target, source, env):
+	target = []
+	for s in source:
+		b = os.path.splitext(str(s))[0]
+		target.append(File(b + ".pb.h"))
+		target.append(File(b + ".pb.c"))
+	return target, source
+
+if conf["LIB_TINYCBOR"] == "y":
+
+	env.Git('https://github.com/nanopb/nanopb', branch='0.4.5')
+
+	env.Append(CFLAGS = ["-DPB_FIELD_16BIT"])
+	objs.append(env.Object([
+		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '*.c')),
+	]))
+	
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR']),
+	])
+
+	env.Append(NANOPB_GENERATOR = File(env['LIB_DEFAULT_REPO_DIR'] + '/generator/nanopb_generator.py'))
+	proto_builder = Builder(
+		action = Action(build_proto, env["PROTOCCOMSTR"]),
+		emitter = modify_proto_targets,
+	)
+	env.Append(BUILDERS = {'Proto' : proto_builder})

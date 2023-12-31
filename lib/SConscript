@@ -1,115 +1,73 @@
-import os
-
 Import("env")
 Import("conf")
 Import("objs")
 
-objs.append(env.Object(source = [
-	File(Glob("fec/*.c")),
-	File(Glob("log/*.c")),
-	File(Glob("crypto/*.c")),
-	File(Glob("freertos/*.c")),
-	File(Glob("freertos/portable/%s/*.c" % env["FREERTOS_PORT"])),
-	#  File("freertos/portable/MemMang/heap_3.c"),
-]))
+import os
+import git
+import tqdm
+from colorama import Fore, Style
 
-env.AddSourceIf("LIB_LINEEDIT", File(Glob("cli/lineedit/*.c")), Dir("cli/lineedit"))
-env.AddSourceIf("LIB_WOLFMQTT", File(Glob("other/wolfmqtt/src/*.c")), Dir("other/wolfmqtt"))
-env.AddSourceIf("LIB_NANOPB", File(Glob("other/nanopb/*.c")), Dir("other/nanopb"))
-env.AddSourceIf("LIB_HEATSHRINK", [File("other/heatshrink/heatshrink_encoder.c"), File("other/heatshrink/heatshrink_decoder.c")], Dir("other/heatshrink"))
-env.AddSourceIf("LIB_LIBUXB", File(Glob("other/uxb/*.c")), Dir("other/uxb"))
-env.AddSourceIf("LIB_SFFS", File(Glob("filesystem/sffs/*.c")), Dir("filesystem/sffs"))
-env.AddSourceIf("LIB_TREECLI", File(Glob("cli/treecli/*.c")), Dir("cli/treecli"))
-env.AddSourceIf("LIB_DUKTAPE", File(Glob("script/duktape/src-custom/duktape.c")), Dir("script/duktape/src-custom"))
-env.AddSourceIf("LIB_WREN", [File(Glob("script/wren/src/vm/*.c")), File(Glob("script/wren/src/optional/*.c"))], [Dir("script/wren/src/include"), Dir("script/wren/src/optional"), Dir("script/wren/src/vm")])
-env.AddSourceIf("LIB_GRAVITY", [
-	File(Glob("script/gravity/src/compiler/*.c")),
-	File(Glob("script/gravity/src/runtime/*.c")),
-	File(Glob("script/gravity/src/shared/*.c")),
-], [
-	Dir("script/gravity/src/compiler"),
-	Dir("script/gravity/src/runtime"),
-	Dir("script/gravity/src/shared"),
-])
-env.AddSourceIf("LIB_SPIFFS", File(Glob("filesystem/spiffs/src/*.c")), Dir("filesystem/spiffs/src"))
-env.AddSourceIf("LIB_ZFP",
-	[
-		File(Glob("other/zfp/src/*.c")),
-	], [
-		Dir("other/zfp/src"),
-		Dir("other/zfp/include"),
-	]
-)
-env.AddSourceIf("LIB_CMSIS_DSP",
-	[
-		File("other/cmsis/CMSIS/DSP/Source/SupportFunctions/SupportFunctions.c"),
-		File("other/cmsis/CMSIS/DSP/Source/CommonTables/arm_const_structs.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_cfft_radix8_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_bitreversal2.c"),
-		File("other/cmsis/CMSIS/DSP/Source/CommonTables/arm_common_tables.c"),
-		File("other/cmsis/CMSIS/DSP/Source/FilteringFunctions/arm_iir_lattice_init_q15.c"),
-		File("other/cmsis/CMSIS/DSP/Source/FilteringFunctions/arm_iir_lattice_q15.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_rfft_fast_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_rfft_fast_init_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_cfft_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/TransformFunctions/arm_cfft_init_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/ComplexMathFunctions/arm_cmplx_mag_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_std_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_var_f32.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_std_q15.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_var_q15.c"),
-		File("other/cmsis/CMSIS/DSP/Source/StatisticsFunctions/arm_mean_q31.c"),
-		File("other/cmsis/CMSIS/DSP/Source/FastMathFunctions/arm_sqrt_q15.c"),
-	], [
-		Dir("other/cmsis/CMSIS/DSP/Include"),
-		Dir("other/cmsis/CMSIS/Core/Include"),
-		Dir("other/cmsis/CMSIS/DSP/PrivateInclude"),
-	]
-)
-env.AddSourceIf("LIB_TINYCBOR", [File("other/tinycbor/src/cborparser.c"), File("other/tinycbor/src/cborencoder.c")], Dir("other/tinycbor/src"))
+env.Replace(LIB_DEFAULT_REPO_DIR = "src/")
+
+def stamp(fn):
+	with open(fn, 'w') as f:
+		pass
+
+class git_clone_progress(git.RemoteProgress):
+	def __init__(self):
+		super().__init__()
+		self._bar = tqdm.tqdm()
+
+	def update(self, op_code, cur_count, max_count=None, message=''):
+		pass
+		self._bar.total = max_count
+		self._bar.n = cur_count
+		self._bar.set_description(message)
+		self._bar.refresh()
+		#  print(op_code)
 
 
-duktape = env.Command(
-	source = None,
-	target = [File("script/duktape/src-custom/duktape.h"), File("script/duktape/src-custom/duktape.c")],
-	action = "python lib/script/duktape/tools/configure.py --output-directory lib/script/duktape/src-custom --source-directory lib/script/duktape/src-input --config-metadata lib/script/duktape/config --option-file lib/script/duktape/config/examples/low_memory.yaml -DDUK_USE_FASTINT --rom-support",
-)
+def Git(self, url, dir=env['LIB_DEFAULT_REPO_DIR'], branch=None):
+	if os.path.exists('.downloaded.stamp'):
+		return
 
-env.Append(CPPPATH = [
-	Dir("fec"),
-	Dir("log"),
-	Dir("crypto"),
-	Dir("freertos/include"),
-	Dir("freertos/portable/%s" % env["FREERTOS_PORT"]),
-	Dir("libopencm3/include"),
+	print(f'{Fore.BLUE}{Style.BRIGHT}Cloning git repo{Style.RESET_ALL} {url} into {dir}...')
 
-])
-
-env.Append(LIBPATH = [
-	Dir("libopencm3/lib"),
-])
-
-# nanopb requirement for large fields
-env.Append(CFLAGS = ["-DPB_FIELD_16BIT"])
-
-def build_proto(target, source, env):
-	for s in source:
-		os.system("lib/other/nanopb/generator/nanopb_generator.py %s" % s)
-
-def modify_proto_targets(target, source, env):
-	target = []
-	for s in source:
-		b = os.path.splitext(str(s))[0]
-		target.append(File(b + ".pb.h"))
-		target.append(File(b + ".pb.c"))
-	return target, source
-
-proto_builder = Builder(
-	action = Action(build_proto, env["PROTOCCOMSTR"]),
-	emitter = modify_proto_targets,
-)
-env.Append(BUILDERS = {'Proto' : proto_builder})
+	try:
+		repo = git.Repo.clone_from(url, dir, progress=git_clone_progress(), branch=branch, depth=1)
+	except:
+		print(f'..{Fore.RED}{Style.BRIGHT}failed{Style.RESET_ALL}')
+		return
+	stamp('.downloaded.stamp')
 
 
 
+env.AddMethod(Git)
+
+def Patch(self, patch, dir=env['LIB_DEFAULT_REPO_DIR']):
+	if os.path.exists('.patched.stamp'):
+		return
+
+	r = git.Repo(dir)
+	for p in patch:
+		# The patch file name is library SConscript file relative, but Git needs it as repository-relative
+		abspatch = os.path.abspath(p)
+		print(f'{Fore.BLUE}{Style.BRIGHT}Patching{Style.RESET_ALL} with {p}...')
+
+		try:
+			r.git.apply([str(abspatch)])
+
+		except git.GitCommandError:
+			print(f'..{Fore.RED}{Style.BRIGHT}failed{Style.RESET_ALL}')
+			return
+
+	stamp('.patched.stamp')
+
+env.AddMethod(Patch)
+
+
+for d in next(os.walk("."))[1]:
+	f = os.path.join(d, "SConscript")
+	if os.path.isfile(f):
+		SConscript(f)
 

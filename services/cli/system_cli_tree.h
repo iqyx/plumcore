@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include "lib/cli/treecli/treecli_parser.h"
+#include "treecli_parser.h"
 
 /* Helper defines to make the command tree more clear. */
 

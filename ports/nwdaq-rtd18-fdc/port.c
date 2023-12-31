@@ -137,7 +137,7 @@ int32_t port_early_init(void) {
 	rcc_periph_clock_enable(RCC_FDCAN);
 	rcc_periph_clock_enable(SCC_FDCAN);
 	/* Set PCLK as FDCAN clock */
-	RCC_CCIPR |= (RCC_CCIPR_FDCAN_PCLK << RCC_CCIPR_FDCAN_SHIFT);
+	RCC_CCIPR |= (RCC_CCIPR_FDCANSEL_PCLK << RCC_CCIPR_FDCANSEL_SHIFT);
 
 	return PORT_EARLY_INIT_OK;
 }
@@ -360,8 +360,8 @@ static void can_init(void) {
 
 	stm32_fdcan_init(&can1, CAN1);
 	/* TIL: first set the interrupt priority, THEN enable it. */
-	nvic_set_priority(NVIC_FDCAN1_INTR1_IRQ, 6 * 16);
-	nvic_enable_irq(NVIC_FDCAN1_INTR1_IRQ);
+	nvic_set_priority(NVIC_FDCAN1_IT0_IRQ, 6 * 16);
+	nvic_enable_irq(NVIC_FDCAN1_IT0_IRQ);
 
 	nbus_init(&nbus, &can1.iface);
 
@@ -370,7 +370,7 @@ static void can_init(void) {
 }
 
 
-void fdcan1_intr1_isr(void) {
+void fdcan1_it0_isr(void) {
 	/* Toggle status LED directly. */
 	if (FDCAN_IR(CAN1) & FDCAN_IR_RF0N) {
 		gpio_toggle(GPIOB, GPIO6);

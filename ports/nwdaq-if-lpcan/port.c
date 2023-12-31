@@ -105,9 +105,8 @@ static void can_init(void) {
 	fdcan_start(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
 	stm32_fdcan_init(&can1, CAN1);
 	/* TIL: first set the interrupt priority, THEN enable it. */
-	/* FDCAN1 has INTR0/INTR1 swapped! */
-	nvic_set_priority(NVIC_FDCAN1_INTR1_IRQ, 6 * 16);
-	nvic_enable_irq(NVIC_FDCAN1_INTR1_IRQ);
+	nvic_set_priority(NVIC_FDCAN1_IT0_IRQ, 6 * 16);
+	nvic_enable_irq(NVIC_FDCAN1_IT0_IRQ);
 
 	// nbus_init(&nbus, &can1.iface);
 	// nbus_root_init(&root_channel, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
@@ -122,8 +121,8 @@ static void can_init(void) {
 	FDCAN_ILE(CAN2) |= FDCAN_ILE_INT0;
 	fdcan_start(CAN2, FDCAN_CCCR_INIT_TIMEOUT);
 	stm32_fdcan_init(&can2, CAN2);
-	nvic_set_priority(NVIC_FDCAN2_INTR0_IRQ, 6 * 16);
-	nvic_enable_irq(NVIC_FDCAN2_INTR0_IRQ);
+	nvic_set_priority(NVIC_FDCAN2_IT0_IRQ, 6 * 16);
+	nvic_enable_irq(NVIC_FDCAN2_IT0_IRQ);
 
 	nbus_switch_init(&switch1);
 	nbus_switch_add_port(&switch1, &can1.iface);
@@ -131,12 +130,11 @@ static void can_init(void) {
 }
 
 
-/* INTR0 and INTR1 swapped in libopencm3! */
-void fdcan1_intr1_isr(void) {
+void fdcan1_it0_isr(void) {
 	stm32_fdcan_irq_handler(&can1);
 }
 
-void fdcan2_intr0_isr(void) {
+void fdcan2_it0_isr(void) {
 	stm32_fdcan_irq_handler(&can2);
 }
 

@@ -23,7 +23,7 @@ menu "Microkernel (scheduler & IPC) configuration"
 			bool "CMRX"
 	endchoice
 
-	source "microkernel/*.Kconfig"
+	source "microkernel/*/Kconfig"
 endmenu
 
 

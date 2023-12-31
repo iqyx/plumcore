@@ -1,0 +1,31 @@
+diff --git a/src/cbor.h b/src/cbor.h
+index be5bbc7..ac39301 100644
+--- a/src/cbor.h
++++ b/src/cbor.h
+@@ -265,6 +265,7 @@ CBOR_INLINE_API CborError cbor_encode_double(CborEncoder *encoder, double value)
+ 
+ CBOR_API CborError cbor_encoder_create_array(CborEncoder *parentEncoder, CborEncoder *arrayEncoder, size_t length);
+ CBOR_API CborError cbor_encoder_create_map(CborEncoder *parentEncoder, CborEncoder *mapEncoder, size_t length);
++CBOR_API CborError cbor_encoder_create_byte_string_array(CborEncoder *parentEncoder, CborEncoder *arrayEncoder, size_t length);
+ CBOR_API CborError cbor_encoder_close_container(CborEncoder *parentEncoder, const CborEncoder *containerEncoder);
+ CBOR_API CborError cbor_encoder_close_container_checked(CborEncoder *parentEncoder, const CborEncoder *containerEncoder);
+ 
+diff --git a/src/cborencoder.c b/src/cborencoder.c
+index 1bf31c8..3a786a4 100644
+--- a/src/cborencoder.c
++++ b/src/cborencoder.c
+@@ -533,6 +533,14 @@ CborError cbor_encoder_create_array(CborEncoder *parentEncoder, CborEncoder *arr
+     return create_container(parentEncoder, arrayEncoder, length, ArrayType << MajorTypeShift);
+ }
+ 
++/**
++ * Creates a CBOR byte string
++ */
++CborError cbor_encoder_create_byte_string_array(CborEncoder *parentEncoder, CborEncoder *arrayEncoder, size_t length)
++{
++    return create_container(parentEncoder, arrayEncoder, length, ByteStringType << MajorTypeShift);
++}
++
+ /**
+  * Creates a CBOR map in the CBOR stream provided by \a parentEncoder and
+  * initializes \a mapEncoder so that items can be added to the map using

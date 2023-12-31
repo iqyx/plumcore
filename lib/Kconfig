@@ -2,10 +2,6 @@ config LIB_LINEEDIT
 	bool "lineedit (single-line editor library with command history)"
 	default y
 
-config LIB_WOLFMQTT
-	bool "WolfMQTT library"
-	default n
-
 config LIB_NANOPB
 	bool "NanoPB protocol buffers library"
 	default y
@@ -13,14 +9,6 @@ config LIB_NANOPB
 config LIB_HEATSHRINK
 	bool "Heatshrink LZSS compression/decompression library"
 	default n
-
-config LIB_LIBUXB
-	bool "UXB bus master library for STM32"
-	default y
-
-config LIB_SFFS
-	bool "SFFS simple flash filesystem library"
-	default y
 
 config LIB_TREECLI
 	bool "treecli tree-structured command line interface library"
@@ -42,8 +30,8 @@ config LIB_SPIFFS
 	bool "SPIFFS NOR flash memory filesystem library"
 	default y
 
-config LIB_CMSIS_DSP
-	bool "ARM CMSIS library (DSP part)"
+config LIB_CMSIS
+	bool "ARM CMSIS library"
 	default y
 
 config LIB_ZFP
@@ -52,4 +40,20 @@ config LIB_ZFP
 
 config LIB_TINYCBOR
 	bool "CBOR encoding/decoding library TinyCbor"
+	default y
+
+config LIB_LIBOPENCM3
+	bool "libopencm3 library"
+	default y
+
+config LIB_PLUMCORE_CRYPTOLIB
+	bool "plumCore cryptographic primitives and routines"
+	default y
+
+config LIB_FEC_GOLAY
+	bool "fec-golay library for Golay forward error correction"
+	default y
+
+config LIB_PLUMCORE_LOG
+	bool "plumCore logging library"
 	default y

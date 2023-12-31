@@ -1,0 +1,16 @@
+diff --git a/include/libopencm3/stm32/common/quadspi_common_v1.h b/include/libopencm3/stm32/common/quadspi_common_v1.h
+index e6af0af3..e97cb4d3 100644
+--- a/include/libopencm3/stm32/common/quadspi_common_v1.h
++++ b/include/libopencm3/stm32/common/quadspi_common_v1.h
+@@ -108,6 +108,11 @@
+ #define QUADSPI_CCR_SIOO    (1 << 28)
+ #define QUADSPI_CCR_FMODE_MASK    0x3
+ #define QUADSPI_CCR_FMODE_SHIFT   26
++#define QUADSPI_CCR_FMODE_WRITE_INDIRECT (0 << QUADSPI_CCR_FMODE_SHIFT)
++#define QUADSPI_CCR_FMODE_READ_INDIRECT (1 << QUADSPI_CCR_FMODE_SHIFT)
++#define QUADSPI_CCR_FMODE_POLLING (2 << QUADSPI_CCR_FMODE_SHIFT)
++#define QUADSPI_CCR_FMODE_MEMORY_MAPPED (3 << QUADSPI_CCR_FMODE_SHIFT)
++
+ #define QUADSPI_CCR_DMODE_MASK    0x3
+ #define QUADSPI_CCR_DMODE_SHIFT   24
+ /* bit 23 reserved */

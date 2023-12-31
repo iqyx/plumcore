@@ -1,0 +1,13 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["LIB_PLUMCORE_CRYPTOLIB"] == "y":
+
+	objs.append(env.Object([
+		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '*.c')),
+	]))
+	
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR']),
+	])
