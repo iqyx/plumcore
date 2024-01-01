@@ -57,3 +57,7 @@ config LIB_FEC_GOLAY
 config LIB_PLUMCORE_LOG
 	bool "plumCore logging library"
 	default y
+
+config LIB_LITTLEFS
+	bool "littlefs filesystem library"
+	default n
