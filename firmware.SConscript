@@ -1,13 +1,15 @@
 import subprocess
 import os
+from tempfile import mkstemp
 
 Import("env")
 Import("conf")
 Import("objs")
 
 
-image_elf_size = Action("$SIZE $SOURCE", env["IMAGEELFSIZECOMSTR"])
-image_readelf = Action("$READELF --program-headers $SOURCE", env["IMAGEELFHDRCOMSTR"])
+image_elf_size = Action("$SIZE $TARGET", env["IMAGEELFSIZECOMSTR"])
+image_elf_headers = Action("$READELF --program-headers $TARGET", env["IMAGEELFHDRCOMSTR"])
+image_elf_sections = Action("$READELF --sections $TARGET", env["IMAGEELFHDRCOMSTR"])
 
 ###################################################################
 # Linking / ELF image generation
@@ -24,7 +26,6 @@ image_elf = env.Program(
 if conf["FW_IMAGE_ELF"] == "y":
 	Alias("firmware", image_elf)
 	AddPostAction(image_elf, image_elf_size)
-	AddPostAction(image_elf, image_readelf)
 
 
 image_bin = env.Command(
@@ -42,10 +43,25 @@ image_strip = env.Command(
 	action = Action("$STRIP $SOURCE -o $TARGET", env["STRIPELFCOMSTR"])
 )
 
+# Signing of the image
+sk = conf["ELF_SIGNING_KEY"]
+image_elf_sign = env.Command(
+	target = env["PORTFILE"] + ".elf.sign",
+	source = env["PORTFILE"] + ".elf.strip",
+	action = [
+		Action(f'scripts/elfsign.py --sk {conf["ELF_SIGNING_KEY"]} --sign $SOURCE'),
+	]
+)
+
 if conf["ELF_IMAGE_XIP"] == "y":
 	Alias("firmware", image_strip)
 	AddPostAction(image_strip, image_elf_size)
-	AddPostAction(image_strip, image_readelf)
+	AddPostAction(image_strip, image_elf_headers)
+	Alias("firmware-sign", image_elf_sign)
+	# AddPostAction(image_elf_sign, image_elf_sections)
+
+
+
 
 
 ###################################################################

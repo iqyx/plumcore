@@ -18,6 +18,11 @@ menu "ELF image configuration"
 		bool "Flatten the image to a *.bin"
 		default y
 
+	config ELF_SIGNING_KEY
+		depends on ELF_IMAGE_XIP
+		string "Ed25519 signing key"
+		default "elfsign.key"
+
 endmenu
 
 

@@ -59,7 +59,9 @@
 #include <interfaces/uart.h>
 #include <interfaces/adc.h>
 
-#include <services/cli/system_cli_tree.h>
+#if !defined(CONFIG_APP_BL)
+	#include <services/cli/system_cli_tree.h>
+#endif
 
 /* Low level drivers for th STM32G4 family */
 #include <services/stm32-system-clock/clock.h>
