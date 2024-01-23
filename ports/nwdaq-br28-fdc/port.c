@@ -214,10 +214,6 @@ struct module_led led_status;
 struct module_led led_error;
 
 static void led_init(void) {
-	/* Configure GPIO for both LEDs. */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO6);
-	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
-
 	module_led_init(&led_status, "led_status");
 	/* In the main application, the status LED is the white one.
 	 * Bootloader uses the red LED as a status indicator. */
@@ -542,6 +538,13 @@ void vPortSetupTimerInterrupt(void) {
 
 
 static void port_setup_default_gpio(void) {
+	/* Status LEDs. */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO6);
+	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
+	/* Turn off both LEDs. */
+	gpio_set(GPIOB, GPIO6);
+	gpio_set(GPIOC, GPIO10);
+
 	/* CAN port. Enable the transceiver permanently (SHDN = L). */
 	gpio_mode_setup(CAN_SHDN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CAN_SHDN_PIN);
 	gpio_clear(CAN_SHDN_PORT, CAN_SHDN_PIN);
