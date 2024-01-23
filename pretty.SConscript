@@ -26,5 +26,7 @@ env['CREATEBINCOMSTR'] = cformat("{c.blue}{c.bold}Creating binary firmware{c.whi
 env['GENIFACECOMSTR'] = cformat("{c.blue}{c.bold}Generating interface files{c.white} $TARGET{c.default}")
 env['GENCONFIGCOMSTR'] = cformat("{c.blue}{c.bold}Generating configuration headers{c.white} $SOURCE -> $TARGET{c.default}")
 env['IMAGEELFSIZECOMSTR'] = cformat("{c.blue}{c.bold}Generated ELF image info:{c.default}")
+env['IMAGEELFHDRCOMSTR'] = cformat("{c.blue}{c.bold}ELF image program headers:{c.default}")
 env['PROTOCCOMSTR'] = cformat("{c.bold}{c.blue}Compiling proto{c.white} $SOURCE{c.default}")
 env['STATSCOMSTR'] = cformat("{c.bold}{c.blue}Generating per file size statistics{c.white} $SOURCE{c.default}")
+env['STRIPELFCOMSTR'] = cformat("{c.bold}{c.blue}Stripping garbage from the ELF XIP image{c.white} $SOURCE{c.default}")

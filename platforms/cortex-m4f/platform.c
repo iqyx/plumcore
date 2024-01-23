@@ -8,17 +8,19 @@
 
 #include "main.h"
 
+#include <libopencm3/cm3/scb.h>
+#include <libopencm3/cm3/vector.h>
+
 #ifdef MODULE_NAME
 #undef MODULE_NAME
 #endif
 #define MODULE_NAME "cortex-m4f"
 
 
+extern uint32_t __vector_table;
+
 void platform_early_init(void) {
-	/* Relocate the vector table first if required. */
-	#if defined(CONFIG_RELOCATE_VECTOR_TABLE)
-		SCB_VTOR = CONFIG_VECTOR_TABLE_ADDRESS;
-	#endif
+
 }
 
 

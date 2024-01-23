@@ -1,0 +1,14 @@
+config APP_BL
+	bool "Bootloader application"
+
+menu "Bootloader configuration"
+ 	depends on APP_BL
+
+	config APP_NAME
+		string
+		default "bootloader"
+
+	config APP_BL_VAR1
+		bool "app1 variable"
+
+endmenu

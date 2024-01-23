@@ -20,20 +20,7 @@ config PORT_NWDAQ_BR28_FDC
 			hex
 			default "0x08000000"
 
-		config NWDAQ_BR28_FDC_ENABLE_SERIAL_CONSOLE
-			bool "Enable diagnostic serial console"
-			default yes
-
 		config NWDAQ_BR28_FDC_CONSOLE_SPEED
-			depends on NWDAQ_BR28_FDC_ENABLE_SERIAL_CONSOLE
 			int "Serial console speed"
 			default 115200
-
-		config NWDAQ_BR28_FDC_ENABLE_LEDS
-			bool "Enable back panel LEDs"
-			default yes
-
-		config NWDAQ_BR28_FDC_ENABLE_FLASH
-			bool "Enable NOR flash on the SPI3 interface"
-			default yes
 	endmenu

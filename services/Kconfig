@@ -63,6 +63,10 @@ menu "Low-level platform drivers"
 			bool "NBUS CAN-FD switch"
 			default n
 
+		config SERVICE_STM32_FLASH
+			bool "STM32 internal flash driver"
+			default y
+
 		source "services/stm32-uart/Kconfig"
 	endmenu
 endmenu
@@ -221,6 +225,27 @@ menu "System services"
 	config SERVICE_CRASH_MGR
 		bool "Crash manager and debug service"
 		default n
+
+	config SERVICE_CHAINLOADER
+		bool "Chainload another firmware image"
+		default n
+
+	menu "ELF chainloader configuration"
+		depends on SERVICE_CHAINLOADER
+		
+		config CHAINLOADER_FIND_START
+			hex "Find ELF: start address"
+			default "0x08000000"
+			
+		config CHAINLOADER_FIND_SIZE
+			hex "Find ELF: size of the search window"
+			default "0x40000"
+
+		config CHAINLOADER_FIND_STEP
+			hex "Find ELF: step"
+			default "0x1000"
+
+	endmenu
 endmenu
 
 menu "Data manipulation/evaluation/processing services"

@@ -6,6 +6,9 @@ Import("conf")
 Import("objs")
 
 
+image_elf_size = Action("$SIZE $SOURCE", env["IMAGEELFSIZECOMSTR"])
+image_readelf = Action("$READELF --program-headers $SOURCE", env["IMAGEELFHDRCOMSTR"])
+
 ###################################################################
 # Linking / ELF image generation
 ###################################################################
@@ -18,14 +21,10 @@ image_elf = env.Program(
 	],
 )
 
-image_elf_size = env.Command(
-	source = image_elf,
-	target = None,
-	action = Action("$SIZE $SOURCE", env["IMAGEELFSIZECOMSTR"])
-)
-
 if conf["FW_IMAGE_ELF"] == "y":
-	Alias("firmware", image_elf_size)
+	Alias("firmware", image_elf)
+	AddPostAction(image_elf, image_elf_size)
+	AddPostAction(image_elf, image_readelf)
 
 
 image_bin = env.Command(
@@ -37,45 +36,16 @@ image_bin = env.Command(
 if conf["ELF_IMAGE_TO_BIN"] == "y":
 	Alias("firmware", image_bin)
 
-
-
-###################################################################
-# uBLoad firmware generation
-###################################################################
-
-# UBF image generator needs a BIN image first
-image_ubf_source = image_bin
-image_ubf_cmd = "$CREATEFW --base 0x08010000 --input $SOURCE --output $TARGET"
-image_ubf_cmd += " --version \"$VERSION\""
-image_ubf_cmd += " --compatibility \"meh 0.x.x\""
-
-if conf["FW_IMAGE_HASH"] == "y":
-	image_ubf_cmd += " --check"
-
-
-# If a firmware signing is requested, prepare a signing key (generate if requested),
-# append the required parameters and the signing key dependency
-if conf["FW_IMAGE_SIGN"] == "y":
-	signing_key = conf["FW_IMAGE_SIGN_KEY"]
-
-	if conf["FW_IMAGE_SIGN_KEY_GENERATE"] == "y":
-		env.Command(
-			target = signing_key,
-			source = None,
-			action = Action("dd if=/dev/urandom bs=32 count=1 of=$TARGET", env["CREATEKEYCOMSTR"])
-		)
-
-	image_ubf_source.append(signing_key);
-	image_ubf_cmd += " --sign " + signing_key
-
-image_ubf = env.Command(
-	target = env["PORTFILE"] + ".ubf",
-	source = image_ubf_source,
-	action = Action(image_ubf_cmd, env["CREATEUBFCOMSTR"])
+image_strip = env.Command(
+	target = env["PORTFILE"] + ".elf.strip",
+	source = env["PORTFILE"] + ".elf",
+	action = Action("$STRIP $SOURCE -o $TARGET", env["STRIPELFCOMSTR"])
 )
 
-if conf["FW_IMAGE_UBLOAD"] == "y":
-	Alias("firmware", image_ubf)
+if conf["ELF_IMAGE_XIP"] == "y":
+	Alias("firmware", image_strip)
+	AddPostAction(image_strip, image_elf_size)
+	AddPostAction(image_strip, image_readelf)
 
 
 ###################################################################
@@ -85,8 +55,9 @@ if conf["FW_IMAGE_UBLOAD"] == "y":
 program_source = None
 if conf["FW_IMAGE_ELF"] == "y":
 	program_source = image_bin
-if conf["FW_IMAGE_UBLOAD"] == "y":
-	program_source = image_ubf
+if conf["ELF_IMAGE_XIP"] == "y":
+	program_source = image_strip
+
 
 oocd = env.Command(
 	source = program_source,
@@ -101,7 +72,7 @@ oocd = env.Command(
 	-c "flash write_image erase $SOURCE %s bin" \
 	-c "reset" \
 	-c "shutdown"
-	""" % (env["OOCD_INTERFACE"], env["OOCD_TARGET"], env["LOAD_ADDRESS"])
+	""" % (env["OOCD_INTERFACE"], env["OOCD_TARGET"], conf["ELF_IMAGE_LOAD_ADDRESS"])
 )
 
 env.Alias("program", oocd);

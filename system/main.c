@@ -63,7 +63,9 @@ static void init_task(void *p) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing services..."));
 	system_init();
 
-	startup_banner();
+	#if defined(CONFIG_SHOW_BANNER)
+		startup_banner();
+	#endif
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing application..."));
 	app_init(&app);
@@ -76,6 +78,7 @@ int main(void) {
 	platform_early_init();
 	port_early_init();
 	u_log_init();
+
 
 	xTaskCreate(init_task, "init", configMINIMAL_STACK_SIZE + 512, NULL, 1, NULL);
 	vTaskStartScheduler();

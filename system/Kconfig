@@ -50,6 +50,10 @@ config DEFAULT_CONSOLE_CLI
 			string "File name"
 			default "default.cfg"
 
+config SHOW_BANNER
+	bool "Show plumCore banner on startup"
+	default yes
+
 config DEFAULT_PLOG_SENSOR_UPLOAD
 	bool "Start default PLOG sensor upload service"
 	select DEFAULT_PLOG_ROUTER
