@@ -149,3 +149,56 @@ tinyelf_ret_t tinyelf_phdr_get(Elf *self, struct tinyelf_program_header *phdr, u
 	
 	return TINYELF_RET_OK;
 }
+
+
+tinyelf_ret_t tinyelf_shdr_get(Elf *self, struct tinyelf_section_header *shdr, uint32_t idx) {
+	if (idx >= self->elf_header.shnum) {
+		return TINYELF_RET_FAILED;
+	}
+	self->cursor = self->elf_header.shoff + self->elf_header.shentsize * idx;
+
+	shdr->name = load_ptr(self);
+	shdr->type = load_uint32(self);
+	shdr->flags = load_uint32(self); 
+	shdr->addr = load_ptr(self);
+	shdr->offset = load_ptr(self);
+	shdr->size = load_ptr(self);
+	shdr->link = load_uint32(self); 
+	shdr->info = load_uint32(self); 
+	shdr->align = load_uint32(self); 
+	shdr->entsize = load_uint32(self); 
+	
+	return TINYELF_RET_OK;
+}
+
+
+tinyelf_ret_t tinyelf_section_get_name(Elf *self, uint32_t offset, char *buf, size_t size) {
+	/* Get the string section header first. */
+	struct tinyelf_section_header str_hdr;
+	if (tinyelf_shdr_get(self, &str_hdr, self->elf_header.shstrndx) != TINYELF_RET_OK) {
+		return TINYELF_RET_FAILED;
+	}
+	
+	self->cursor = str_hdr.offset + offset;
+	char c = 0;
+	while ((c = (char)load_uint8(self)) && (size > 1)) {
+		*buf = c;
+		buf++;
+		size--;
+	}
+	*buf = '\0';
+
+	return TINYELF_RET_OK;
+}
+
+
+tinyelf_ret_t tinyelf_section_find_by_name(Elf *self, const char *name, struct tinyelf_section_header *shdr) {
+	for (uint32_t i = 0; tinyelf_shdr_get(self, shdr, i) == TINYELF_RET_OK; i++) {
+		char fname[TINYELF_MAX_SECTION_NAME_LEN] = {0};
+		tinyelf_section_get_name(self, shdr->name, fname, sizeof(fname));
+		if (!strcmp(name, fname)) {
+			return TINYELF_RET_OK;
+		}
+	}
+	return TINYELF_RET_FAILED;
+}

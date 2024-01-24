@@ -17,6 +17,8 @@
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/cortex.h>
 #include <cbor.h>
+#include <blake2.h>
+#include <ed25519.h>
 
 #include "chainloader.h"
 #include "tinyelf.h"
@@ -39,6 +41,7 @@ static tinyelf_ret_t tinyelf_read(Elf *elf, size_t pos, void *buf, size_t len, s
 }
 
 
+#if defined(CONFIG_CHAINLOADER_INFO_LOGGING)
 static chainloader_ret_t print_elf(Elf *elf) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("  type %s, %s endian, version %d"),
 		tinyelf_class_str[elf->elf_header.class],
@@ -80,6 +83,25 @@ static chainloader_ret_t print_phdr(Elf *elf) {
 }
 
 
+static chainloader_ret_t print_shdr(Elf *elf) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("section headers:"));
+	struct tinyelf_section_header hdr = {0};
+	for (uint32_t i = 0; tinyelf_shdr_get(elf, &hdr, i) == TINYELF_RET_OK; i++) {
+		char name[32] = {0};
+		tinyelf_section_get_name(elf, hdr.name, name, sizeof(name));
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("  %s, type %d, addr 0x%08x, offset %p, size %p"),
+			name,
+			hdr.type,
+			hdr.addr,
+			hdr.offset,
+			hdr.size
+		);
+	}
+	return CHAINLOADER_RET_OK;
+}
+#endif
+
+
 /**
  * @brief Find the application vector table position
  *
@@ -98,6 +120,69 @@ static chainloader_ret_t chainloader_find_vector_table(ChainLoader *self, uint32
 		}
 	}
 	return ret;
+}
+
+
+chainloader_ret_t chainloader_find_signature(ChainLoader *self, uint8_t **addr, size_t *size) {
+	struct tinyelf_section_header hdr = {0};
+	if (tinyelf_section_find_by_name(&self->elf, ".sign.ed25519", &hdr) != TINYELF_RET_OK) {
+		return CHAINLOADER_RET_FAILED;
+	}
+	*addr = self->membuf + hdr.offset;
+	*size = hdr.size;
+	#if defined(CONFIG_CHAINLOADER_INFO_LOGGING)
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Ed25519 signature found at 0x%08x, size %p"), *addr, *size);
+	#endif
+
+	return CHAINLOADER_RET_OK;
+}
+
+
+static chainloader_ret_t chainloader_elf_b2s(ChainLoader *self, uint8_t *exclude, size_t exclude_size, uint8_t h[32]) {
+	size_t elf_size = self->elf.elf_header.shoff + self->elf.elf_header.shentsize * self->elf.elf_header.shnum;
+
+	/* Part before the exclude region. */
+	blake2s_state s;
+	blake2s_init(&s, 32);
+	blake2s_update(&s, self->membuf, exclude - self->membuf);
+
+	/* Exclusion is included as a zero buffer. */
+	uint8_t hm[32] = {0};
+	blake2s_update(&s, hm, sizeof(hm));
+	blake2s_update(&s, hm, sizeof(hm));
+
+	/* Part immediately following the excluded range to the end of the ELF. */
+	blake2s_update(&s, exclude + exclude_size, elf_size - (exclude - self->membuf) - exclude_size);
+
+	blake2s_final(&s, h, 32);
+
+	return CHAINLOADER_RET_OK;
+}
+
+
+chainloader_ret_t chainloader_check_signature(ChainLoader *self, const uint8_t pubkey[32]) {
+	/* Content of the .sign.ed25519 ELF section. */
+	uint8_t *addr = NULL;
+	size_t size = 0;
+	if (chainloader_find_signature(self, &addr, &size) != CHAINLOADER_RET_OK) {
+		return CHAINLOADER_RET_FAILED;
+	}
+
+	/* Blake2s hash of the ELF file must be computed with the signature section
+	 * excluded and replaced with zeros. */
+	uint8_t h[32] = {0};
+	if (chainloader_elf_b2s(self, addr, size, h) != CHAINLOADER_RET_OK) {
+		return CHAINLOADER_RET_FAILED;
+	}
+	vTaskDelay(200);
+
+	if (ed25519_verify(addr, pubkey, h, 32) != ED25519_VERIFY_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("Signature verification failed"));
+		return CHAINLOADER_RET_FAILED;
+	}
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Signature verified OK"));
+
+	return CHAINLOADER_RET_OK;
 }
 
 
@@ -125,9 +210,14 @@ chainloader_ret_t chainloader_set_elf(ChainLoader *self, uint8_t *buf, size_t si
 	/* Now the callback can be used to init and load an ELF. */
 	tinyelf_init(&self->elf, tinyelf_read, self);
 	if (tinyelf_parse(&self->elf) == TINYELF_RET_OK) {
-		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("ELF image found at 0x%08x"), self->membuf);
-		print_elf(&self->elf);
-		print_phdr(&self->elf);	
+		#if defined(CONFIG_CHAINLOADER_INFO_LOGGING)
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("ELF image found at 0x%08x"), self->membuf);
+		#endif
+		#if defined(CONFIG_CHAINLOADER_DEBUG_LOGGING)
+			print_elf(&self->elf);
+			print_phdr(&self->elf);	
+		#endif
+		// print_shdr(&self->elf);
 		return CHAINLOADER_RET_OK;
 	}
 
@@ -148,7 +238,9 @@ chainloader_ret_t chainloader_boot(ChainLoader *self) {
 		return CHAINLOADER_RET_FAILED;
 	}
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("jumping to 0x%08x, MSP 0x%08x, vector table 0x%08x --------->\n\n"), self->elf.elf_header.entry, *(uint32_t *)self->vector_table, self->vector_table);
+	#if defined(CONFIG_CHAINLOADER_INFO_LOGGING)
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("jumping to 0x%08x, MSP 0x%08x, vector table 0x%08x --------->\n\n"), self->elf.elf_header.entry, *(uint32_t *)self->vector_table, self->vector_table);
+	#endif
 
 	vTaskDelay(200);
 	vTaskSuspendAll();

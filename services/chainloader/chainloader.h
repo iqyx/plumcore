@@ -41,3 +41,5 @@ chainloader_ret_t chainloader_find_elf(ChainLoader *self, uint32_t mstart, uint3
 chainloader_ret_t chainloader_set_elf(ChainLoader *self, uint8_t *buf, size_t size);
 chainloader_ret_t chainloader_boot(ChainLoader *self);
 
+chainloader_ret_t chainloader_find_signature(ChainLoader *self, uint8_t **addr, size_t *size);
+chainloader_ret_t chainloader_check_signature(ChainLoader *self, const uint8_t pubkey[32]);

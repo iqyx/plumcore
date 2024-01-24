@@ -8,7 +8,7 @@ menu "Bootloader configuration"
 		string
 		default "bootloader"
 
-	config APP_BL_VAR1
-		bool "app1 variable"
+	config BL_PUBKEY
+		string "Ed25519 public key for firmware verification (base64)"
 
 endmenu

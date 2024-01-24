@@ -13,6 +13,7 @@
 
 
 #define TINYELF_ELF_MAGIC 0x7f454c46
+#define TINYELF_MAX_SECTION_NAME_LEN 32
 
 typedef enum {
 	TINYELF_RET_OK = 0,
@@ -94,6 +95,42 @@ struct tinyelf_program_header {
 	uint32_t align;
 };
 
+enum tinyelf_shdr_type {
+	TINYELF_SHDR_TYPE_NULL = 0x0,
+	TINYELF_SHDR_TYPE_PROGBITS = 0x1,
+	TINYELF_SHDR_TYPE_SYMTAB = 0x2,
+	TINYELF_SHDR_TYPE_STRTAB = 0x3,
+	TINYELF_SHDR_TYPE_RELA = 0x4,
+	TINYELF_SHDR_TYPE_HASH = 0x5,
+	TINYELF_SHDR_TYPE_DYNAMIC = 0x6,
+	TINYELF_SHDR_TYPE_NOTE = 0x7,
+	TINYELF_SHDR_TYPE_NOBITS = 0x8,
+	TINYELF_SHDR_TYPE_REL = 0x9,
+	TINYELF_SHDR_TYPE_SHLIB = 0xa,
+	TINYELF_SHDR_TYPE_DYNSYM = 0xb,
+	TINYELF_SHDR_TYPE_INIT_ARRAY = 0xe,
+	TINYELF_SHDR_TYPE_FINI_ARRAY = 0xf,
+	TINYELF_SHDR_TYPE_PREINIT_ARRAY = 0x10,
+	TINYELF_SHDR_TYPE_GROUP = 0x11,
+	TINYELF_SHDR_TYPE_SYMTAB_SHNDX = 0x12,
+	TINYELF_SHDR_TYPE_NUM = 0x13,
+	TINYELF_SHDR_TYPE_LOOS = 0,
+};
+
+struct tinyelf_section_header {
+	uint32_t name;
+	enum tinyelf_shdr_type type;
+	uint32_t flags;
+	uint32_t addr;
+	uint32_t offset;
+	uint32_t size;
+	uint32_t link;
+	uint32_t info;
+	uint32_t align;
+	uint32_t entsize;
+};
+
+
 typedef struct tinyelf_elf Elf;
 typedef struct tinyelf_elf {
 	/* Read callback for ELF data access. */
@@ -112,4 +149,7 @@ typedef struct tinyelf_elf {
 tinyelf_ret_t tinyelf_init(Elf *self, tinyelf_ret_t (*read)(Elf *self, size_t pos, void *buf, size_t len, size_t *read), void *read_ctx);
 tinyelf_ret_t tinyelf_parse(Elf *self);
 tinyelf_ret_t tinyelf_phdr_get(Elf *self, struct tinyelf_program_header *phdr, uint32_t idx);
+tinyelf_ret_t tinyelf_shdr_get(Elf *self, struct tinyelf_section_header *shdr, uint32_t idx);
+tinyelf_ret_t tinyelf_section_get_name(Elf *self, uint32_t offset, char *buf, size_t size);
+tinyelf_ret_t tinyelf_section_find_by_name(Elf *self, const char *name, struct tinyelf_section_header *shdr);
 

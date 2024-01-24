@@ -1,8 +1,8 @@
 #pragma once
 
+#include <main.h>
 #include <services/chainloader/chainloader.h>
 
-#include "config.h"
 
 typedef enum {
 	APP_RET_OK = 0,
@@ -14,6 +14,7 @@ enum bl_state {
 	BL_STATE_FIND_APP,
 	BL_STATE_BOOT,
 	BL_STATE_ALL_FAILED,
+	BL_STATE_CHECK_SIGNATURE,
 };
 
 typedef struct {
@@ -21,6 +22,7 @@ typedef struct {
 	ChainLoader chainloader;
 
 	enum bl_state state;
+	TaskHandle_t task;
 
 } App;
 

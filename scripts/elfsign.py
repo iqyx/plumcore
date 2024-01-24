@@ -57,6 +57,8 @@ if args.sign:
 	hm = blake2s(elf).digest()
 	sm = ed25519.signature_unsafe(hm, sk, pk)
 	save_file(f.name, sm);
+	print(f'hm = {hm.hex()}')
+	print(f'sm = {sm.hex()}')
 
 	# Attach the signature
 	run(f'arm-none-eabi-objcopy --update-section .sign.ed25519="{f.name}" {args.sign}', shell=True)

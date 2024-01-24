@@ -245,6 +245,14 @@ menu "System services"
 			hex "Find ELF: step"
 			default "0x1000"
 
+		config CHAINLOADER_INFO_LOGGING
+			bool "Enable info logging"
+			default y
+
+		config CHAINLOADER_DEBUG_LOGGING
+			bool "Enable debug logging"
+			default n
+
 	endmenu
 endmenu
 
