@@ -13,7 +13,6 @@
 #include <main.h>
 
 #include <libopencm3/cm3/common.h>
-#include <blake2.h>
 #include <interfaces/flash.h>
 
 /* This is a naive approach. Some STM32 families have non-uniform flash sectors. */

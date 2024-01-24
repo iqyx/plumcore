@@ -15,7 +15,6 @@
 #include <libopencm3/cm3/cortex.h>
 #include <libopencm3/stm32/flash.h>
 #include <interfaces/flash.h>
-#include <blake2.h>
 #include "stm32-flash.h"
 
 #define MODULE_NAME "stm32-flash"
