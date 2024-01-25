@@ -8,6 +8,8 @@
 #define MODULE_NAME "bootloader"
 
 
+/* String representation of bootloader states. Ordering must be the same
+ * as in the corresponding enum. */
 static const char *bl_states[] = {
 	"init",
 	"find-app",
@@ -20,24 +22,30 @@ static const char *bl_states[] = {
 static void bl_set_state(App *self, enum bl_state state) {
 	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("state '%s' -> '%s'"), bl_states[self->state], bl_states[state]);
 	self->state = state;
-
 }
 
 
 static app_ret_t bl_step(App *self) {
 	switch (self->state) {
 		case BL_STATE_FIND_APP:
-			chainloader_init(&self->chainloader);
-			if (chainloader_find_elf(&self->chainloader, CONFIG_CHAINLOADER_FIND_START, CONFIG_CHAINLOADER_FIND_SIZE, CONFIG_CHAINLOADER_FIND_STEP) != CHAINLOADER_RET_OK) {
+			if (chainloader_init(&self->chainloader) == CHAINLOADER_RET_OK &&
+			    chainloader_find_elf(&self->chainloader, (uint8_t *)CONFIG_CHAINLOADER_FIND_START, CONFIG_CHAINLOADER_FIND_SIZE, CONFIG_CHAINLOADER_FIND_STEP) == CHAINLOADER_RET_OK
+			) {
+				bl_set_state(self, BL_STATE_CHECK_SIGNATURE);
+			} else {
 				u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot find ELF firmware to chainload"));
 				bl_set_state(self, BL_STATE_ALL_FAILED);
-			} else {
-				bl_set_state(self, BL_STATE_CHECK_SIGNATURE);
 			}
 			break;
 
 		case BL_STATE_BOOT:
-			chainloader_boot(&self->chainloader);
+			switch (chainloader_boot(&self->chainloader)) {
+				case CHAINLOADER_RET_OK:
+					/* unreachable */ break;
+				case CHAINLOADER_RET_FAILED:
+				default:
+					bl_set_state(self, BL_STATE_ALL_FAILED); break;
+			}
 			break;
 
 		case BL_STATE_ALL_FAILED:

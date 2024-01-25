@@ -21,6 +21,9 @@ typedef enum {
 	TINYELF_RET_NOELF,
 } tinyelf_ret_t;
 
+/* If the header members are enumerable, they are defined by enums.
+ * If applicable, a corresponding const array is created to access
+ * the names uring runtime. */
 enum tinyelf_class {
 	TINYELF_ELF32 = 1,
 	TINYELF_ELF64 = 2,
@@ -37,11 +40,12 @@ enum tinyelf_type {
 	TINYELF_ET_NONE = 0x00,
 	TINYELF_ET_REL = 0x01,
 	TINYELF_ET_EXEC = 0x02,
+	/** @todo */
 };
 
 enum tinyelf_machine {
 	TINYELF_EM_NONE = 0x00,
-	
+	/** @todo */
 };
 
 enum tinyelf_version {
@@ -70,7 +74,6 @@ struct tinyelf_elf_header {
 	uint16_t shstrndx;
 	
 };
-
 
 enum tinyelf_phdr_type {
 	TINYELF_PHDR_TYPE_NULL = 0,
@@ -133,23 +136,63 @@ struct tinyelf_section_header {
 
 typedef struct tinyelf_elf Elf;
 typedef struct tinyelf_elf {
-	/* Read callback for ELF data access. */
+	/**
+	 * @brief Read callback for ELF data access.
+	 *
+	 * @param self Tinyelf instance. It can be used to get the calling context (@p self->read_ctx)
+	 * @param pos Read data from the @p pos position
+	 * @param buf Buffer to read data to
+	 * @param len Length of the data to read
+	 * @param read Length of the data actually read (eg. during a file read, EOF may be encountered)
+	 */
 	tinyelf_ret_t (*read)(Elf *self, size_t pos, void *buf, size_t len, size_t *read);
 	void *read_ctx;
 
-
-
 	struct tinyelf_elf_header elf_header;
 
+	/** @todo consider moving the cursor to the flash access layer, that is getting rid of it. */
 	size_t cursor;
 
 } Elf;
 
 
+/**
+ * @brief Initialise a tinyelf library instance
+ *
+ * @param @read Callback used to read the underlying data storage (eg. flash)
+ */
 tinyelf_ret_t tinyelf_init(Elf *self, tinyelf_ret_t (*read)(Elf *self, size_t pos, void *buf, size_t len, size_t *read), void *read_ctx);
+
+/*-
+ * @brief Parse the ELF image header
+ *
+ * Try to parse the ELF. Check the ELF magic first. If it matches, ELF header is
+ * read. The cursor remains at the end of the header. No more actions are taken.
+ */
 tinyelf_ret_t tinyelf_parse(Elf *self);
+
+/**
+ * @brief Get a program header with number @p idx
+ */
 tinyelf_ret_t tinyelf_phdr_get(Elf *self, struct tinyelf_program_header *phdr, uint32_t idx);
+
+/**
+ * @brieg Get a section header with number @p idx
+ */
 tinyelf_ret_t tinyelf_shdr_get(Elf *self, struct tinyelf_section_header *shdr, uint32_t idx);
+
+/**
+ * @brief Get a section name
+ *
+ * @param offset Offset of the section name string in the text string section
+ *               (get it from the @p name field of the section header struct).
+ */
 tinyelf_ret_t tinyelf_section_get_name(Elf *self, uint32_t offset, char *buf, size_t size);
+
+/**
+ * @brief Try to find section by its name
+ *
+ * Linearly search all sections and compare if the name matches. Return the section header if yes.
+ */
 tinyelf_ret_t tinyelf_section_find_by_name(Elf *self, const char *name, struct tinyelf_section_header *shdr);
 

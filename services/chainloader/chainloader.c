@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Service for chainloading another firmware
  *
@@ -41,7 +41,6 @@ static tinyelf_ret_t tinyelf_read(Elf *elf, size_t pos, void *buf, size_t len, s
 }
 
 
-#if defined(CONFIG_CHAINLOADER_INFO_LOGGING)
 static chainloader_ret_t print_elf(Elf *elf) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("  type %s, %s endian, version %d"),
 		tinyelf_class_str[elf->elf_header.class],
@@ -99,7 +98,6 @@ static chainloader_ret_t print_shdr(Elf *elf) {
 	}
 	return CHAINLOADER_RET_OK;
 }
-#endif
 
 
 /**
@@ -108,6 +106,10 @@ static chainloader_ret_t print_shdr(Elf *elf) {
  * Iterate over all ELF headers and find the one with the vector table. Vector table always
  * starts with a stack pointer load address followed by a reset vector address. The reset
  * vector address must be the same as the entry point in the ELF header.
+ *
+ * @todo This functionality is specific to chainloading and even then it is used only when
+ * a static vector table is found. If the main firmware creates the vector table dynamically,
+ * no vector table is found in the .text section and this function fails.
  */
 static chainloader_ret_t chainloader_find_vector_table(ChainLoader *self, uint32_t *addr) {
 	struct tinyelf_program_header hdr = {0};
@@ -123,6 +125,11 @@ static chainloader_ret_t chainloader_find_vector_table(ChainLoader *self, uint32
 }
 
 
+/**
+ * ELF signature is always in a single section. For Ed25519 signatures it is a raw 64 byte string.
+ * @todo This functionality should be moved to the tinyelf library asi it is not specific for
+ *       ELF chainloading. ELF signatures can be checked even in ELFs residing in files.
+ */
 chainloader_ret_t chainloader_find_signature(ChainLoader *self, uint8_t **addr, size_t *size) {
 	struct tinyelf_section_header hdr = {0};
 	if (tinyelf_section_find_by_name(&self->elf, ".sign.ed25519", &hdr) != TINYELF_RET_OK) {
@@ -138,6 +145,11 @@ chainloader_ret_t chainloader_find_signature(ChainLoader *self, uint8_t **addr, 
 }
 
 
+/**
+ * @todo  - move to the tinyelf library
+ *        - exclusion hardcoded to 64 bytes
+ *        - probably replace the exclusion with a single section instead of the more generic addr & len
+ */
 static chainloader_ret_t chainloader_elf_b2s(ChainLoader *self, uint8_t *exclude, size_t exclude_size, uint8_t h[32]) {
 	size_t elf_size = self->elf.elf_header.shoff + self->elf.elf_header.shentsize * self->elf.elf_header.shnum;
 
@@ -160,38 +172,37 @@ static chainloader_ret_t chainloader_elf_b2s(ChainLoader *self, uint8_t *exclude
 }
 
 
+/**
+ * @todo  - move to the tinyelf library
+ *        - name it using ed25519
+ */
 chainloader_ret_t chainloader_check_signature(ChainLoader *self, const uint8_t pubkey[32]) {
 	/* Content of the .sign.ed25519 ELF section. */
 	uint8_t *addr = NULL;
 	size_t size = 0;
-	if (chainloader_find_signature(self, &addr, &size) != CHAINLOADER_RET_OK) {
-		return CHAINLOADER_RET_FAILED;
-	}
-
 	/* Blake2s hash of the ELF file must be computed with the signature section
 	 * excluded and replaced with zeros. */
 	uint8_t h[32] = {0};
-	if (chainloader_elf_b2s(self, addr, size, h) != CHAINLOADER_RET_OK) {
-		return CHAINLOADER_RET_FAILED;
-	}
-	vTaskDelay(200);
 
-	if (ed25519_verify(addr, pubkey, h, 32) != ED25519_VERIFY_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("Signature verification failed"));
-		return CHAINLOADER_RET_FAILED;
+	if (chainloader_find_signature(self, &addr, &size) == CHAINLOADER_RET_OK &&
+	    chainloader_elf_b2s(self, addr, size, h) == CHAINLOADER_RET_OK &&
+	    ed25519_verify(addr, pubkey, h, 32) == ED25519_VERIFY_OK) {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Signature verified OK"));
+		return CHAINLOADER_RET_OK;
 	}
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Signature verified OK"));
 
-	return CHAINLOADER_RET_OK;
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("Signature verification failed"));
+	return CHAINLOADER_RET_FAILED;
 }
 
 
-chainloader_ret_t chainloader_find_elf(ChainLoader *self, uint32_t mstart, uint32_t msize, uint32_t mstep) {
-	for (uint32_t offset = 0; offset < msize; offset += mstep) {
-		if (chainloader_set_elf(self, (uint8_t *)(mstart + offset), msize - offset) == CHAINLOADER_RET_OK) {
+chainloader_ret_t chainloader_find_elf(ChainLoader *self, uint8_t *mstart, size_t msize, size_t mstep) {
+	for (size_t offset = 0; offset < msize; offset += mstep) {
+		if (chainloader_set_elf(self, mstart + offset, msize - offset) == CHAINLOADER_RET_OK) {
 			return CHAINLOADER_RET_OK;
 		}
 	}
+	/* No ELF found during the scan, membuf is clear now. */
 	return CHAINLOADER_RET_FAILED;
 }
 
@@ -216,11 +227,14 @@ chainloader_ret_t chainloader_set_elf(ChainLoader *self, uint8_t *buf, size_t si
 		#if defined(CONFIG_CHAINLOADER_DEBUG_LOGGING)
 			print_elf(&self->elf);
 			print_phdr(&self->elf);	
+			print_shdr(&self->elf);
 		#endif
-		// print_shdr(&self->elf);
 		return CHAINLOADER_RET_OK;
 	}
 
+	/* Not properly parsed, set membuf back. */
+	self->membuf = NULL;
+	self->memsize = 0;
 	return CHAINLOADER_RET_FAILED;
 }
 
@@ -233,6 +247,10 @@ chainloader_ret_t chainloader_free(ChainLoader *self) {
 
 
 chainloader_ret_t chainloader_boot(ChainLoader *self) {
+	/* Cannot boot when the ELF address is not found. */
+	if (self->membuf == NULL) {
+		return CHAINLOADER_RET_FAILED;
+	}
 	if (chainloader_find_vector_table(self, &self->vector_table) != CHAINLOADER_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no vector table found"));
 		return CHAINLOADER_RET_FAILED;
@@ -242,28 +260,17 @@ chainloader_ret_t chainloader_boot(ChainLoader *self) {
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("jumping to 0x%08x, MSP 0x%08x, vector table 0x%08x --------->\n\n"), self->elf.elf_header.entry, *(uint32_t *)self->vector_table, self->vector_table);
 	#endif
 
-	vTaskDelay(200);
-	vTaskSuspendAll();
-	cm_disable_interrupts();
-	systick_interrupt_disable();
-	NVIC_ICER(0) = 0xffffffffU;
-	NVIC_ICER(1) = 0xffffffffU;
-	NVIC_ICER(2) = 0xffffffffU;
-	NVIC_ICER(3) = 0xffffffffU;
-	NVIC_ICER(4) = 0xffffffffU;
-	NVIC_ICER(5) = 0xffffffffU;
-	NVIC_ICER(6) = 0xffffffffU;
-	NVIC_ICER(7) = 0xffffffffU;
-	NVIC_ICPR(0) = 0xffffffffU;
-	NVIC_ICPR(1) = 0xffffffffU;
-	NVIC_ICPR(2) = 0xffffffffU;
-	NVIC_ICPR(3) = 0xffffffffU;
-	NVIC_ICPR(4) = 0xffffffffU;
-	NVIC_ICPR(5) = 0xffffffffU;
-	NVIC_ICPR(6) = 0xffffffffU;
-	NVIC_ICPR(7) = 0xffffffffU;
+	/* This delay is really needed, otherwise FreeRTOS freezes here. */
+	vTaskDelay(100);
 
-	
+	/* Suspend all tasks, disable all interrupts and clear all pending interrupts. */
+	vTaskSuspendAll();
+	for (uint32_t i = 0; i < 8; i++) {
+		NVIC_ICER(i) = 0xffffffffU;
+		NVIC_ICPR(i) = 0xffffffffU;
+	}
+
+	/* Switch back to MSP. */	
 	__asm volatile("mov r0, #0");
 	__asm volatile("msr control, r0");
 	__asm volatile("isb");
@@ -271,11 +278,12 @@ chainloader_ret_t chainloader_boot(ChainLoader *self) {
 	register uint32_t msp __asm("msp");
 	typedef void (*app_entry_t)(void);
 	app_entry_t app_entry = (app_entry_t)self->elf.elf_header.entry;
+
+	/* Set stack pointer, relocate the vector table to the new position and run the application firmware. */
 	msp = *(uint32_t *)self->vector_table;
 	SCB_VTOR = self->vector_table;
-
 	app_entry();
-	(void)msp;
 
+	(void)msp;
 	return CHAINLOADER_RET_OK;
 }
