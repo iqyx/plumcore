@@ -206,6 +206,7 @@ static flash_ret_t spi_flash_write(Flash *flash, const size_t addr, const void *
 	self->spidev->vmt->deselect(self->spidev);
 
 	if (spi_flash_wait_complete(self) != SPI_FLASH_RET_OK) {
+		spi_flash_write_enable(self, false);
 		return FLASH_RET_TIMEOUT;
 	}
 	spi_flash_write_enable(self, false);
