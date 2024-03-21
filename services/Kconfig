@@ -67,6 +67,10 @@ menu "Low-level platform drivers"
 			bool "STM32 internal flash driver"
 			default y
 
+		config SERVICE_STM32_SWUART
+			bool "STM32 single-wire UART implementation"
+			default n
+
 		source "services/stm32-uart/Kconfig"
 	endmenu
 endmenu
