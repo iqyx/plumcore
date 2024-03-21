@@ -61,3 +61,7 @@ config LIB_PLUMCORE_LOG
 config LIB_LITTLEFS
 	bool "littlefs filesystem library"
 	default n
+
+config LIB_BLAKE2S_MICRO
+	bool "blake2s-micro library"
+	default n

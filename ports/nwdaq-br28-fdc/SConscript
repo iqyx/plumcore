@@ -18,3 +18,7 @@ env.Append(CFLAGS = [
 
 env.Append(CPPPATH = [Dir(".")])
 
+# env.Append(LINKFLAGS = [
+	# "-Wl,-u_printf_float",
+# ])
+

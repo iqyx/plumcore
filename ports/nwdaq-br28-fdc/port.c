@@ -59,7 +59,9 @@
 #include <interfaces/uart.h>
 #include <interfaces/adc.h>
 
-#include <services/cli/system_cli_tree.h>
+#if !defined(CONFIG_APP_BL)
+	#include <services/cli/system_cli_tree.h>
+#endif
 
 /* Low level drivers for th STM32G4 family */
 #include <services/stm32-system-clock/clock.h>
@@ -73,27 +75,31 @@
 #include <services/stm32-fdcan/stm32-fdcan.h>
 
 /* High level drivers */
-#include <services/adc-mcp3564/mcp3564.h>
-#include <services/adc-composite/adc-composite.h>
-#include <services/generic-power/generic-power.h>
-#include <services/generic-mux/generic-mux.h>
 #include <services/spi-flash/spi-flash.h>
 #include <services/flash-vol-static/flash-vol-static.h>
-#include <services/fs-spiffs/fs-spiffs.h>
-#include <services/flash-fifo/flash-fifo.h>
-#include <services/adc-sensor/adc-sensor.h>
-#include <services/nbus/nbus.h>
-#include <services/nbus/nbus-root.h>
-#include <services/nbus/nbus-log.h>
-#include <services/nbus-mq/nbus-mq.h>
 #include <services/i2c-eeprom/i2c-eeprom.h>
+#if !defined(CONFIG_APP_BL)
+	#include <services/adc-mcp3564/mcp3564.h>
+	#include <services/adc-composite/adc-composite.h>
+	#include <services/generic-power/generic-power.h>
+	#include <services/generic-mux/generic-mux.h>
+	#include <services/fs-spiffs/fs-spiffs.h>
+	#include <services/flash-fifo/flash-fifo.h>
+	#include <services/adc-sensor/adc-sensor.h>
+	#include <services/nbus/nbus.h>
+	#include <services/nbus/nbus-root.h>
+	#include <services/nbus/nbus-log.h>
+	#include <services/nbus-mq/nbus-mq.h>
+	#include <services/nbus-flash/nbus-flash.h>
 
-/* System services */
-#include <services/crash-mgr/crash-mgr.h>
+	/* System services */
+	#include <services/crash-mgr/crash-mgr.h>
 
-/* Applets */
-#include <applets/hello-world/hello-world.h>
-#include <applets/tempco-calibration/tempco-cal.h>
+	/* Applets */
+	#include <applets/hello-world/hello-world.h>
+	#include <applets/tempco-calibration/tempco-cal.h>
+#endif
+
 
 /**
  * Port specific global variables and singleton instances.
@@ -101,14 +107,18 @@
 
 Watchdog watchdog;
 Stm32Rtc rtc;
-/* This is somewhat mandatory as the main purpose of the device is to measure something. */
-Mcp3564 mcp;
-Stm32Dac dac1_1;
-Stm32Dac dac1_2;
-GenericPower exc_power;
-GenericMux input_mux;
-Stm32SpiBus spi2;
-Stm32SpiDev spi2_adc;
+
+/* This is somewhat mandatory as the main purpose of the device is to measure something.
+ * Define only if the main application is specified to run. */
+#if !defined(CONFIG_APP_BL)
+	Mcp3564 mcp;
+	Stm32Dac dac1_1;
+	Stm32Dac dac1_2;
+	GenericPower exc_power;
+	GenericMux input_mux;
+	Stm32SpiBus spi2;
+	Stm32SpiDev spi2_adc;
+#endif
 
 
 /* PLL configuration for a 19.2 MHz XTAL. We are using such a weird frequency to possibly
@@ -157,11 +167,14 @@ int32_t port_early_init(void) {
 	/** @todo needed fo G4? */
 	RCC_CCIPR |= 3 << 28;
 
-	/* FDCAN interface */
-	rcc_periph_clock_enable(RCC_FDCAN);
-	rcc_periph_clock_enable(SCC_FDCAN);
-	/* Set PCLK as FDCAN clock */
-	RCC_CCIPR |= (RCC_CCIPR_FDCANSEL_PCLK << RCC_CCIPR_FDCANSEL_SHIFT);
+	/* No CAN bus support in the bootloader. */
+	#if !defined(CONFIG_APP_BL)
+		/* FDCAN interface */
+		rcc_periph_clock_enable(RCC_FDCAN);
+		rcc_periph_clock_enable(SCC_FDCAN);
+		/* Set PCLK as FDCAN clock */
+		RCC_CCIPR |= (RCC_CCIPR_FDCANSEL_PCLK << RCC_CCIPR_FDCANSEL_SHIFT);
+	#endif
 
 	return PORT_EARLY_INIT_OK;
 }
@@ -171,190 +184,196 @@ int32_t port_early_init(void) {
  * System serial console initialisation
  **********************************************************************************************************************/
 
-#if defined(CONFIG_NWDAQ_BR28_FDC_ENABLE_SERIAL_CONSOLE)
-	Stm32Uart uart2;
-	static void console_init(void) {
-		/* Set the corresponding GPIO to alternate mode and enable USART2 clock. */
-		gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
-		gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
-		gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
-		rcc_periph_clock_enable(RCC_USART2);
+Stm32Uart uart2;
+static void console_init(void) {
+	/* Set the corresponding GPIO to alternate mode and enable USART2 clock. */
+	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
+	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
+	gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
+	rcc_periph_clock_enable(RCC_USART2);
 
-		nvic_enable_irq(NVIC_USART2_IRQ);
-		nvic_set_priority(NVIC_USART2_IRQ, 7 * 16);
+	nvic_enable_irq(NVIC_USART2_IRQ);
+	nvic_set_priority(NVIC_USART2_IRQ, 7 * 16);
 
-		/* Initialise and configure the UART */
-		stm32_uart_init(&uart2, USART2);
-		uart2.uart.vmt->set_bitrate(&uart2.uart, CONFIG_NWDAQ_BR28_FDC_CONSOLE_SPEED);
+	/* Initialise and configure the UART */
+	stm32_uart_init(&uart2, USART2);
+	uart2.uart.vmt->set_bitrate(&uart2.uart, CONFIG_NWDAQ_BR28_FDC_CONSOLE_SPEED);
 
-		/* Advertise the console stream output and set it as default for log output. */
-		Stream *console = &uart2.stream;
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)console, "console");
-		u_log_set_stream(console);
-	}
-
-
-	void usart2_isr(void) {
-		stm32_uart_interrupt_handler(&uart2);
-	}
-#endif
+	/* Advertise the console stream output and set it as default for log output. */
+	Stream *console = &uart2.stream;
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)console, "console");
+	u_log_set_stream(console);
+}
 
 
-#if defined(CONFIG_NWDAQ_BR28_FDC_ENABLE_LEDS)
-	struct module_led led_status;
-	struct module_led led_error;
+void usart2_isr(void) {
+	stm32_uart_interrupt_handler(&uart2);
+}
 
-	static void led_init(void) {
-		gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO6);
-		module_led_init(&led_status, "led_status");
+
+struct module_led led_status;
+struct module_led led_error;
+
+static void led_init(void) {
+	module_led_init(&led_status, "led_status");
+	/* In the main application, the status LED is the white one.
+	 * Bootloader uses the red LED as a status indicator. */
+	#if defined(CONFIG_APP_BL)
+		module_led_set_port(&led_status, GPIOC, GPIO10);
+		/* Blink fast in the bootloader. */
+		interface_led_loop(&led_status.iface, 0x12);
+	#else
 		module_led_set_port(&led_status, GPIOB, GPIO6);
 		interface_led_loop(&led_status.iface, 0xff);
-		hal_interface_set_name(&(led_status.iface.descriptor), "led_status");
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_status.iface.descriptor, "led_status");
+	#endif
+	hal_interface_set_name(&(led_status.iface.descriptor), "led_status");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_status.iface.descriptor, "led_status");
 
-		gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
+	/* Redefine the red LED as an error LED only in the main application. */
+	#if !defined(CONFIG_APP_BL)
 		module_led_init(&led_error, "led_error");
 		module_led_set_port(&led_error, GPIOC, GPIO10);
 		interface_led_loop(&led_error.iface, 0xf);
 		hal_interface_set_name(&(led_error.iface.descriptor), "led_error");
 		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_error.iface.descriptor, "led_error");
-	}
-#endif
+	#endif
+}
 
 
 /**********************************************************************************************************************
  * Main ADC initialisation
  **********************************************************************************************************************/
+#if !defined(CONFIG_APP_BL)
+
+	/* Generic GPIO mux for channel 0-3/4-7 selection *********************************************************************/
+	const struct generic_mux_sel_line input_mux_lines[] = {
+		{.port = MUX_A0_PORT, .pin = MUX_A0_PIN},
+		{.port = MUX_A1_PORT, .pin = MUX_A1_PIN},
+	};
 
 
-/* Generic GPIO mux for channel 0-3/4-7 selection *********************************************************************/
-const struct generic_mux_sel_line input_mux_lines[] = {
-	{.port = MUX_A0_PORT, .pin = MUX_A0_PIN},
-	{.port = MUX_A1_PORT, .pin = MUX_A1_PIN},
-};
+	/* Reference voltage positive/negative mux ****************************************************************************/
+	static mux_ret_t vref_mux_enable(Mux *self, bool enable) {
+		(void)self;
+		(void)enable;
 
-
-/* Reference voltage positive/negative mux ****************************************************************************/
-static mux_ret_t vref_mux_enable(Mux *self, bool enable) {
-	(void)self;
-	(void)enable;
-
-	return MUX_RET_OK;
-}
-
-
-static mux_ret_t vref_mux_select(Mux *self, uint32_t channel) {
-	(void)self;
-
-	if (channel == 0) {
-		/* Positive Vref mux. */
-		gpio_set(VREF1_SEL_PORT, VREF1_SEL_PIN);
-		gpio_set(VREF2_SEL_PORT, VREF2_SEL_PIN);
 		return MUX_RET_OK;
-	} else if (channel == 1) {
-		gpio_clear(VREF1_SEL_PORT, VREF1_SEL_PIN);
-		gpio_clear(VREF2_SEL_PORT, VREF2_SEL_PIN);
-		return MUX_RET_OK;
-	} else {
-		return MUX_RET_FAILED;
 	}
-}
 
 
-static const struct mux_vmt vref_mux_vmt = {
-	.enable = vref_mux_enable,
-	.select = vref_mux_select,
-};
+	static mux_ret_t vref_mux_select(Mux *self, uint32_t channel) {
+		(void)self;
 
-Mux vref_mux;
+		if (channel == 0) {
+			/* Positive Vref mux. */
+			gpio_set(VREF1_SEL_PORT, VREF1_SEL_PIN);
+			gpio_set(VREF2_SEL_PORT, VREF2_SEL_PIN);
+			return MUX_RET_OK;
+		} else if (channel == 1) {
+			gpio_clear(VREF1_SEL_PORT, VREF1_SEL_PIN);
+			gpio_clear(VREF2_SEL_PORT, VREF2_SEL_PIN);
+			return MUX_RET_OK;
+		} else {
+			return MUX_RET_FAILED;
+		}
+	}
 
 
-/* MCP3564 internal mux for selecting first/second half of inputs *****************************************************/
-static mux_ret_t mcp_mux_enable(Mux *self, bool enable) {
-	(void)self;
-	(void)enable;
+	static const struct mux_vmt vref_mux_vmt = {
+		.enable = vref_mux_enable,
+		.select = vref_mux_select,
+	};
 
-	return MUX_RET_OK;
-}
+	Mux vref_mux;
 
 
-static mux_ret_t mcp_mux_select(Mux *self, uint32_t channel) {
-	(void)self;
+	/* MCP3564 internal mux for selecting first/second half of inputs *****************************************************/
+	static mux_ret_t mcp_mux_enable(Mux *self, bool enable) {
+		(void)self;
+		(void)enable;
 
-	if (channel == 0) {
+		return MUX_RET_OK;
+	}
+
+
+	static mux_ret_t mcp_mux_select(Mux *self, uint32_t channel) {
+		(void)self;
+
+		if (channel == 0) {
+			mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
+			mcp3564_update(&mcp);
+			return MUX_RET_OK;
+		} else if (channel == 1) {
+			mcp3564_set_mux(&mcp, MCP3564_MUX_CH2, MCP3564_MUX_CH3);
+			mcp3564_update(&mcp);
+			return MUX_RET_OK;
+		} else {
+			return MUX_RET_FAILED;
+		}
+	}
+
+
+	static const struct mux_vmt mcp_mux_vmt = {
+		.enable = mcp_mux_enable,
+		.select = mcp_mux_select,
+	};
+
+	Mux mcp_mux;
+
+
+	static void adc_init(void) {
+		rcc_periph_clock_enable(RCC_SPI2);
+		/* GPIO is already initialised */
+
+		stm32_spibus_init(&spi2, SPI2);
+		spi2.bus.vmt->set_sck_freq(&spi2.bus, 2e6);
+		spi2.bus.vmt->set_mode(&spi2.bus, 0, 0);
+
+		stm32_spidev_init(&spi2_adc, &spi2.bus, ADC_CS_PORT, ADC_CS_PIN);
+
+		mcp3564_init(&mcp, &(spi2_adc.dev));
+		mcp3564_set_stp_enable(&mcp, false);
+		mcp3564_set_gain(&mcp, MCP3564_GAIN_2);
+		mcp3564_set_osr(&mcp, MCP3564_OSR_81920);
 		mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
 		mcp3564_update(&mcp);
-		return MUX_RET_OK;
-	} else if (channel == 1) {
-		mcp3564_set_mux(&mcp, MCP3564_MUX_CH2, MCP3564_MUX_CH3);
-		mcp3564_update(&mcp);
-		return MUX_RET_OK;
-	} else {
-		return MUX_RET_FAILED;
+
+		generic_mux_init(&input_mux, MUX_EN_PORT, MUX_EN_PIN, &input_mux_lines, 2);
+
+		/* Vref mux init */
+		vref_mux.parent = NULL;
+		vref_mux.vmt = &vref_mux_vmt;
+
+		/* MCP3564 mux init */
+		mcp_mux.parent = NULL;
+		mcp_mux.vmt = &mcp_mux_vmt;
 	}
-}
 
+	/**********************************************************************************************************************
+	 * Sensor excitation initialisation
+	 **********************************************************************************************************************/
 
-static const struct mux_vmt mcp_mux_vmt = {
-	.enable = mcp_mux_enable,
-	.select = mcp_mux_select,
-};
+	static void exc_init(void) {
+		/* Excitation is handled as a generic power device which can be enabled/disabled, it's voltage/polarity set. */
+		generic_power_init(&exc_power);
+		generic_power_set_vref(&exc_power, 3.3f);
 
-Mux mcp_mux;
+		/* Enable STM32 DAC and create a stm32-dac service per channel. It is used to set the excitation power
+		 * device output voltage. */
+		gpio_mode_setup(VREF1_DAC_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, VREF1_DAC_PIN);
+		gpio_mode_setup(VREF2_DAC_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, VREF2_DAC_PIN);
+		rcc_periph_clock_enable(RCC_DAC1);
+		stm32_dac_init(&dac1_1, DAC1, DAC_CHANNEL1);
+		stm32_dac_init(&dac1_2, DAC1, DAC_CHANNEL2);
+		generic_power_set_voltage_dac(&exc_power, &dac1_1.dac_iface, &dac1_2.dac_iface);
 
+		/* Setup excitation enable GPIO output. Not inverted. */
+		gpio_mode_setup(EXC_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, EXC_EN_PIN);
+		gpio_clear(EXC_EN_PORT, EXC_EN_PIN);
+		generic_power_set_enable_gpio(&exc_power, EXC_EN_PORT, EXC_EN_PIN, false);
 
-static void adc_init(void) {
-	rcc_periph_clock_enable(RCC_SPI2);
-	/* GPIO is already initialised */
-
-	stm32_spibus_init(&spi2, SPI2);
-	spi2.bus.vmt->set_sck_freq(&spi2.bus, 2e6);
-	spi2.bus.vmt->set_mode(&spi2.bus, 0, 0);
-
-	stm32_spidev_init(&spi2_adc, &spi2.bus, ADC_CS_PORT, ADC_CS_PIN);
-
-	mcp3564_init(&mcp, &(spi2_adc.dev));
-	mcp3564_set_stp_enable(&mcp, false);
-	mcp3564_set_gain(&mcp, MCP3564_GAIN_2);
-	mcp3564_set_osr(&mcp, MCP3564_OSR_81920);
-	mcp3564_set_mux(&mcp, MCP3564_MUX_CH0, MCP3564_MUX_CH1);
-	mcp3564_update(&mcp);
-
-	generic_mux_init(&input_mux, MUX_EN_PORT, MUX_EN_PIN, &input_mux_lines, 2);
-
-	/* Vref mux init */
-	vref_mux.parent = NULL;
-	vref_mux.vmt = &vref_mux_vmt;
-
-	/* MCP3564 mux init */
-	mcp_mux.parent = NULL;
-	mcp_mux.vmt = &mcp_mux_vmt;
-}
-
-/**********************************************************************************************************************
- * Sensor excitation initialisation
- **********************************************************************************************************************/
-
-static void exc_init(void) {
-	/* Excitation is handled as a generic power device which can be enabled/disabled, it's voltage/polarity set. */
-	generic_power_init(&exc_power);
-	generic_power_set_vref(&exc_power, 3.3f);
-
-	/* Enable STM32 DAC and create a stm32-dac service per channel. It is used to set the excitation power
-	 * device output voltage. */
-	gpio_mode_setup(VREF1_DAC_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, VREF1_DAC_PIN);
-	gpio_mode_setup(VREF2_DAC_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, VREF2_DAC_PIN);
-	rcc_periph_clock_enable(RCC_DAC1);
-	stm32_dac_init(&dac1_1, DAC1, DAC_CHANNEL1);
-	stm32_dac_init(&dac1_2, DAC1, DAC_CHANNEL2);
-	generic_power_set_voltage_dac(&exc_power, &dac1_1.dac_iface, &dac1_2.dac_iface);
-
-	/* Setup excitation enable GPIO output. Not inverted. */
-	gpio_mode_setup(EXC_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, EXC_EN_PIN);
-	gpio_clear(EXC_EN_PORT, EXC_EN_PIN);
-	generic_power_set_enable_gpio(&exc_power, EXC_EN_PORT, EXC_EN_PIN, false);
-
-}
+	}
+#endif /* of main ADC init */
 
 /**********************************************************************************************************************
  * Flash memory initialisation
@@ -369,8 +388,11 @@ Flash *lv_boot;
 Flash *lv_system;
 Flash *lv_test;
 
-FsSpiffs spiffs_system;
-FlashFifo fifo;
+/* No filesystem in the bootloader. Code too big. Sry. See the init below too. */
+#if !defined(CONFIG_APP_BL)
+	FsSpiffs spiffs_system;
+	FlashFifo fifo;
+#endif
 
 static void nor_flash_init(void) {
 	/* SPI for the NOR flash is not initialised in the default GPIO setup. Do full setup here. */
@@ -396,91 +418,101 @@ static void nor_flash_init(void) {
 	flash_vol_static_create(&lvs, "test", 0x100000, 0x100000, &lv_test);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_test, "test");
 
-	fs_spiffs_init(&spiffs_system);
-	if (fs_spiffs_mount(&spiffs_system, lv_system) == FS_SPIFFS_RET_OK) {
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, (Interface *)&spiffs_system.iface, "system");
-	} else {
-		/* We cannot continue if mounting fails. There is no important data on
-		 * the system volume, let's format it to make the thing working again. */
-		fs_spiffs_format(&spiffs_system, lv_system);
-	}
+	#if !defined(CONFIG_APP_BL)
+		fs_spiffs_init(&spiffs_system);
+		if (fs_spiffs_mount(&spiffs_system, lv_system) == FS_SPIFFS_RET_OK) {
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, (Interface *)&spiffs_system.iface, "system");
+		} else {
+			/* We cannot continue if mounting fails. There is no important data on
+			 * the system volume, let's format it to make the thing working again. */
+			fs_spiffs_format(&spiffs_system, lv_system);
+		}
 
-	if (flash_fifo_init(&fifo, lv_test) == FLASH_FIFO_RET_OK) {
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, (Interface *)&fifo.fs, "fifo");
-	} else {
-		/** @TODO format the FIFO if init fails */
-	}
+		if (flash_fifo_init(&fifo, lv_test) == FLASH_FIFO_RET_OK) {
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, (Interface *)&fifo.fs, "fifo");
+		} else {
+			/** @TODO format the FIFO if init fails */
+		}
+	#endif
 }
 
 /**********************************************************************************************************************
  * PCB temperature sensor
  **********************************************************************************************************************/
 
-static const struct sensor_info pcb_temp_info = {
-	.description = "PCB temperature",
-	.unit = "°C"
-};
+/* No temperature sensor needed in the bootloader. */
+#if !defined(CONFIG_APP_BL)
+	static const struct sensor_info pcb_temp_info = {
+		.description = "PCB temperature",
+		.unit = "°C"
+	};
 
-Stm32Adc adc1;
-AdcSensor pcb_temp;
-static void temp_sensor_init(void) {
-	stm32_adc_init(&adc1, ADC1);
-	adc_sensor_init(&pcb_temp, &adc1.iface, 1, &pcb_temp_info);
-	pcb_temp.oversample = 16;
-	pcb_temp.div_low_fs = 4095.0f;
-	pcb_temp.div_low_high_r = 10000.0f;
+	Stm32Adc adc1;
+	AdcSensor pcb_temp;
+	static void temp_sensor_init(void) {
+		stm32_adc_init(&adc1, ADC1);
+		adc_sensor_init(&pcb_temp, &adc1.iface, 1, &pcb_temp_info);
+		pcb_temp.oversample = 16;
+		pcb_temp.div_low_fs = 4095.0f;
+		pcb_temp.div_low_high_r = 10000.0f;
 
-	pcb_temp.ntc_r25 = 10000.0f;
-	pcb_temp.ntc_beta = 3380.0f;
+		pcb_temp.ntc_r25 = 10000.0f;
+		pcb_temp.ntc_beta = 3380.0f;
 
-	// pcb_temp.a = 0.0f;
-	// pcb_temp.b = 0.25974f;
-	// pcb_temp.c = -259.74f;
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&pcb_temp.iface, "pcb_temp");
-}
+		// pcb_temp.a = 0.0f;
+		// pcb_temp.b = 0.25974f;
+		// pcb_temp.c = -259.74f;
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&pcb_temp.iface, "pcb_temp");
+	}
+#endif
 
 
 /**********************************************************************************************************************
  * NBUS/CAN-FD interface
  **********************************************************************************************************************/
 
-Stm32Fdcan can1;
-Nbus nbus;
-NbusRoot nbus_root;
-NbusLog nbus_log;
-NbusChannel *nbus_root_channel = &nbus_root.channel;
+/* No CAN bus nor NBUS support in the bootloader. */
+#if !defined(CONFIG_APP_BL)
+	Stm32Fdcan can1;
+	Nbus nbus;
+	NbusRoot nbus_root;
+	NbusLog nbus_log;
+	NbusFlash nbus_flash;
+	NbusChannel *nbus_root_channel = &nbus_root.channel;
 
-static void can_init(void) {
-	rcc_periph_reset_pulse(RST_FDCAN);
-	fdcan_init(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
-	fdcan_set_can(CAN1, false, false, true, false, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
-	fdcan_set_fdcan(CAN1, true, true, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
+	static void can_init(void) {
+		rcc_periph_reset_pulse(RST_FDCAN);
+		fdcan_init(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
+		fdcan_set_can(CAN1, false, false, true, false, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
+		fdcan_set_fdcan(CAN1, true, true, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
 
-	FDCAN_IE(CAN1) |= FDCAN_IE_RF0NE;
-	FDCAN_ILE(CAN1) |= FDCAN_ILE_INT0;
-	// FDCAN_ILS(CAN1) |= FDCAN_ILS_RxFIFO0;
-	// nvic_enable_irq(NVIC_FDCAN1_INTR0_IRQ);
-	fdcan_start(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
+		FDCAN_IE(CAN1) |= FDCAN_IE_RF0NE;
+		FDCAN_ILE(CAN1) |= FDCAN_ILE_INT0;
+		// FDCAN_ILS(CAN1) |= FDCAN_ILS_RxFIFO0;
+		// nvic_enable_irq(NVIC_FDCAN1_INTR0_IRQ);
+		fdcan_start(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
 
-	stm32_fdcan_init(&can1, CAN1);
-	/* TIL: first set the interrupt priority, THEN enable it. */
-	nvic_set_priority(NVIC_FDCAN1_IT0_IRQ, 6 * 16);
-	nvic_enable_irq(NVIC_FDCAN1_IT0_IRQ);
+		stm32_fdcan_init(&can1, CAN1);
+		/* TIL: first set the interrupt priority, THEN enable it. */
+		nvic_set_priority(NVIC_FDCAN1_IT0_IRQ, 6 * 16);
+		nvic_enable_irq(NVIC_FDCAN1_IT0_IRQ);
 
-	nbus_init(&nbus, &can1.iface);
+		nbus_init(&nbus, &can1.iface);
 
-	nbus_root_init(&nbus_root, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
-	nbus_log_init(&nbus_log, nbus_root_channel);
-}
-
-
-void fdcan1_it0_isr(void) {
-	/* Toggle status LED directly. */
-	if (FDCAN_IR(CAN1) & FDCAN_IR_RF0N) {
-		gpio_toggle(GPIOB, GPIO6);
+		nbus_root_init(&nbus_root, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
+		nbus_log_init(&nbus_log, nbus_root_channel);
+		nbus_flash_init(&nbus_flash, nbus_root_channel, "flash");
 	}
-	stm32_fdcan_irq_handler(&can1);
-}
+
+
+	void fdcan1_it0_isr(void) {
+		/* Toggle status LED directly. */
+		if (FDCAN_IR(CAN1) & FDCAN_IR_RF0N) {
+			gpio_toggle(GPIOB, GPIO6);
+		}
+		stm32_fdcan_irq_handler(&can1);
+	}
+#endif
 
 
 /**********************************************************************************************************************
@@ -509,6 +541,13 @@ void vPortSetupTimerInterrupt(void) {
 
 
 static void port_setup_default_gpio(void) {
+	/* Status LEDs. */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO6);
+	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
+	/* Turn off both LEDs. */
+	gpio_set(GPIOB, GPIO6);
+	gpio_set(GPIOC, GPIO10);
+
 	/* CAN port. Enable the transceiver permanently (SHDN = L). */
 	gpio_mode_setup(CAN_SHDN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CAN_SHDN_PIN);
 	gpio_clear(CAN_SHDN_PORT, CAN_SHDN_PIN);
@@ -570,42 +609,42 @@ static void port_setup_default_gpio(void) {
 	gpio_mode_setup(I2C1_SCL_PORT, GPIO_MODE_AF, GPIO_PUPD_NONE, I2C1_SCL_PIN);
 	gpio_set_output_options(I2C1_SCL_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, I2C1_SCL_PIN);
 	gpio_set_af(I2C1_SCL_PORT, I2C1_SCL_AF, I2C1_SCL_PIN);
-
 }
 
 
-const struct crash_mgr_region memdump_regions[] = {
-		{(void *)0x20000000, 0x10000},
-		{NULL, 0}
-};
-
+/* No Crash manager in the bootloader, simple watchdog is used instead. */
+#if !defined(CONFIG_APP_BL)
+	const struct crash_mgr_region memdump_regions[] = {
+			{(void *)0x20000000, 0x10000},
+			{NULL, 0}
+	};
+#endif
 
 int32_t port_init(void) {
 	port_setup_default_gpio();
-	#if defined(CONFIG_NWDAQ_BR28_FDC_ENABLE_SERIAL_CONSOLE)
-		console_init();
-	#endif
+	console_init();
 	stm32_rtc_init(&rtc);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CLOCK, &rtc.iface.interface, "rtc");
-	#if defined(CONFIG_NWDAQ_BR28_FDC_ENABLE_LEDS)
-		led_init();
-	#endif
-
-	exc_init();
-	adc_init();
+	led_init();
 	nor_flash_init();
-	temp_sensor_init();
-	can_init();
 	port_i2c_init();
 
-	crash_mgr = (CrashMgr *)0x20014000;
-	/* SRAM2 + CCM is 32K */
-	crash_mgr_init(crash_mgr, 0x8000);
-	crash_mgr_save_coredump(crash_mgr, &spiffs_system.iface, "coredump.cbcd");
-	crash_mgr_enable_memdump(crash_mgr, memdump_regions);
+	#if !defined(CONFIG_APP_BL)
+		exc_init();
+		adc_init();
+		temp_sensor_init();
+		can_init();
 
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&tempco_calibration, "tempco-calibration");
+
+		crash_mgr = (CrashMgr *)0x20014000;
+		/* SRAM2 + CCM is 32K */
+		crash_mgr_init(crash_mgr, 0x8000);
+		crash_mgr_save_coredump(crash_mgr, &spiffs_system.iface, "coredump.cbcd");
+		crash_mgr_enable_memdump(crash_mgr, memdump_regions);
+
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&tempco_calibration, "tempco-calibration");
+	#endif
 
 	return PORT_INIT_OK;
 }

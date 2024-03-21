@@ -63,6 +63,14 @@ menu "Low-level platform drivers"
 			bool "NBUS CAN-FD switch"
 			default n
 
+		config SERVICE_STM32_FLASH
+			bool "STM32 internal flash driver"
+			default y
+
+		config SERVICE_STM32_SWUART
+			bool "STM32 single-wire UART implementation"
+			default n
+
 		source "services/stm32-uart/Kconfig"
 	endmenu
 endmenu
@@ -96,6 +104,10 @@ menu "NBUS protocol drivers"
 
 	config SERVICE_NBUS_MQ_POLL
 		bool "NBUS message queue bridge - polling interface"
+		default n
+
+	config SERVICE_NBUS_FLASH
+		bool "NBUS flash access interface"
 		default n
 endmenu
 
@@ -221,6 +233,35 @@ menu "System services"
 	config SERVICE_CRASH_MGR
 		bool "Crash manager and debug service"
 		default n
+
+	config SERVICE_CHAINLOADER
+		bool "Chainload another firmware image"
+		default n
+
+	menu "ELF chainloader configuration"
+		depends on SERVICE_CHAINLOADER
+
+		config CHAINLOADER_FIND_START
+			hex "Find ELF: start address"
+			default "0x08000000"
+
+		config CHAINLOADER_FIND_SIZE
+			hex "Find ELF: size of the search window"
+			default "0x40000"
+
+		config CHAINLOADER_FIND_STEP
+			hex "Find ELF: step"
+			default "0x1000"
+
+		config CHAINLOADER_INFO_LOGGING
+			bool "Enable info logging"
+			default y
+
+		config CHAINLOADER_DEBUG_LOGGING
+			bool "Enable debug logging"
+			default n
+
+	endmenu
 endmenu
 
 menu "Data manipulation/evaluation/processing services"

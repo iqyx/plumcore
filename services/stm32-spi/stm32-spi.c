@@ -230,8 +230,7 @@ static spi_ret_t stm32_spidev_exchange(SpiDev *spidev, const uint8_t *txbuf, uin
 static spi_ret_t stm32_spidev_select(SpiDev *spidev) {
 	Stm32SpiDev *self = (Stm32SpiDev *)spidev->parent;
 
-	/* Already selected or cannot lock the bus. */
-	if (self->selected || self->bus->vmt->lock(self->bus) != SPI_RET_OK) {
+	if (self->bus->vmt->lock(self->bus) != SPI_RET_OK) {
 		return SPI_RET_FAILED;
 	}
 	gpio_clear(self->locm3_cs_port, self->locm3_cs_pin);
