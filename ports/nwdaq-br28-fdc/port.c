@@ -90,6 +90,7 @@
 	#include <services/nbus/nbus-root.h>
 	#include <services/nbus/nbus-log.h>
 	#include <services/nbus-mq/nbus-mq.h>
+	#include <services/nbus-flash/nbus-flash.h>
 
 	/* System services */
 	#include <services/crash-mgr/crash-mgr.h>
@@ -476,6 +477,7 @@ static void nor_flash_init(void) {
 	Nbus nbus;
 	NbusRoot nbus_root;
 	NbusLog nbus_log;
+	NbusFlash nbus_flash;
 	NbusChannel *nbus_root_channel = &nbus_root.channel;
 
 	static void can_init(void) {
@@ -499,6 +501,7 @@ static void nor_flash_init(void) {
 
 		nbus_root_init(&nbus_root, &nbus, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
 		nbus_log_init(&nbus_log, nbus_root_channel);
+		nbus_flash_init(&nbus_flash, nbus_root_channel, "flash");
 	}
 
 
