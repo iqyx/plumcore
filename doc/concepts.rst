@@ -3,6 +3,14 @@ Concepts and design goals
 ================================================
 
 
+Thin wrappers for external libraries
+===========================================
+
+Whenever an external library providing a common service is used, it is wrapped in a thin
+wrapper exposing a defined Interface. For example, filesystem access libraries are all
+wrapped to provide the same ``Fs`` interface.
+
+
 The less supported platforms and compilers, the better
 ==========================================================
 
@@ -39,6 +47,9 @@ We are expecting a coding style to be strictly adhered to. Yes, we do want curly
 around single statements in ``if``. Yes, we have a mandatory ``default`` in a ``switch``
 statement. Yes, we are using ``/* .. */`` as comments.
 
+Why? Reading and writing the code should be a pleasure. Every developer with a healthy
+dose of OCPD should be able to conform to basic coding guidelines.
+
 
 Microkernel usage
 =====================
@@ -51,7 +62,7 @@ essential parts:
 - basic IPC
 
 All other components are implemented as services. Currently, this is not the case.
-We are using FreeRTOS and some of its functionality.
+We are using FreeRTOS and some of its functionality which will go away in the future.
 
 
 Code and functionality organisation
@@ -88,6 +99,17 @@ The framework contains a message broker service for passing data between service
 The preferred way of manipulating data is to subscribe, receive the data, manipulate
 and publish back with a different topic name.
 
+The data is always passed in a common datatype resembling NumPy's ``ndarray``.
+
+
+Selecting the best from all worlds
+=======================================
+
+plumCore uses a bit of a naive approach, because it is easy. It uses a bit of *Misra's*
+approach, because it is supposedly safe. It requires all functions to return a result
+of their execution and you are recommended to check it every time. We are not banning
+dynamic memory allocation, but we have strict rules for it. We are programming deffensively,
+but not too much to be contraproductive.
 
 
 VCS and build system

@@ -1,10 +1,9 @@
 
 ====================================
-The plumCore (IoT) framework
+The plumCore DAQ framework
 ====================================
 
-A modular framework for data logging, remote data acquisition
-and low power wireless mesh networks.
+A modular framework for data logging and remote data acquisition.
 
 The name represents a seed found in a plum fruit - the core of the plum.
 Although not used in this manner it sounds sufficiently good to be used
