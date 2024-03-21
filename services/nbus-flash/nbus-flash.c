@@ -342,7 +342,7 @@ nbus_flash_ret_t nbus_flash_init(NbusFlash *self, NbusChannel *parent, const cha
 	nbus_channel_set_interface(&self->channel, NBUS_FLASH_INTERFACE_NAME, NBUS_FLASH_INTERFACE_VERSION);
 	nbus_add_channel(parent->nbus, &self->channel);
 
-	xTaskCreate(nbus_task, name, configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->nbus_task));
+	xTaskCreate(nbus_task, "nbus-flash", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->nbus_task));
 	if (self->nbus_task == NULL) {
 		return NBUS_FLASH_RET_FAILED;
 	}

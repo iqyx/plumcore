@@ -101,6 +101,10 @@ menu "NBUS protocol drivers"
 	config SERVICE_NBUS_MQ_POLL
 		bool "NBUS message queue bridge - polling interface"
 		default n
+
+	config SERVICE_NBUS_FLASH
+		bool "NBUS flash access interface"
+		default n
 endmenu
 
 
@@ -232,11 +236,11 @@ menu "System services"
 
 	menu "ELF chainloader configuration"
 		depends on SERVICE_CHAINLOADER
-		
+
 		config CHAINLOADER_FIND_START
 			hex "Find ELF: start address"
 			default "0x08000000"
-			
+
 		config CHAINLOADER_FIND_SIZE
 			hex "Find ELF: size of the search window"
 			default "0x40000"
