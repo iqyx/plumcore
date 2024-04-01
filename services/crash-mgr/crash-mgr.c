@@ -16,6 +16,7 @@
 #include <libopencm3/cm3/scb.h>
 #include <libopencm3/cm3/nvic.h>
 #include <cbor.h>
+#include "backtrace.h"
 
 #include "crash-mgr.h"
 
@@ -28,49 +29,86 @@ CrashMgr *crash_mgr;
 
 static const char *fault_str[] = {"HARD", "BUS", "MEM", "USAGE"};
 
-static crash_mgr_ret_t do_logdump(CrashMgr *self, TaskHandle_t task, enum crash_mgr_fault fault) {
-	(void)self;
-
-	TaskStatus_t task_status = {0};
-	vTaskGetInfo(task, &task_status, pdFALSE, eReady);
-	/* The first member MUST be the current stack pointer (top of stack). */
-	uint32_t *sp = *(uint32_t **)task;
-
-	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("%s: %s fault"), task_status.pcTaskName, fault_str[fault]);
-	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("%s: SP = %0p, TCB = %0p"), task_status.pcTaskName, sp, task);
-
-	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("%s: xPSR = %0p, PC = %0p, LR = %0p, R12 = %0p"), task_status.pcTaskName, sp[16], sp[15], sp[14], sp[13]);
-	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("%s: R3 = %0p, R2 = %0p, R1 = %0p, R0 = %0p"), task_status.pcTaskName, sp[12], sp[11], sp[10], sp[9]);
-	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("%s: EXC_RETURN = %0p"), task_status.pcTaskName, sp[8]);
-
-	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("%s: R11 = %0p, R10 = %0p, R9 = %0p, R8 = %0p"), task_status.pcTaskName, sp[7], sp[6], sp[5], sp[4]);
-	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("%s: R7 = %0p, R6 = %0p, R5 = %0p, R4 = %0p"), task_status.pcTaskName, sp[3], sp[2], sp[1], sp[0]);
-
-	return CRASH_MGR_RET_OK;
-}
 
 
-static crash_mgr_ret_t prepare_coredump(CrashMgr *self) {
+
+/***********************************************************************************************************************
+ * Core dump functionality
+ **********************************************************************************************************************/
+
+crash_mgr_ret_t coredump_init(CoreDump *self, uint8_t *buf, size_t len) {
+	if (u_assert(self != NULL) ||
+	    u_assert(buf != NULL) ||
+	    u_assert(len > 0)) {
+		return CRASH_MGR_RET_FAILED;
+	}
+	memset(self, 0, sizeof(CoreDump));
+
+	self->work_buf = buf;
+	self->work_buf_size = len;
+
+	/* Write the header. CBOR encoded core dump versions are simple unsigned integers. */
 	cbor_encoder_init(&self->encoder, self->work_buf, self->work_buf_size, 0);
 	cbor_encoder_create_map(&self->encoder, &self->encoder_map, CborIndefiniteLength);
 	cbor_encode_text_stringz(&self->encoder_map, "cbcd");
-	cbor_encode_int(&self->encoder_map, 1);
+	cbor_encode_int(&self->encoder_map, COREDUMP_VERSION);
 
-	/* We are using a compressor. Save compression config as it is needed for decompression. */
+	/* We are using a compressor for memory dumps. Save compression config as it is needed for decompression.
+	 * As of now, Heathshrink library is used. */
 	cbor_encode_text_stringz(&self->encoder_map, "comp");
 	cbor_encode_text_stringz(&self->encoder_map, "hs");
 	cbor_encode_text_stringz(&self->encoder_map, "hs-wsz2");
-	cbor_encode_int(&self->encoder_map, CRASH_MGR_HS_WINDOW_BITS);
+	cbor_encode_int(&self->encoder_map, CONFIG_CRASH_MGR_COMP_HS_WINDOW_BITS);
 	cbor_encode_text_stringz(&self->encoder_map, "hs-lsz2");
-	cbor_encode_int(&self->encoder_map, CRASH_MGR_HS_LOOKAHEAD_BITS);
+	cbor_encode_int(&self->encoder_map, CONFIG_CRASH_MGR_COMP_HS_LOOKAHEAD_BITS);
 
+	/* Now we are free to add key-value pairs using the encoder_map encoder. */
+	return CRASH_MGR_RET_OK;
+}
+
+
+crash_mgr_ret_t coredump_finish(CoreDump *self) {
+	cbor_encoder_close_container(&self->encoder, &self->encoder_map);
 
 	return CRASH_MGR_RET_OK;
 }
 
 
-static crash_mgr_ret_t do_memdump(CrashMgr *self, uint8_t *buf, size_t size) {
-	/* Prepare the encoder (indefinite byte string). */
+crash_mgr_ret_t coredump_save(CoreDump *self, Fs *fs, const char *filename) {
+	if (u_assert(self != NULL) ||
+	    u_assert(fs != NULL) ||
+	    u_assert(filename != NULL)) {
+		return CRASH_MGR_RET_FAILED;
+	}
+
+	size_t extra = cbor_encoder_get_extra_bytes_needed(&self->encoder);
+	if (extra > 0) {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("work buffer not big enough, core dump is saved truncated (%lu B extra needed)"), extra);
+		/* Continue anyway */
+	}
+	size_t cbor_len = cbor_encoder_get_buffer_size(&self->encoder, self->work_buf);
+
+	File f;
+	if (fs->vmt->open(fs, &f, filename, FS_MODE_CREATE | FS_MODE_WRITEONLY | FS_MODE_TRUNCATE) != FS_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot open '%s' for writing"), filename);
+		return CRASH_MGR_RET_FAILED;
+	}
+	size_t written = 0;
+	fs->vmt->write(fs, &f, self->work_buf, cbor_len, &written);
+	fs->vmt->close(fs, &f);
+
+	if (written == cbor_len) {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("coredump saved in '%s', %lu bytes written"), filename, written);
+		return CRASH_MGR_RET_OK;
+	}
+
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("coredump saving error"));
+	return CRASH_MGR_RET_FAILED;
+}
+
+
+crash_mgr_ret_t coredump_mem(CoreDump *self, uint8_t *buf, size_t size) {
+	/* Prepare the encoder (indefinite byte string) and save memory region metadata. */
 	cbor_encode_text_stringz(&self->encoder_map, "mem");
 
 	CborEncoder encoder_dump;
@@ -87,9 +125,9 @@ static crash_mgr_ret_t do_memdump(CrashMgr *self, uint8_t *buf, size_t size) {
 	/* Prepare the heatshrink compressor. */
 	self->hse = (heatshrink_encoder *)self->hse_buffer;
 	self->hse->search_index = (struct hs_index *)self->hse_search_index;
-	self->hse->search_index->size = (2 << CRASH_MGR_HS_WINDOW_BITS) * sizeof(uint16_t);
-	self->hse->window_sz2 = CRASH_MGR_HS_WINDOW_BITS;
-	self->hse->lookahead_sz2 = CRASH_MGR_HS_LOOKAHEAD_BITS;
+	self->hse->search_index->size = (2 << CONFIG_CRASH_MGR_COMP_HS_WINDOW_BITS) * sizeof(uint16_t);
+	self->hse->window_sz2 = CONFIG_CRASH_MGR_COMP_HS_WINDOW_BITS;
+	self->hse->lookahead_sz2 = CONFIG_CRASH_MGR_COMP_HS_LOOKAHEAD_BITS;
 	heatshrink_encoder_reset(self->hse);
 
 	/* Process the whole region */
@@ -147,45 +185,136 @@ static crash_mgr_ret_t do_memdump(CrashMgr *self, uint8_t *buf, size_t size) {
 }
 
 
-static crash_mgr_ret_t do_coredump(CrashMgr *self, TaskHandle_t task, enum crash_mgr_fault fault) {
+crash_mgr_ret_t coredump_task_list(CoreDump *self) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("dumping task list"));
+	/** @todo Iterate over all tasks/threads and get their TCB addresses and names. */
 
-	/** @todo dump registers */
+	return CRASH_MGR_RET_OK;
+}
 
-	/* Dump user selected memory regions */
-	if (self->memdump_regions != NULL) {
-		for (const struct crash_mgr_region *r = self->memdump_regions; r->addr != NULL; r++) {
-			do_memdump(self, r->addr, r->size);
+
+crash_mgr_ret_t coredump_fault_info(CoreDump *self, TaskHandle_t task, enum crash_mgr_fault fault) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("dumping basic fault info"));
+
+	cbor_encode_text_stringz(&self->encoder_map, "fault");
+	cbor_encode_text_stringz(&self->encoder_map, fault_str[fault]);
+
+	TaskStatus_t task_status = {0};
+	vTaskGetInfo(task, &task_status, pdFALSE, eReady);
+	cbor_encode_text_stringz(&self->encoder_map, "thread");
+	cbor_encode_text_stringz(&self->encoder_map, task_status.pcTaskName);
+
+	cbor_encode_text_stringz(&self->encoder_map, "thread-tcb");
+	cbor_encode_uint(&self->encoder_map, (uint32_t)task);
+
+	return CRASH_MGR_RET_OK;
+}
+
+
+crash_mgr_ret_t coredump_registers(CoreDump *self, TaskHandle_t task, enum crash_mgr_fault fault) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("dumping registers"));
+
+	cbor_encode_text_stringz(&self->encoder_map, "registers");
+	CborEncoder encoder_reg;
+	cbor_encoder_create_map(&self->encoder_map, &encoder_reg, CborIndefiniteLength);
+
+	uint32_t *sp = *(uint32_t **)task;
+	cbor_encode_text_stringz(&encoder_reg, "sp");
+	cbor_encode_uint(&encoder_reg, (uint32_t)sp);
+	cbor_encode_text_stringz(&encoder_reg, "xPSR");
+	cbor_encode_uint(&encoder_reg, sp[16]);
+	cbor_encode_text_stringz(&encoder_reg, "PC");
+	cbor_encode_uint(&encoder_reg, sp[15]);
+	cbor_encode_text_stringz(&encoder_reg, "LR");
+	cbor_encode_uint(&encoder_reg, sp[14]);
+	cbor_encode_text_stringz(&encoder_reg, "R12");
+	cbor_encode_uint(&encoder_reg, sp[13]);
+	/** @todo dump the rest */
+
+	cbor_encoder_close_container(&self->encoder_map, &encoder_reg);
+
+	return CRASH_MGR_RET_OK;
+}
+
+
+crash_mgr_ret_t coredump_log(CoreDump *self) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("dumping log buffer content"));
+	/** @todo Dump the log ring buffer */
+
+	return CRASH_MGR_RET_OK;
+}
+
+
+crash_mgr_ret_t coredump_backtrace(CoreDump *self, backtrace_t *bt, size_t bt_len) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("dumping backtrace"));
+	for (uint32_t i = 0; i < bt_len; i++) {
+		if (i > 0 && bt[i].address == bt[i - 1].address) {
+			break;
 		}
+		/** @todo Dump the backtrace here */
 	}
 
 	return CRASH_MGR_RET_OK;
 }
 
 
-static crash_mgr_ret_t finish_coredump(CrashMgr *self) {
-	cbor_encoder_close_container(&self->encoder, &self->encoder_map);
+/***********************************************************************************************************************
+ * Fault logging functionality
+ **********************************************************************************************************************/
+
+
+static crash_mgr_ret_t crash_mgr_log_info(CrashMgr *self, TaskHandle_t task, enum crash_mgr_fault fault) {
+	(void)self;
+
+	/* The first member MUST be the current stack pointer (top of stack). */
+	uint32_t *sp = *(uint32_t **)task;
+
+	TaskStatus_t task_status = {0};
+	vTaskGetInfo(task, &task_status, pdFALSE, eReady);
+
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("\x1b[33m--------------------- surprised pikachu in '%s', %s fault ---------------------\x1b[0m"), task_status.pcTaskName, fault_str[fault]);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("SP = %0p, TCB = %0p, xPSR = %0p, PC = %0p, LR = %0p, R12 = %0p"), sp, task, sp[16], sp[15], sp[14], sp[13]);
 
 	return CRASH_MGR_RET_OK;
 }
 
 
-static crash_mgr_ret_t save_coredump(CrashMgr *self) {
-	size_t cbor_len = cbor_encoder_get_buffer_size(&self->encoder, self->work_buf);
+static crash_mgr_ret_t crash_mgr_log_registers(CrashMgr *self, TaskHandle_t task, enum crash_mgr_fault fault) {
+	uint32_t *sp = *(uint32_t **)task;
 
-	/* Now the state is properly saved in a volatile memory, save it to a file. */
-	File f;
-	if (self->coredump_fs->vmt->open(self->coredump_fs, &f, self->coredump_filename, FS_MODE_CREATE | FS_MODE_WRITEONLY | FS_MODE_TRUNCATE) != FS_RET_OK) {
-		return CRASH_MGR_RET_FAILED;
-	}
-	size_t written = 0;
-	self->coredump_fs->vmt->write(self->coredump_fs, &f, self->work_buf, cbor_len, &written);
-	self->coredump_fs->vmt->close(self->coredump_fs, &f);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("\x1b[33m------------------------- registers -------------------------\x1b[0m"));
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("R3 = %0p, R2 = %0p, R1 = %0p, R0 = %0p"), sp[12], sp[11], sp[10], sp[9]);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("EXC_RETURN = %0p"), sp[8]);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("R11 = %0p, R10 = %0p, R9 = %0p, R8 = %0p"), sp[7], sp[6], sp[5], sp[4]);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("R7 = %0p, R6 = %0p, R5 = %0p, R4 = %0p"), sp[3], sp[2], sp[1], sp[0]);
 
-	if (written == cbor_len) {
-		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("coredump saved in '%s', %lu bytes written"), self->coredump_filename, written);
-		return CRASH_MGR_RET_OK;
+	return CRASH_MGR_RET_OK;
+}
+
+
+static crash_mgr_ret_t crash_mgr_log_backtrace(CrashMgr *self) {
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("\x1b[33m------------------------- backtrace -------------------------\x1b[0m"));
+	for (uint32_t i = 0; i < self->bt_len; i++) {
+		if (i > 0 && self->bt_buf[i].address == self->bt_buf[i - 1].address) {
+			break;
+		}
+		u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("#%u %p in %s@%p"), i, self->bt_buf[i].address, self->bt_buf[i].name, self->bt_buf[i].function);
 	}
-	return CRASH_MGR_RET_FAILED;
+
+	return CRASH_MGR_RET_OK;
+}
+
+
+static void crash_mgr_reboot(CrashMgr *self) {
+	/** @todo prepare for reboot here */
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("rebooting as requested --------->\n\n"));
+
+	vTaskDelay(1000);
+	*((unsigned long*)0xE000ED0C) = 0x05FA0004;
+	while (true) {
+		;
+	}
 }
 
 
@@ -197,28 +326,52 @@ static void crash_mgr_handler_task(void *p) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialised, dormant"));
 	while (true) {
 		vTaskSuspend(NULL);
-
 		/* The task is resumed HERE right after a crash occurs. It is the highest priority task
 		 * in the system and it is already scheduled to run. Do the following actions once
 		 * and then suspend itself back. */
 
 		/* Disable interrupts first -> stop all unscheduled background tasks and data processing.
-		 * Coredump saving doesn't need interrupts working. */
+		 * Coredump saving doesn't need interrupts working. Reenable interrupts back.
+		 * The failed task is kept suspended. */
 		vPortEnterCritical();
 
-		prepare_coredump(self);
-		do_coredump(self, self->task, self->fault);
-		finish_coredump(self);
+		coredump_init(&self->coredump, self->work_buf, self->work_buf_size);
+		/* Dump user selected memory regions */
+		if (self->memdump_regions != NULL) {
+			for (const struct crash_mgr_region *r = self->memdump_regions; r->addr != NULL; r++) {
+				coredump_mem(&self->coredump, r->addr, r->size);
+			}
+		}
 
 		vTaskSuspend(self->task);
 		vPortExitCritical();
 
-		if (self->logdump_enabled) {
-			do_logdump(self, self->task, self->fault);
-		}
+		/* We may do a bit of logging when out of the critical section. */
+		crash_mgr_log_info(self, self->task, self->fault);
+		#if defined(CONFIG_CRASH_MGR_LOG_REGISTERS)
+			crash_mgr_log_registers(self, self->task, self->fault);
+		#endif
+		#if defined(CONFIG_CRASH_MGR_LOG_BACKTRACE)
+			crash_mgr_log_backtrace(self);
+		#endif
+
+		/* As an alternative to log output, dump info to the coredump too. */
+		coredump_fault_info(&self->coredump, self->task, self->fault);
+		#if defined(CONFIG_CRASH_MGR_DUMP_REGISTERS)
+			coredump_registers(&self->coredump, self->task, self->fault);
+		#endif
+		#if defined(CONFIG_CRASH_MGR_DUMP_BACKTRACE)
+			coredump_backtrace(&self->coredump, self->bt_buf, self->bt_len);
+		#endif
+
+		coredump_finish(&self->coredump);
 		if (self->coredump_fs != NULL) {
-			save_coredump(self);
+			coredump_save(&self->coredump, self->coredump_fs, self->coredump_filename);
 		}
+
+		#if defined(CONFIG_CRASH_MGR_REBOOT)
+			crash_mgr_reboot(&self);
+		#endif
 	}
 }
 
@@ -228,11 +381,9 @@ crash_mgr_ret_t crash_mgr_init(CrashMgr *self, size_t max_instance_size) {
 		/* Instance data doesn't fit even without the work buffer. */
 		return CRASH_MGR_RET_FAILED;
 	}
-	/* Pain the instance + working buffer. */
+	/* Paint the instance + working buffer. */
 	memset(self, 0x55, max_instance_size);
 	self->work_buf_size = max_instance_size - sizeof(CrashMgr);
-
-	self->logdump_enabled = true;
 
 	/* Enable fault handlers */
 	SCB_SHCSR |= SCB_SHCSR_USGFAULTENA | SCB_SHCSR_BUSFAULTENA | SCB_SHCSR_MEMFAULTENA;
@@ -271,6 +422,7 @@ crash_mgr_ret_t crash_mgr_enable_memdump(CrashMgr *self, const struct crash_mgr_
 		/* Save the offending task. */ \
 		crash_mgr->task = xTaskGetCurrentTaskHandle(); \
 		crash_mgr->fault = f; \
+		crash_mgr->bt_len = backtrace_unwind(crash_mgr->bt_buf, CRASH_MGR_BACKTRACE_SIZE); \
 		xTaskResumeFromISR(crash_mgr->handler_task); \
 		portYIELD(); \
 	} \
@@ -285,9 +437,11 @@ void usage_fault_handler(void) { crash_mgr_generic_handler(CRASH_MGR_FAULT_USAGE
 
 /* Simulated faults */
 crash_mgr_ret_t crash_mgr_invalid_instruction_fault(void) {
-	invalid_function_t invalid = (invalid_function_t)0xE0000000;
+	const uint32_t invalid_instruction = 0xe0000000UL;
+	invalid_function_t invalid = (invalid_function_t)&invalid_instruction;
 	return invalid();
 }
+
 
 crash_mgr_ret_t crash_mgr_hard_fault(void) {
 	if (*(uint32_t *)0x0 == 0x1) {
@@ -295,3 +449,7 @@ crash_mgr_ret_t crash_mgr_hard_fault(void) {
 	}
 	return CRASH_MGR_RET_FAILED;
 }
+
+
+
+

@@ -234,6 +234,50 @@ menu "System services"
 		bool "Crash manager and debug service"
 		default n
 
+	menu "Crash manager configuration"
+		depends on SERVICE_CRASH_MGR
+
+		config CRASH_MGR_COMP_HS_WINDOW_BITS
+			int "Heatshrink compressor window size (bits)"
+			default 8
+
+		config CRASH_MGR_COMP_HS_LOOKAHEAD_BITS
+			int "Heatshrink compressor lookahead size (bits)"
+			default 5
+
+		config CRASH_MGR_LOG_REGISTERS
+			bool "Log register values"
+			default y
+
+		config CRASH_MGR_DUMP_REGISTERS
+			bool "Include register values in coredump"
+			default y
+
+		config CRASH_MGR_ENABLE_BACKTRACE
+			bool "Enable backtrace support (includes unwind tables in the firmware image)"
+			default n
+
+		config CRASH_MGR_FUNCTION_NAMES
+			bool "Include function names in the firmware image (optional for backtrace support)"
+			default n
+
+		config CRASH_MGR_LOG_BACKTRACE
+			depends on CRASH_MGR_ENABLE_BACKTRACE
+			bool "Output backtrace to the log"
+			default y
+
+		config CRASH_MGR_DUMP_BACKTRACE
+			depends on CRASH_MGR_ENABLE_BACKTRACE
+			bool "Dump backtrace to coredump"
+			default y
+
+		config CRASH_MGR_REBOOT
+			bool "Reboot device after fault"
+			default y
+
+
+	endmenu
+
 	config SERVICE_CHAINLOADER
 		bool "Chainload another firmware image"
 		default n
