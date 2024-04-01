@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Crash manager and debug service
  *
@@ -27,9 +27,7 @@
  * instance of the crash manager if there is any at all. */
 CrashMgr *crash_mgr;
 
-static const char *fault_str[] = {"HARD", "BUS", "MEM", "USAGE"};
-
-
+static const char *fault_str[] = {"NMI", "HARD", "BUS", "MEM", "USAGE"};
 
 
 /***********************************************************************************************************************
@@ -186,6 +184,8 @@ crash_mgr_ret_t coredump_mem(CoreDump *self, uint8_t *buf, size_t size) {
 
 
 crash_mgr_ret_t coredump_task_list(CoreDump *self) {
+	(void)self;
+
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("dumping task list"));
 	/** @todo Iterate over all tasks/threads and get their TCB addresses and names. */
 
@@ -212,6 +212,9 @@ crash_mgr_ret_t coredump_fault_info(CoreDump *self, TaskHandle_t task, enum cras
 
 
 crash_mgr_ret_t coredump_registers(CoreDump *self, TaskHandle_t task, enum crash_mgr_fault fault) {
+	(void)self;
+	(void)fault;
+
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("dumping registers"));
 
 	cbor_encode_text_stringz(&self->encoder_map, "registers");
@@ -229,7 +232,13 @@ crash_mgr_ret_t coredump_registers(CoreDump *self, TaskHandle_t task, enum crash
 	cbor_encode_uint(&encoder_reg, sp[14]);
 	cbor_encode_text_stringz(&encoder_reg, "R12");
 	cbor_encode_uint(&encoder_reg, sp[13]);
-	/** @todo dump the rest */
+
+	cbor_encode_text_stringz(&encoder_reg, "CFSR");
+	cbor_encode_uint(&encoder_reg, SCB_CFSR);
+	cbor_encode_text_stringz(&encoder_reg, "HFSR");
+	cbor_encode_uint(&encoder_reg, SCB_HFSR);
+	cbor_encode_text_stringz(&encoder_reg, "BFAR");
+	cbor_encode_uint(&encoder_reg, SCB_BFAR);
 
 	cbor_encoder_close_container(&self->encoder_map, &encoder_reg);
 
@@ -238,7 +247,9 @@ crash_mgr_ret_t coredump_registers(CoreDump *self, TaskHandle_t task, enum crash
 
 
 crash_mgr_ret_t coredump_log(CoreDump *self) {
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("dumping log buffer content"));
+	(void)self;
+
+	u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("dumping log buffer content not implemented"));
 	/** @todo Dump the log ring buffer */
 
 	return CRASH_MGR_RET_OK;
@@ -246,6 +257,8 @@ crash_mgr_ret_t coredump_log(CoreDump *self) {
 
 
 crash_mgr_ret_t coredump_backtrace(CoreDump *self, backtrace_t *bt, size_t bt_len) {
+	(void)self;
+
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("dumping backtrace"));
 	for (uint32_t i = 0; i < bt_len; i++) {
 		if (i > 0 && bt[i].address == bt[i - 1].address) {
@@ -273,13 +286,17 @@ static crash_mgr_ret_t crash_mgr_log_info(CrashMgr *self, TaskHandle_t task, enu
 	vTaskGetInfo(task, &task_status, pdFALSE, eReady);
 
 	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("\x1b[33m--------------------- surprised pikachu in '%s', %s fault ---------------------\x1b[0m"), task_status.pcTaskName, fault_str[fault]);
-	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("SP = %0p, TCB = %0p, xPSR = %0p, PC = %0p, LR = %0p, R12 = %0p"), sp, task, sp[16], sp[15], sp[14], sp[13]);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("SP = %0p, TCB = %0p, xPSR = %0p, PC = %0p, LR = %0p"), sp, task, sp[16], sp[15], sp[14]);
+	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("CSFR = %0p, HFSR = %0p, BFAR = %0p"), SCB_CFSR, SCB_HFSR, SCB_BFAR);
 
 	return CRASH_MGR_RET_OK;
 }
 
 
 static crash_mgr_ret_t crash_mgr_log_registers(CrashMgr *self, TaskHandle_t task, enum crash_mgr_fault fault) {
+	(void)self;
+	(void)fault;
+
 	uint32_t *sp = *(uint32_t **)task;
 
 	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("\x1b[33m------------------------- registers -------------------------\x1b[0m"));
@@ -295,9 +312,6 @@ static crash_mgr_ret_t crash_mgr_log_registers(CrashMgr *self, TaskHandle_t task
 static crash_mgr_ret_t crash_mgr_log_backtrace(CrashMgr *self) {
 	u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("\x1b[33m------------------------- backtrace -------------------------\x1b[0m"));
 	for (uint32_t i = 0; i < self->bt_len; i++) {
-		if (i > 0 && self->bt_buf[i].address == self->bt_buf[i - 1].address) {
-			break;
-		}
 		u_log(system_log, LOG_TYPE_CRIT, U_LOG_MODULE_PREFIX("#%u %p in %s@%p"), i, self->bt_buf[i].address, self->bt_buf[i].name, self->bt_buf[i].function);
 	}
 
@@ -305,26 +319,47 @@ static crash_mgr_ret_t crash_mgr_log_backtrace(CrashMgr *self) {
 }
 
 
+static void crash_mgr_trim_backtrace(CrashMgr *self) {
+	for (uint32_t i = 0; i < self->bt_len; i++) {
+		if (i > 0 && self->bt_buf[i].address == self->bt_buf[i - 1].address) {
+			self->bt_len = i;
+			break;
+		}
+	}
+}
+
+
 static void crash_mgr_reboot(CrashMgr *self) {
+	(void)self;
 	/** @todo prepare for reboot here */
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("rebooting as requested --------->\n\n"));
 
+	/* Try to delay a bit to finish logging. This should be handled by a power manager service in the future. */
 	vTaskDelay(1000);
-	*((unsigned long*)0xE000ED0C) = 0x05FA0004;
+	SCB_AIRCR = 0x05FA0004;
+
+	/* Loop in the high priority handler task forewer. If reboot fails for any reason, watchdog manages it. */
 	while (true) {
 		;
 	}
 }
 
 
-/* The handler task is run with the highest priority in the system. Once unblocked it doesn't
- * allow other tasks to run until it finishes with core/log dumps and returns back to dormant state. */
+/***********************************************************************************************************************
+ * Handler task
+ *
+ * The handler task is run with the highest priority in the system. Once unblocked it doesn't allow other tasks
+ * to run until it finishes with core/log dumps and returns back to the dormant state.
+ **********************************************************************************************************************/
+
 static void crash_mgr_handler_task(void *p) {
 	CrashMgr *self = (CrashMgr *)p;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialised, dormant"));
 	while (true) {
+		/* We are fully prepared to catch faults. Enable their processing and wait for a crash. */
+		self->state = CRASH_MGR_STATE_READY;
 		vTaskSuspend(NULL);
 		/* The task is resumed HERE right after a crash occurs. It is the highest priority task
 		 * in the system and it is already scheduled to run. Do the following actions once
@@ -345,6 +380,8 @@ static void crash_mgr_handler_task(void *p) {
 
 		vTaskSuspend(self->task);
 		vPortExitCritical();
+
+		crash_mgr_trim_backtrace(self);
 
 		/* We may do a bit of logging when out of the critical section. */
 		crash_mgr_log_info(self, self->task, self->fault);
@@ -370,7 +407,7 @@ static void crash_mgr_handler_task(void *p) {
 		}
 
 		#if defined(CONFIG_CRASH_MGR_REBOOT)
-			crash_mgr_reboot(&self);
+			crash_mgr_reboot(self);
 		#endif
 	}
 }
@@ -388,7 +425,6 @@ crash_mgr_ret_t crash_mgr_init(CrashMgr *self, size_t max_instance_size) {
 	/* Enable fault handlers */
 	SCB_SHCSR |= SCB_SHCSR_USGFAULTENA | SCB_SHCSR_BUSFAULTENA | SCB_SHCSR_MEMFAULTENA;
 
-	self->state = CRASH_MGR_STATE_READY;
 	xTaskCreate(crash_mgr_handler_task, "crash-mgr", CRASH_MGR_TASK_STACK, self, configMAX_PRIORITIES - 1, &self->handler_task);
 
 	return CRASH_MGR_RET_OK;
@@ -429,17 +465,24 @@ crash_mgr_ret_t crash_mgr_enable_memdump(CrashMgr *self, const struct crash_mgr_
 
 
 /* Fault handlers */
+void nmi_handler(void)         { crash_mgr_generic_handler(CRASH_MGR_FAULT_NMI)   }
 void hard_fault_handler(void)  { crash_mgr_generic_handler(CRASH_MGR_FAULT_HARD)  }
 void mem_manage_handler(void)  { crash_mgr_generic_handler(CRASH_MGR_FAULT_MEM)   }
 void bus_fault_handler(void)   { crash_mgr_generic_handler(CRASH_MGR_FAULT_BUS)   }
 void usage_fault_handler(void) { crash_mgr_generic_handler(CRASH_MGR_FAULT_USAGE) }
 
 
-/* Simulated faults */
+/***********************************************************************************************************************
+ * Functions to simulate common faults
+ **********************************************************************************************************************/
+
+/** @todo Move to a dedicated crash/fault test suite (run as an applet). */
+
 crash_mgr_ret_t crash_mgr_invalid_instruction_fault(void) {
-	const uint32_t invalid_instruction = 0xe0000000UL;
-	invalid_function_t invalid = (invalid_function_t)&invalid_instruction;
-	return invalid();
+	uint32_t invalid_instruction = 0xe0000000UL;
+	invalid_function_t invalid = (invalid_function_t)((uint32_t)&invalid_instruction | 1UL);
+	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("executing instruction at %0p"), (uint32_t)invalid);
+	return (crash_mgr_ret_t)invalid();
 }
 
 
@@ -450,6 +493,11 @@ crash_mgr_ret_t crash_mgr_hard_fault(void) {
 	return CRASH_MGR_RET_FAILED;
 }
 
+
+crash_mgr_ret_t crash_mgr_nmi(void) {
+	SCB_ICSR |= SCB_ICSR_NMIPENDSET;
+	return CRASH_MGR_RET_FAILED;
+}
 
 
 
