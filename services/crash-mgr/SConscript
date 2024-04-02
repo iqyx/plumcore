@@ -4,3 +4,10 @@ Import("conf")
 
 if conf["SERVICE_CRASH_MGR"] == "y":
 	objs.append(env.Object(File(Glob("*.c"))))
+
+if conf["CRASH_MGR_ENABLE_BACKTRACE"] == "y":
+	env.Append(CFLAGS = ["-funwind-tables"])
+
+	if conf["CRASH_MGR_FUNCTION_NAMES"] == "y":
+		env.Append(CFLAGS = ["-mpoke-function-name"])
+
