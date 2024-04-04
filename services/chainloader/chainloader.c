@@ -226,7 +226,7 @@ chainloader_ret_t chainloader_set_elf(ChainLoader *self, uint8_t *buf, size_t si
 		#endif
 		#if defined(CONFIG_CHAINLOADER_DEBUG_LOGGING)
 			print_elf(&self->elf);
-			print_phdr(&self->elf);	
+			print_phdr(&self->elf);
 			print_shdr(&self->elf);
 		#endif
 		return CHAINLOADER_RET_OK;
@@ -264,13 +264,15 @@ chainloader_ret_t chainloader_boot(ChainLoader *self) {
 	vTaskDelay(100);
 
 	/* Suspend all tasks, disable all interrupts and clear all pending interrupts. */
+	taskENTER_CRITICAL();
+	systick_interrupt_disable();
 	vTaskSuspendAll();
 	for (uint32_t i = 0; i < 8; i++) {
 		NVIC_ICER(i) = 0xffffffffU;
 		NVIC_ICPR(i) = 0xffffffffU;
 	}
 
-	/* Switch back to MSP. */	
+	/* Switch back to MSP. */
 	__asm volatile("mov r0, #0");
 	__asm volatile("msr control, r0");
 	__asm volatile("isb");
