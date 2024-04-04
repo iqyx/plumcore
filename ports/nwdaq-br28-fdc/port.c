@@ -108,11 +108,11 @@
 
 Watchdog watchdog;
 Stm32Rtc rtc;
-Stm32Clock cmgr;
 
 /* This is somewhat mandatory as the main purpose of the device is to measure something.
  * Define only if the main application is specified to run. */
 #if !defined(CONFIG_APP_BL)
+	Stm32Clock cmgr;
 	Mcp3564 mcp;
 	Stm32Dac dac1_1;
 	Stm32Dac dac1_2;
@@ -124,6 +124,9 @@ Stm32Clock cmgr;
 
 
 int32_t port_early_init(void) {
+	iwdg_set_period_ms(8000);
+	iwdg_start();
+
 	rcc_periph_clock_enable(RCC_GPIOA);
 	rcc_periph_clock_enable(RCC_GPIOB);
 	rcc_periph_clock_enable(RCC_GPIOC);
@@ -595,12 +598,13 @@ int32_t port_init(void) {
 	port_setup_default_gpio();
 	console_init();
 
-	watchdog_init(&watchdog, 4000, 1);
+	#if !defined(CONFIG_APP_BL)
+		stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_LOW_PERF);
+		stm32_clock_wait_init_done(&cmgr);
+		stm32_rtc_init(&rtc);
+	#endif
 
-	stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_LOW_PERF);
-	stm32_clock_wait_init_done(&cmgr);
-
-	stm32_rtc_init(&rtc);
+	watchdog_init(&watchdog, 8000, 1);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CLOCK, &rtc.iface.interface, "rtc");
 	led_init();
 	nor_flash_init();
