@@ -71,6 +71,10 @@ menu "Low-level platform drivers"
 			bool "STM32 single-wire UART implementation"
 			default n
 
+		config SERVICE_STM32_CLOCK
+			bool "STM32 clock manager"
+			default y
+
 		source "services/stm32-uart/Kconfig"
 	endmenu
 endmenu
