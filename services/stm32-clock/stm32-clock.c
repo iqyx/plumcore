@@ -286,8 +286,10 @@ static void stm32_clock_step(Stm32Clock *self) {
 				set_state(self, STM32_CLOCK_STATE_LSE_OK);
 			} else {
 				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("enabling LSE"));
+				RCC_APB1ENR1 |= RCC_APB1ENR1_PWREN;
+				PWR_CR1 |= PWR_CR1_DBP;
 				RCC_BDCR |= RCC_BDCR_LSEON;
-				self->timeout_ms = 1000;
+				self->timeout_ms = 2000;
 				set_state(self, STM32_CLOCK_STATE_WAIT_LSE);
 			}
 			break;
