@@ -78,6 +78,7 @@
 #include <services/spi-flash/spi-flash.h>
 #include <services/flash-vol-static/flash-vol-static.h>
 #include <services/i2c-eeprom/i2c-eeprom.h>
+#include <services/stm32-clock/stm32-clock.h>
 #if !defined(CONFIG_APP_BL)
 	#include <services/adc-mcp3564/mcp3564.h>
 	#include <services/adc-composite/adc-composite.h>
@@ -107,6 +108,7 @@
 
 Watchdog watchdog;
 Stm32Rtc rtc;
+Stm32Clock cmgr;
 
 /* This is somewhat mandatory as the main purpose of the device is to measure something.
  * Define only if the main application is specified to run. */
@@ -121,39 +123,7 @@ Stm32Rtc rtc;
 #endif
 
 
-/* PLL configuration for a 19.2 MHz XTAL. We are using such a weird frequency to possibly
- * use it as a MCLK source for the Microchip ADC. MCU is run at 64 MHz because we need
- * a round clock for CAN-FD too (which, as it seems, conflicts with the ADC's MCLK requirements). */
-static const struct rcc_clock_scale hse_192_to_64 = {
-	.pllm = 6,
-	.plln = 40,
-	.pllp = 2,
-	.pllq = 2,
-	.pllr = 2,
-	.pll_source = RCC_PLLCFGR_PLLSRC_HSE,
-	.hpre = RCC_CFGR_HPRE_NODIV,
-	.ppre1 = RCC_CFGR_PPREx_NODIV,
-	.ppre2 = RCC_CFGR_PPREx_NODIV,
-	.vos_scale = PWR_SCALE1,
-	.boost = false,
-	.flash_config = FLASH_ACR_DCEN | FLASH_ACR_ICEN,
-	.flash_waitstates = 2,
-	.ahb_frequency  = 64e6,
-	.apb1_frequency = 64e6,
-	.apb2_frequency = 64e6,
-};
-
-
 int32_t port_early_init(void) {
-	rcc_osc_on(RCC_HSE);
-	rcc_wait_for_osc_ready(RCC_HSE);
-	rcc_clock_setup_pll(&hse_192_to_64);
-	rcc_set_sysclk_source(RCC_PLL);
-
-	rcc_osc_on(RCC_LSE);
-	/** @todo fails intermittently */
-	// rcc_wait_for_osc_ready(RCC_LSE);
-
 	rcc_periph_clock_enable(RCC_GPIOA);
 	rcc_periph_clock_enable(RCC_GPIOB);
 	rcc_periph_clock_enable(RCC_GPIOC);
@@ -483,6 +453,7 @@ static void nor_flash_init(void) {
 	static void can_init(void) {
 		rcc_periph_reset_pulse(RST_FDCAN);
 		fdcan_init(CAN1, FDCAN_CCCR_INIT_TIMEOUT);
+		/* Expect 64 MHz clock for the FDCAN peripheral */
 		fdcan_set_can(CAN1, false, false, true, false, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
 		fdcan_set_fdcan(CAN1, true, true, 1, 8, 5, (64e6 / (CAN_BITRATE) / 16) - 1);
 
@@ -534,7 +505,7 @@ void vPortSetupTimerInterrupt(void) {
 	/* Initialize systick interrupt for FreeRTOS. */
 	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
 	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
-	systick_set_reload(64e3 - 1);
+	systick_set_reload(16000UL - 1);
 	systick_interrupt_enable();
 	systick_counter_enable();
 }
@@ -623,6 +594,12 @@ static void port_setup_default_gpio(void) {
 int32_t port_init(void) {
 	port_setup_default_gpio();
 	console_init();
+
+	watchdog_init(&watchdog, 4000, 1);
+
+	stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_LOW_PERF);
+	stm32_clock_wait_init_done(&cmgr);
+
 	stm32_rtc_init(&rtc);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CLOCK, &rtc.iface.interface, "rtc");
 	led_init();
@@ -663,7 +640,7 @@ void tim2_isr(void) {
 void port_task_timer_init(void) {
 	rcc_periph_reset_pulse(RST_TIM6);
 	/* The timer should run at 1MHz */
-	timer_set_prescaler(TIM6, 64 - 1);
+	timer_set_prescaler(TIM6, 16 - 1);
 	timer_continuous_mode(TIM6);
 	timer_set_period(TIM6, UINT16_MAX);
 	timer_enable_counter(TIM6);
