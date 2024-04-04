@@ -330,7 +330,7 @@ int32_t module_loginmgr_init(struct module_loginmgr *loginmgr, const char *name,
 	lineedit_set_print_handler(&(loginmgr->le), module_loginmgr_print_handler, (void *)loginmgr);
 	lineedit_set_prompt_callback(&(loginmgr->le), module_loginmgr_prompt_callback, (void *)loginmgr);
 
-	xTaskCreate(loginmgr_task, "loginmgr_task", configMINIMAL_STACK_SIZE + 64, (void *)loginmgr, 1, NULL);
+	xTaskCreate(loginmgr_task, "loginmgr_task", configMINIMAL_STACK_SIZE + 96, (void *)loginmgr, 1, NULL);
 	u_log(system_log, LOG_TYPE_INFO, "init ok");
 
 	return MODULE_LOGINMGR_INIT_OK;
