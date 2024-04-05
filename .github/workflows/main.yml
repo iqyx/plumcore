@@ -1,0 +1,43 @@
+on:
+  push:
+    branches:
+    - develop
+    - feature/*
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build
+    runs-on: arm-none-eabi-gcc
+    steps:
+
+    - name: Setup arm-none-eabi-gcc path
+      run: echo "/opt/arm-gnu-toolchain-13.2.Rel1-aarch64-arm-none-eabi/bin" >> $GITHUB_PATH
+
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        set-safe-directory: false
+
+    - run: |
+        git fetch --prune --unshallow --no-recurse-submodules
+        git branch develop
+        git branch -u origin/develop develop
+        git branch master
+        git branch -u origin/master master
+
+    - name: Install python venv & dependencies
+      run: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install -r requirements.txt
+        echo PATH=$PATH >> $GITHUB_ENV
+        echo VIRTUAL_ENV=$VIRTUAL_ENV >> $GITHUB_ENV
+
+    - name: Select the port
+      run: defconfig config/nwdaq_br28_fdc_defconfig
+
+    - name: Compile
+      run: |
+        scons firmware
+

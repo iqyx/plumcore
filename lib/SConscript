@@ -33,12 +33,7 @@ def Git(self, url, dir=env['LIB_DEFAULT_REPO_DIR'], branch=None):
 		return
 
 	print(f'{Fore.BLUE}{Style.BRIGHT}Cloning git repo{Style.RESET_ALL} {url} into {dir}...')
-
-	try:
-		repo = git.Repo.clone_from(url, dir, progress=git_clone_progress(), branch=branch, depth=1)
-	except:
-		print(f'..{Fore.RED}{Style.BRIGHT}failed{Style.RESET_ALL}')
-		return
+	repo = git.Repo.clone_from(url, dir, progress=git_clone_progress(), branch=branch, depth=1)
 	stamp('.downloaded.stamp')
 
 
@@ -58,12 +53,7 @@ def Patch(self, ppatch, dir=env['LIB_DEFAULT_REPO_DIR']):
 		abspatch = os.path.abspath(p)
 		print(f'{Fore.BLUE}{Style.BRIGHT}Patching{Style.RESET_ALL} with {p}...')
 
-		try:
-			r.git.apply([str(abspatch)])
-
-		except git.GitCommandError:
-			print(f'..{Fore.RED}{Style.BRIGHT}failed{Style.RESET_ALL}')
-			return
+		r.git.apply([str(abspatch)])
 
 	stamp('.patched.stamp')
 
@@ -78,7 +68,7 @@ def Make(self, target, cwd='.'):
 
 	r = subprocess.run(['make', target], cwd=str(cwd), stdout=subprocess.PIPE)
 	print(r.stdout.decode())
-	
+
 	stamp('.compiled.stamp')
 
 env.AddMethod(Make)
