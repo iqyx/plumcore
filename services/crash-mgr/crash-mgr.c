@@ -15,6 +15,10 @@
 #include <main.h>
 #include <libopencm3/cm3/scb.h>
 #include <libopencm3/cm3/nvic.h>
+#include <libopencm3/stm32/iwdg.h>
+#include <libopencm3/stm32/gpio.h>
+#include <libopencm3/stm32/rcc.h>
+
 #include <cbor.h>
 #include "backtrace.h"
 
@@ -93,6 +97,10 @@ crash_mgr_ret_t coredump_save(CoreDump *self, Fs *fs, const char *filename) {
 	}
 	size_t written = 0;
 	fs->vmt->write(fs, &f, self->work_buf, cbor_len, &written);
+	/* SPIFFS workaround, writing sometimes fail. */
+	if (written == 0) {
+		fs->vmt->write(fs, &f, self->work_buf, cbor_len, &written);
+	}
 	fs->vmt->close(fs, &f);
 
 	if (written == cbor_len) {
@@ -130,6 +138,10 @@ crash_mgr_ret_t coredump_mem(CoreDump *self, uint8_t *buf, size_t size) {
 
 	/* Process the whole region */
 	while (size) {
+		/* Reset the watchdog. */
+		/** @todo remove STM32 dependency */
+		IWDG_KR = IWDG_KR_RESET;
+
 		/* Feed the compressor state machine with some bytes first. */
 		size_t sink_size;
 		HSE_sink_res sres = heatshrink_encoder_sink(self->hse, buf, size, &sink_size);
@@ -465,7 +477,12 @@ crash_mgr_ret_t crash_mgr_enable_memdump(CrashMgr *self, const struct crash_mgr_
 
 
 /* Fault handlers */
-void nmi_handler(void)         { crash_mgr_generic_handler(CRASH_MGR_FAULT_NMI)   }
+void nmi_handler(void)         {
+	/* NMI is (among others) caused by the clock security system. Clear the flag to avoid
+	 * calling the handler in a loop. */
+	RCC_CICR |= RCC_CICR_CSSC; \
+	crash_mgr_generic_handler(CRASH_MGR_FAULT_NMI)
+}
 void hard_fault_handler(void)  { crash_mgr_generic_handler(CRASH_MGR_FAULT_HARD)  }
 void mem_manage_handler(void)  { crash_mgr_generic_handler(CRASH_MGR_FAULT_MEM)   }
 void bus_fault_handler(void)   { crash_mgr_generic_handler(CRASH_MGR_FAULT_BUS)   }
