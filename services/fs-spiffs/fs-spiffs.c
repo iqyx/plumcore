@@ -88,7 +88,7 @@ static void fs_spiffs_check_callback(struct spiffs_t *context, spiffs_check_type
                         if (u_assert(fs_spiffs->state == FS_SPIFFS_STATE_MOUNTED)) { \
                         	return FS_RET_FAILED; \
                         } \
-			SPIFFS_clearerr(&fs_spiffs->spiffs); 
+			SPIFFS_clearerr(&fs_spiffs->spiffs);
 
 #define FS_CHECK_ERRNO  if (SPIFFS_errno(&fs_spiffs->spiffs) != 0) { \
                         	return FS_RET_FAILED; \
@@ -143,7 +143,10 @@ static fs_ret_t fs_spiffs_fs_rename(Fs *self, const char *old_path, const char *
 
 static fs_ret_t fs_spiffs_fs_read(Fs *self, File *f, void *buf, size_t len, size_t *read) {
 	FS_IMPL_HEADER
-	size_t r = SPIFFS_read(&fs_spiffs->spiffs, (spiffs_file)f->handle, buf, len);
+	int32_t r = SPIFFS_read(&fs_spiffs->spiffs, (spiffs_file)f->handle, buf, len);
+	if (r == -1) {
+		return FS_RET_FAILED;
+	}
 	if (read != NULL) {
 		*read = r;
 	}
@@ -154,7 +157,10 @@ static fs_ret_t fs_spiffs_fs_read(Fs *self, File *f, void *buf, size_t len, size
 
 static fs_ret_t fs_spiffs_fs_write(Fs *self, File *f, const void *buf, size_t len, size_t *written) {
 	FS_IMPL_HEADER
-	size_t w = SPIFFS_write(&fs_spiffs->spiffs, (spiffs_file)f->handle, buf, len);
+	int32_t w = SPIFFS_write(&fs_spiffs->spiffs, (spiffs_file)f->handle, buf, len);
+	if (w == -1) {
+		return FS_RET_FAILED;
+	}
 	if (written != NULL) {
 		*written = w;
 	}
