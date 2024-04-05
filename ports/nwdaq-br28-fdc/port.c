@@ -160,17 +160,17 @@ int32_t port_early_init(void) {
 Stm32Uart uart2;
 static void console_init(void) {
 	/* Set the corresponding GPIO to alternate mode and enable USART2 clock. */
-	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO2 | GPIO3);
+	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO2 | GPIO3);
 	gpio_set_output_options(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO2 | GPIO3);
 	gpio_set_af(GPIOA, GPIO_AF7, GPIO2 | GPIO3);
 	rcc_periph_clock_enable(RCC_USART2);
 
-	nvic_enable_irq(NVIC_USART2_IRQ);
-	nvic_set_priority(NVIC_USART2_IRQ, 7 * 16);
-
 	/* Initialise and configure the UART */
 	stm32_uart_init(&uart2, USART2);
 	uart2.uart.vmt->set_bitrate(&uart2.uart, CONFIG_NWDAQ_BR28_FDC_CONSOLE_SPEED);
+
+	nvic_enable_irq(NVIC_USART2_IRQ);
+	nvic_set_priority(NVIC_USART2_IRQ, 7 * 16);
 
 	/* Advertise the console stream output and set it as default for log output. */
 	Stream *console = &uart2.stream;
