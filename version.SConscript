@@ -30,7 +30,7 @@ if str(repo.head.ref)[:8] == "feature/":
 	v = dev_tag + "-" + dev_feature + ".%s" % commits_from_develop
 
 
-if repo.head.ref == repo.heads.master:
+if str(repo.head.ref) == "master":
 	v = str(next((tag for tag in repo.tags if tag.commit == repo.head.commit), "0.0.0"))
 
 
