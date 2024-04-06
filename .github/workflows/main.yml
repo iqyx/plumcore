@@ -9,6 +9,15 @@ jobs:
   build:
     name: build
     runs-on: arm-none-eabi-gcc
+
+    strategy:
+      matrix:
+        port:
+        - name: nwdaq_br28_fdc
+          target: firmware-sign
+        - name: nwdaq_br28_fdc_bl
+          target: firmware
+
     steps:
 
     - name: Setup arm-none-eabi-gcc path
@@ -30,10 +39,22 @@ jobs:
         echo PATH=$PATH >> $GITHUB_ENV
         echo VIRTUAL_ENV=$VIRTUAL_ENV >> $GITHUB_ENV
 
+    - name: Create default ELF signing key
+      run: |
+        python -c "import hashlib; import base64; print(base64.b64encode(hashlib.sha256(b'default-key').digest()).decode('utf-8'))" > elfsign.key
+        scripts/elfsign.py --sk elfsign.key -p elfsign.pub
+
     - name: Select the port
-      run: defconfig config/nwdaq_br28_fdc_defconfig
+      run: defconfig config/${{ matrix.port.name }}_defconfig
 
     - name: Compile
       run: |
-        scons firmware
+        scons ${{ matrix.port.target }}
 
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.port.name }}
+        path: |
+          bin/*
+          .config
