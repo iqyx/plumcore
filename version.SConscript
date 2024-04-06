@@ -21,7 +21,12 @@ if str(repo.head.ref)[:8] == "feature/":
 	dev_branch = str(repo.head.ref)
 	dev_feature = dev_branch[8:]
 	dev_tag = [str(tag)[:-4] for tag in repo.tags if str(tag)[-3:] == "dev"][-1]
-	commits_from_develop = len(list(repo.iter_commits("develop..." + dev_branch)))
+	try:
+		commits_from_develop = len(list(repo.iter_commits("develop..." + dev_branch)))
+	except:
+		# local develop branch doesn't exist (most probably)
+		commits_from_develop = len(list(repo.iter_commits("origin/develop..." + dev_branch)))
+
 	v = dev_tag + "-" + dev_feature + ".%s" % commits_from_develop
 
 
