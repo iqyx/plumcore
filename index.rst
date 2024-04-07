@@ -15,6 +15,7 @@ as a name for a totally unrelated project.
 .. toctree::
 	:numbered:
 
+	README
 	doc/introduction
 	doc/concepts
 	microkernel/index
