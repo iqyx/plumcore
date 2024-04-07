@@ -1,3 +1,5 @@
+name: Compile App & BL for all supported ports
+
 on:
   push:
     branches:

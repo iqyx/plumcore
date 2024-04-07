@@ -16,8 +16,8 @@ templates_path = ['templates']
 exclude_patterns = ['build', 'static', 'lib/duktape', 'lib/zfp']
 
 html_theme = 'sphinx_rtd_theme'
-html_title = 'plumCore IoT/DAQ framework'
-html_logo = 'static/plum.png'
+html_title = 'plumCore DAQ framework'
+html_logo = 'static/plum.svg'
 html_theme_options = {
 	'globaltoc_collapse': False,
  	'globaltoc_includehidden': True,
