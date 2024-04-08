@@ -9,3 +9,8 @@ protobuf==5.26.1
 SCons==4.1.0.post1
 tqdm==4.57.0
 colorama==0.4.4
+sphinx==7.2.6
+sphinx-rtd-theme==2.0.0
+rst2pdf==0.101
+sphinxcontrib-contentui==0.2.5
+sphinx-toolbox==3.5.0
