@@ -1,10 +1,10 @@
-.. image:: doc/static/header.png
+.. image:: doc/_static/header.png
 	:width: 100%
 	:alt: header image
 
 .. raw:: html
 
-   <h1><img style="position: relative; top: -0.15em; height: 1em; width: auto;" src="doc/static/plum.svg"> The plumCore DAQ framework</h1>
+   <h1><img style="position: relative; top: -0.15em; height: 1em; width: auto;" src="doc/_static/plum.svg"> The plumCore DAQ framework</h1>
 
 
 A modular framework for data logging and remote data acquisition.

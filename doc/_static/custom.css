@@ -1,12 +1,12 @@
-
-@page { 
-	size: auto A4 portrait;
-	margin-top: 20mm;
-	margin-bottom: 20mm;
+@media print {
+	@page {
+		size: auto A4 portrait;
+		margin-top: 20mm;
+		margin-bottom: 20mm;
+	}
 }
 
 h1 {
-	page-break-after: always;
 }
 
 .align-left {
