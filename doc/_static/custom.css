@@ -6,7 +6,18 @@
 	}
 }
 
-h1 {
+h1::before {
+	content: '';
+	background: url('header.png');
+	background-size: contain;
+	background-repeat: repeat-x;
+	height: 4em;
+	width: 100%;
+	display: inline-block;
+}
+
+p + section h2, h1 + section h2 {
+	break-before: page;
 }
 
 .align-left {

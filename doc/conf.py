@@ -39,7 +39,7 @@ rst_prolog = """
 
 .. |plum| raw:: html
 
-   <img style="position: relative; top: -0.15em; height: 1em; width: auto;" src="_static/plum.svg">
+   <img style="position: relative; top: -0.15em; height: 1em; width: auto;" src="/_static/plum.svg">
 
 .. role:: tag-button
 .. role:: material-icons

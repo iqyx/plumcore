@@ -1,8 +1,3 @@
-.. image:: doc/_static/header.png
-	:width: 100%
-	:alt: header image
-
-
 ====================================
 |plum| The plumCore DAQ framework
 ====================================
@@ -40,6 +35,7 @@ are not plumCore's target applications.
 	protocols/nbus/nbus
 	ports/index
 	doc/conceptual/conceptual
+	doc/code-structure
 	doc/coding-style
 
 
