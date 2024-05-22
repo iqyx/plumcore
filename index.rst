@@ -37,5 +37,6 @@ are not plumCore's target applications.
 	doc/conceptual/conceptual
 	doc/code-structure
 	doc/coding-style
+	doc/ep/ep
 
 
