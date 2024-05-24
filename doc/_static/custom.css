@@ -25,63 +25,14 @@ p + section h2, h1 + section h2 {
 }
 
 .wy-nav-content {
-	max-width: 100% !important;
+	max-width: 100%;
+}
+
+.logo {
+	height: 100px !important;
 }
 
 .wy-side-nav-search, .wy-nav-top {
 	background-color: #4e4a4a;
 }
-
-/*
-.md-tabs {
-	display: none;
-}
-
-.md-grid {
-	max-width: 100%;
-}
-
-.md-nav__link {
-	margin-top: 0;
-	padding-top: 0.5rem;
-}
-
-.md-nav__link:hover {
-	background-color: red;
-}
-
-.md-nav__item {
-	padding-left: 0;
-}
-
-.md-nav__item .md-nav__item {
-	padding-left: 0;
-}
-
-.md-nav__list > .md-nav__item > .md-nav__list a {
-	padding-left: 1rem;
-}
-
-.md-nav__list > .md-nav__item > .md-nav__list > .md-nav__item > .md-nav__list > .md-nav__item a {
-	padding-left: 2rem;
-}
-
-.md-sidebar--primary {
-	background-color: #444;
-	color: #ddd;
-}
-
-.md-nav__link[href^="#"] {
-	background-color: #ddd;
-	color: #444;
-}
-
-.md-sidebar--secondary {
-	margin-left: 100%;
-}
-
-.md-main__inner {
-	padding-top: 0;
-}
-*/
 

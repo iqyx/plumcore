@@ -1,7 +1,8 @@
 ===================================
-plumCore enhancement proposals
+Enhancement proposals
 ===================================
 
 .. toctree::
 
 	73c-login-manager.rst
+	2a9-object-store
