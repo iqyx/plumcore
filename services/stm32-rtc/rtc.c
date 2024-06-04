@@ -296,27 +296,7 @@ stm32_rtc_ret_t stm32_rtc_init(Stm32Rtc *self) {
 	/* Enable the peripheral and disable backup domain write protection. */
 	rcc_periph_clock_enable(RCC_PWR);
 
-	#if defined(STM32L4) || defined(STM32G4)
-		PWR_CR1 |= PWR_CR1_DBP;
-	#else
-		rcc_periph_clock_enable(RCC_RTC);
-		PWR_CR |= PWR_CR_DBP;
-	#endif
-
-	/* Enable LSE oscillator and wait for it to stabilize. */
-	RCC_BDCR |= RCC_BDCR_LSEON;
-	self->lse_available = false;
-	uint32_t timeout = 20;
-	while (timeout > 0) {
-		if (RCC_BDCR & RCC_BDCR_LSERDY) {
-			self->lse_available = true;
-			break;
-		}
-		vTaskDelay(100);
-		timeout--;
-	}
-
-	if (self->lse_available == false) {
+	if (!(RCC_BDCR & RCC_BDCR_LSERDY)) {
 		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("LSE oscillator is not available"));
 
 		/* Enable LSI. */
