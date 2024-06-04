@@ -156,8 +156,11 @@ app_ret_t app_init(App *self) {
 	adc_composite_set_vref_mux(&self->adc, &vref_mux);
 	adc_composite_set_clock(&self->adc, &rtc.clock);
 	adc_composite_set_device_temp(&self->adc, &pcb_temp.iface, "channel/temp");
+	adc_composite_init_config(&self->adc);
 
 	adc_composite_start_cont(&self->adc);
+
+	configlib_log_walk(&self->adc.root_conf.conf);
 
 	// mq_batch_init(&self->mq_batch_1, self->mq);
 	// mq_batch_start(&self->mq_batch_1, DTYPE_INT32, 32, "channel/1", "channel/batch/1");
@@ -168,6 +171,7 @@ app_ret_t app_init(App *self) {
 
 	// mq_sensor_source_init(&self->pcb_temp_source, &pcb_temp.iface, "sensor/pcb-temp", self->mq, &rtc.clock, 1000);
 
+/*
 	plog_packager_init(&self->raw_data_packager, self->mq);
 	plog_packager_add_filter(&self->raw_data_packager, "channel/#");
 	plog_packager_add_dst_mq(&self->raw_data_packager, "pkg/channel");
@@ -175,6 +179,7 @@ app_ret_t app_init(App *self) {
 	plog_packager_set_nonce(&self->raw_data_packager, (uint8_t *)"nonce", 5);
 	plog_packager_set_key(&self->raw_data_packager, (uint8_t *)"key", 3);
 	plog_packager_start(&self->raw_data_packager, 2048, 3072);
+*/
 
 	nbus_mq_init(&self->nbus_mq, self->mq, nbus_root_channel, "mq");
 	nbus_mq_start(&self->nbus_mq, "channel/#");

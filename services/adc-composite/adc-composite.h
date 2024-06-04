@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * High level composite ADC device
  *
- * Copyright (c) 2022, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2022-2024, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -17,6 +17,9 @@
 #include <services/adc-mcp3564/mcp3564.h>
 #include <interfaces/mq.h>
 #include <interfaces/clock.h>
+#include <interfaces/conf.h>
+#include "configlib.h"
+
 
 #define ADC_COMPOSITE_MAX_MUX 4
 
@@ -55,6 +58,11 @@ struct adc_composite_channel {
 	bool temp_compensation;
 	float tc_a;
 	float tc_b;
+
+	ConfiglibValue channel_conf;
+	ConfiglibValue gain_conf;
+	ConfiglibValue pregain_conf;
+
 };
 
 enum adc_composite_state {
@@ -110,6 +118,11 @@ typedef struct adc_composite {
 	Sensor *device_temp;
 	float temp_c;
 	const char *temp_topic;
+
+	ConfiglibValue root_conf;
+	ConfiglibValue exc_voltage_v_conf;
+	ConfiglibValue interval_ms_conf;
+	ConfiglibValue channels_conf;
 
 } AdcComposite;
 

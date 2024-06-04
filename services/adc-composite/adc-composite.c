@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * High level composite ADC device
  *
- * Copyright (c) 2022, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2022-2024, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -27,6 +27,15 @@
  * - zistit, preco nejde MQ sniff & spol
  * - overit, ze sa vysledky korektne presuvaju na MQ
  * - pridat agregator na vysledky na MQ, jedna hodnota raz za minutu
+ *
+ * 4.6.2024
+ * --------------
+ *
+ * When dealing with a calibration/settings/configuration split feature request, the following is becoming required:
+ * - split the channel configuration into static settings (channel names, hardware-dependent configuration
+ *   such as pregain, muxing configuration), channel settings (gain, ac excitation) and calibration coefficients
+ *   (offset compensation, gain compensation, temp compensation).
+ * - split ADC configuration into the same as ^
  */
 
 
@@ -126,6 +135,29 @@ err:
 	vTaskDelete(NULL);
 }
 
+
+adc_composite_ret_t adc_composite_init_config(AdcComposite *self) {
+
+	configlib_init(&self->root_conf, "root");
+
+	configlib_init(&self->interval_ms_conf, "interval_ms");
+	configlib_map(&self->interval_ms_conf, &self->interval_ms, CONF_U32);
+	configlib_append(&self->interval_ms_conf, &self->root_conf, CONF_DIR_NEXT);
+
+	configlib_init_map_append(&self->exc_voltage_v_conf, "exc_voltage_v", &self->exc_voltage_v, CONF_F, &self->root_conf, CONF_DIR_NEXT);
+	configlib_init_map_append(&self->channels_conf, "channels", NULL, CONF_SUBTREE, &self->root_conf, CONF_DIR_NEXT);
+
+	const struct adc_composite_channel *c = *(self->channels);
+	while (c->name != NULL) {
+		configlib_init_map_append(&c->channel_conf, c->name, NULL, CONF_SUBTREE, &self->channels_conf, CONF_DIR_CHILD);
+		configlib_init_map_append(&c->pregain_conf, "pregain", &c->pregain, CONF_F, &c->channel_conf, CONF_DIR_CHILD);
+		configlib_init_map_append(&c->gain_conf, "gain", &c->gain, CONF_F, &c->channel_conf, CONF_DIR_CHILD);
+
+		c++;
+	}
+
+	return ADC_COMPOSITE_RET_OK;
+}
 
 
 adc_composite_ret_t adc_composite_init(AdcComposite *self, Adc *adc, Mq *mq) {
