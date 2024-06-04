@@ -47,7 +47,8 @@ reaction, as usually seen in this case, is to press various keys until something
 of the least surprise*, ``loginmgr`` *must not* react to cat-typing when not logged in. It *should* greet the user
 appropriately, wait for the user to calm down (eg. wait until the typing stops) and display the prompt afterwards.
 Optionally, it *can* detect noise on the receive line when the reception of characters wouldn't stop and display
-an appropriate warning to the user.
+an appropriate warning to the user. The behaviour should be bound to a configurable timer to greet the user
+if they try to access the console again.
 
 
 Wakelock
