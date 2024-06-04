@@ -27,6 +27,7 @@ are not plumCore's target applications.
 
 	doc/introduction
 	doc/concepts
+	doc/getting-started
 	microkernel/index
 	services/services
 	services/interfaces/index
@@ -37,5 +38,6 @@ are not plumCore's target applications.
 	doc/conceptual/conceptual
 	doc/code-structure
 	doc/coding-style
+	doc/ep/ep
 
 

@@ -1,15 +1,15 @@
 import sphinx_rtd_theme
 
-project = 'plumCore IoT/DAQ framework'
-copyright = '2021, Marek Koza'
+project = 'plumCore DAQ framework'
+copyright = '2021-2024, Marek Koza'
 author = 'Marek Koza'
 extensions = [
 	'sphinx_rtd_theme',
-	'rst2pdf.pdfbuilder',
 	'sphinxcontrib.contentui',
 	'sphinx_toolbox.confval',
 	'sphinx_toolbox.code',
 ]
+default_role = 'any'
 numfig = True
 autosectionlabel_prefix_document = True
 templates_path = ['templates']
@@ -29,7 +29,6 @@ html_static_path = ['_static']
 html_use_index = True
 html_css_files = [
 	'custom.css',
-	'https://fonts.googleapis.com/css2?family=Material+Icons',
 ]
 
 rst_prolog = """
@@ -44,4 +43,3 @@ rst_prolog = """
 .. role:: tag-button
 .. role:: material-icons
 """
-
