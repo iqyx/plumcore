@@ -27,6 +27,7 @@ are not plumCore's target applications.
 
 	doc/introduction
 	doc/concepts
+	doc/getting-started
 	microkernel/index
 	services/services
 	services/interfaces/index
