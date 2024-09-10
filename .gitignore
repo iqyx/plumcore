@@ -17,8 +17,12 @@
 *.key
 *.map
 
-# ignore encryption and signing keys
+# ignore the whole bin/ directory containing only generated outputs
+bin
+
+# ignore encryption and signing keys, public too
 *.key
+*.pub
 
 version.h
 
@@ -34,6 +38,8 @@ config.h
 doc/build
 
 # ignore repositories with downloaded libraries
+# note: for in-tree libraries, add a .gitignore file in the
+# corresponding lib subdirectory and exclude sources with !src/
 lib/*/src
 
 # ignore stamps marking library source preparation steps
