@@ -15,6 +15,8 @@
 #include <libopencm3/stm32/gpio.h>
 #include <types/ndarray.h>
 #include <interfaces/servicelocator.h>
+#include <interfaces/conf.h>
+#include <configlib.h>
 
 #include "adc-composite.h"
 

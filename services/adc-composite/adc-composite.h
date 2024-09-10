@@ -18,7 +18,7 @@
 #include <interfaces/mq.h>
 #include <interfaces/clock.h>
 #include <interfaces/conf.h>
-#include "configlib.h"
+#include <configlib.h>
 
 
 #define ADC_COMPOSITE_MAX_MUX 4

@@ -65,3 +65,7 @@ config LIB_LITTLEFS
 config LIB_BLAKE2S_MICRO
 	bool "blake2s-micro library"
 	default n
+
+config LIB_PLUMCORE_CONFIGLIB
+	bool "plumCore configuration library/helpers"
+	default y
