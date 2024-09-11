@@ -125,7 +125,7 @@ struct conf_vmt {
 	 */
 	conf_ret_t (*create)(Conf *self, const char *name, Conf **new);
 
-	conf_ret_t (*stat)(Conf *self, const char **name, enum conf_type *type);
+	conf_ret_t (*stat)(Conf *self, const char **name, enum conf_type *type, enum conf_flag *flags);
 
 	/**
 	 * @brief Destroy/delete the current value
