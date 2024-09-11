@@ -23,6 +23,9 @@ typedef struct {
 	Stream stream;
 	uint32_t port;
 
+	uint32_t de_port;
+	uint32_t de_pin;
+
 	StreamBufferHandle_t rxbuf;
 	StreamBufferHandle_t txbuf;
 	SemaphoreHandle_t txmutex;
@@ -33,3 +36,4 @@ typedef struct {
 stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, uint32_t port);
 stm32_uart_ret_t stm32_uart_free(Stm32Uart *self);
 stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self);
+stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, uint32_t de_port, uint32_t de_pin);

@@ -13,6 +13,7 @@
 #include <main.h>
 #include <interfaces/stream.h>
 #include <interfaces/uart.h>
+#include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/usart.h>
 #include <libopencm3/cm3/nvic.h>
 
@@ -112,7 +113,7 @@ static const struct uart_vmt uart_vmt = {
 	.set_bitrate = uart_set_bitrate,
 	.set_databits = uart_set_databits,
 	.set_stopbits = uart_set_stopbits,
-	.set_parity = uart_set_parity
+	.set_parity = uart_set_parity,
 };
 
 
@@ -144,6 +145,12 @@ static stream_ret_t stream_write(Stream *self, const void *buf, size_t size) {
 		size_t to_write = min_size(CONFIG_SERVICE_STM32_UART_TXBUF_SIZE / 2, size);
 
 		size_t written = xStreamBufferSend(stm32_uart->txbuf, buf, to_write, 0);
+
+		/* Assert driver enable if set. */
+		if (stm32_uart->de_port != 0) {
+			gpio_set(stm32_uart->de_port, stm32_uart->de_pin);
+		}
+
 		/* And send the data. It is important TXEIE remains set. */
 		USART_CR1(stm32_uart->port) |= USART_CR1_TXEIE;
 
@@ -198,6 +205,12 @@ static stream_ret_t stream_write_timeout(Stream *self, const void *buf, size_t s
 		xSemaphoreGive(stm32_uart->txmutex);
 		return STREAM_RET_TIMEOUT;
 	}
+
+	/* Assert driver enable if set. */
+	if (stm32_uart->de_port != 0) {
+		gpio_set(stm32_uart->de_port, stm32_uart->de_pin);
+	}
+
 	/* Enable TX empty interrupt to send the data. */
 	USART_CR1(stm32_uart->port) |= USART_CR1_TXEIE;
 
@@ -280,6 +293,7 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, uint32_t port) {
 	/* Enable RX not empty interrupt to receive data. */
 	USART_CR3(self->port) |= USART_CR3_OVRDIS;
 	USART_CR1(self->port) |= USART_CR1_RXNEIE;
+	USART_CR1(self->port) |= USART_CR1_TCIE;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("port %p initialized"), port);
 	return STM32_UART_RET_OK;
@@ -324,6 +338,15 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 		}
 	}
 
+	if ((USART_ISR(self->port) & USART_ISR_TC)) {
+		/* De-assert driver enable if set. */
+		if (self->de_port != 0) {
+			gpio_clear(self->de_port, self->de_pin);
+		}
+
+		USART_ICR(self->port) |= USART_ICR_TCCF;
+	}
+
 	if ((USART_ISR(self->port) & USART_ISR_RXNE)) {
 		uint8_t b = usart_recv(self->port);
 
@@ -342,3 +365,10 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 	return STM32_UART_RET_OK;
 }
 
+
+stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, uint32_t de_port, uint32_t de_pin) {
+	self->de_port = de_port;
+	self->de_pin = de_pin;
+
+	return STM32_UART_RET_OK;
+}
