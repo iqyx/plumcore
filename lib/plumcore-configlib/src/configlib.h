@@ -32,15 +32,19 @@ typedef struct configlib_value {
 	ConfiglibValue *parent;
 
 	void *var;
+	size_t *len;
+	size_t size;
+
 	const char *name;
 	enum conf_type type;
-
+	enum conf_flag flags;
 
 } ConfiglibValue;
 
 
 configlib_ret_t configlib_init(ConfiglibValue *self, const char *name);
 configlib_ret_t configlib_map(ConfiglibValue *self, void *var, enum conf_type type);
+configlib_ret_t configlib_map_string(ConfiglibValue *self, char *str, size_t size);
 configlib_ret_t configlib_append(ConfiglibValue *self, ConfiglibValue *parent, enum conf_dir dir);
 
 

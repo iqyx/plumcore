@@ -71,12 +71,12 @@ static conf_ret_t configlib_walk(Conf *self, enum conf_dir direction, Conf **nex
 }
 
 
-static conf_ret_t configlib_stat(Conf *self, const char **name, enum conf_type *type) {
+static conf_ret_t configlib_stat(Conf *self, const char **name, enum conf_type *type, enum conf_flag *flags) {
 	ConfiglibValue *value = self->parent;
 
 	*name = value->name;
 	*type = value->type;
-	/** @todo add flags */
+	*flags = value->flags;
 
 	return CONF_RET_OK;
 }
@@ -111,6 +111,15 @@ configlib_ret_t configlib_init(ConfiglibValue *self, const char *name) {
 configlib_ret_t configlib_map(ConfiglibValue *self, void *var, enum conf_type type) {
 	self->var = var;
 	self->type = type;
+
+	return CONFIGLIB_RET_OK;
+}
+
+
+configlib_ret_t configlib_map_string(ConfiglibValue *self, char *str, size_t size) {
+	self->var = str;
+	self->size = size;
+	self->type = CONF_STR;
 
 	return CONFIGLIB_RET_OK;
 }
@@ -172,7 +181,8 @@ static void configlib_log_walk_subtree(Conf *self, uint32_t indent) {
 
 		const char *conf_name = NULL;
 		enum conf_type conf_type = CONF_SUBTREE;
-		self->vmt->stat(self, &conf_name, &conf_type);
+		enum conf_flag conf_flags;
+		self->vmt->stat(self, &conf_name, &conf_type, &conf_flags);
 
 		union conf_val val = {0};
 		self->vmt->read(self, &val);
