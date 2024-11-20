@@ -28,6 +28,7 @@
 static power_ret_t generic_power_enable(Power *self, bool enable) {
 	GenericPower *power = (GenericPower *)self->parent;
 
+	power->enabled = enable;
 	if (enable != power->enable_invert) {
 		gpio_set(power->locm3_enable_port, power->locm3_enable_pin);
 	} else {

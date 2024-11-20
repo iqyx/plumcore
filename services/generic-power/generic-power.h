@@ -32,6 +32,7 @@ typedef struct generic_power {
 	Dac *dac_p;
 	Dac *dac_m;
 
+	bool enabled;
 
 	/* Host power interface instance. */
 	Power power;
