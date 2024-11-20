@@ -29,5 +29,11 @@ if not app_name:
 
 if app_ext_dir:
 	SConscript(app_ext_dir + "/SConscript")
+
+
 else:
 	SConscript(app_name + "/SConscript")
+	for d in next(os.walk(app_name + "/applets/"))[1]:
+		f = os.path.join(app_name, 'applets', d, "SConscript")
+		if os.path.isfile(f):
+			SConscript(f)
