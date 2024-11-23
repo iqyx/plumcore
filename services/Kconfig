@@ -241,6 +241,7 @@ menu "System services"
 	config SERVICE_CRASH_MGR
 		bool "Crash manager and debug service"
 		default n
+		select LIB_HEATSHRINK
 
 	menu "Crash manager configuration"
 		depends on SERVICE_CRASH_MGR
