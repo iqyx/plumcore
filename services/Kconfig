@@ -204,6 +204,10 @@ menu "High level device drivers"
 		depends on SERVICE_STM32_SPI
 		bool "ADI ADXL355 3 axis accelerometer"
 		default n
+
+	config SERVICE_LCD_ST7586
+		bool "ST7586 LCD driver"
+		default n
 endmenu
 
 menu "Filesystem and memory management services"
