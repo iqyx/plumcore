@@ -65,6 +65,7 @@ if conf["OUTPUT_FILE_VERSION_SUFFIX"] == "y":
 	env["PORTFILE"] += "-" + env["VERSION"]
 
 # Must be included beforehand, it defines the toolchain used
+SConscript("ports/SConscript")
 SConscript("platforms/SConscript")
 
 env["CC"] = "%s-gcc" % env["TOOLCHAIN"]
@@ -73,7 +74,7 @@ env["AR"] = "%s-ar" % env["TOOLCHAIN"]
 env["AS"] = "%s-as" % env["TOOLCHAIN"]
 env["LD"] = "%s-gcc" % env["TOOLCHAIN"]
 env["NM"] = "%s-nm" % env["TOOLCHAIN"]
-env["GDB"] = "%s-gdb" % env["TOOLCHAIN"]
+env["GDB"] = "gdb-multiarch"
 env["OBJCOPY"] = "%s-objcopy" % env["TOOLCHAIN"]
 env["OBJDUMP"] = "%s-objdump" % env["TOOLCHAIN"]
 env["SIZE"] = "%s-size" % env["TOOLCHAIN"]
@@ -94,7 +95,6 @@ objs.append(env.Object(source = [
 	File(Glob("hal/interfaces/*.c")),
 ]))
 
-SConscript("ports/SConscript")
 SConscript("doc.SConscript")
 SConscript("applications/SConscript")
 SConscript("microkernel/freertos/SConscript")
@@ -112,14 +112,7 @@ env.Append(CPPPATH = [Dir(".")])
 
 env.Append(LINKFLAGS = [
 	env["CFLAGS"],
-	"--static",
-	"-nostartfiles",
-	"--specs=nano.specs",
-	"-T", env["LDSCRIPT"],
 	"-Wl,-Map=%s.map" % env["PORTFILE"],
-	"-Wl,--gc-sections",
-	# "-n",
-	"-Wl,-z,max-page-size=0x100",
 ])
 
 
@@ -129,7 +122,7 @@ if conf["FW_IMAGE_ELF"] == "y":
 
 if conf["ELF_IMAGE_XIP"] == "y":
 	env["LOAD_ADDRESS"] = int(conf["ELF_IMAGE_LOAD_ADDRESS"], 0) + 0x100
-	
+
 env.Append(LINKFLAGS = [
 	"-Wl,--defsym=LOAD_ADDRESS=%s" % env["LOAD_ADDRESS"],
 ])
