@@ -5,7 +5,7 @@
 #include "app.h"
 #include <base64.h>
 
-#define MODULE_NAME "bootloader"
+#define MODULE_NAME "bl"
 
 
 /* String representation of bootloader states. Ordering must be the same
@@ -62,7 +62,7 @@ static app_ret_t bl_step(App *self) {
 				bl_set_state(self, BL_STATE_ALL_FAILED);
 				break;
 			}
-			
+
 			if (chainloader_check_signature(&self->chainloader, pubkey) == CHAINLOADER_RET_OK) {
 				bl_set_state(self, BL_STATE_BOOT);
 			} else {
