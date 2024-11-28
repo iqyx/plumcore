@@ -71,7 +71,7 @@ endchoice
 
 
 # Applets are short running application or scripts usually with
-# user interraction (CLI, network)
+# user interaction (CLI, network)
 menu "Applets"
 	source "applets/*/Kconfig"
 endmenu
