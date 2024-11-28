@@ -6,6 +6,24 @@
  * All rights reserved.
  */
 
+/**
+ * This is an extremely simple POC code of a LCD text console with part of the screen
+ * scrolling as the text is added. It understands some basic ANSI escape sequences to
+ * set bold and normal font and also some colors. Other than that, it most probably
+ * won't work for anything useful. There is a bunch of things which need to be
+ * addressed before considering this code at least alpha quality:
+ *
+ * - font rendering needs to be moved to a separate library, probably plumcore-grlib
+ * - basic geometric shapes too (drawing frames, "windows", buttons, etc.)
+ * - picture displaying too
+ * - tool for converting pictures to C arrays needs to be made more generic
+ * - making console header configurable and optional, it must be possible to
+ *   display custom text and logo
+ * - scroll are configurable
+ * - display size configurable (atm it only works with a 240x160 px display)
+ * - Fb mode agnostic (now it works only in 2bpp G2 mode)
+ */
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,7 +81,6 @@ const struct imdata im_plum = {
 /***************************************************************************************************
  * Stream interface API
  ***************************************************************************************************/
-
 
 static stream_ret_t stream_write(Stream *self, const void *buf, size_t size) {
 	if (u_assert(self != NULL) ||
@@ -240,6 +257,11 @@ fb_console_ret_t fb_console_scroll(FbConsole *self, size_t r_start, size_t r_end
 }
 
 
+/**
+ * @brief Render simple text on a framebuffer device
+ *
+ * @todo move to plumcore-grlib library
+ */
 fb_ret_t fb_text(Fb *self, const char *text, size_t posx, size_t posy, size_t *advance, uint8_t color, const struct small_char *font) {
 	/** @todo handle the width properly */
 
@@ -269,6 +291,11 @@ fb_ret_t fb_text(Fb *self, const char *text, size_t posx, size_t posy, size_t *a
 }
 
 
+/**
+ * @brief Render simple uncompressed image on a framebuffer device
+ *
+ * @todo move to the plumcore-grlib library
+ */
 fb_ret_t fb_image(Fb *self, size_t posx, size_t posy, const struct imdata *data) {
 	for (size_t y = 0; y < data->h; y++) {
 		uint8_t d[60];
