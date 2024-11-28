@@ -396,6 +396,10 @@ menu "User interface services"
 		bool "Console login manager"
 		default n
 		select LIB_LINEEDIT
+
+	config SERVICE_FB_CONSOLE
+		bool "Simple text console on a framebuffer device"
+		default n
 endmenu
 
 menu "Communication server/client services"
