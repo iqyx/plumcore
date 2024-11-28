@@ -11,6 +11,9 @@
 #include <string.h>
 #include <stdio.h>
 
+/** @todo remove libopencm3 dependency */
+#include <libopencm3/stm32/gpio.h>
+
 #include <main.h>
 #include <interfaces/spi.h>
 
@@ -19,42 +22,6 @@
 #define MODULE_NAME "lcd-st7586"
 
 
-/***************************************************************************************************
- * Framebuffer interface API
- ***************************************************************************************************/
-
-
-//static const struct power_vmt generic_power_vmt = {
-	//.enable = generic_power_enable,
-	//.set_voltage = generic_power_set_voltage,
-//};
-
-
-/*
-static void lcd_send_spi(uint8_t data) {
-	spi_send8(SPI1, data);
-	spi_read8(SPI1);
-}
-
-
-static void lcd_write(uint8_t v) {
-	gpio_clear(LCD_CS_PORT, LCD_CS_PIN);
-	lcd_send_spi(v);
-	gpio_set(LCD_CS_PORT, LCD_CS_PIN);
-}
-
-
-static void lcd_write_buf(uint8_t *buf, size_t len) {
-	gpio_clear(LCD_CS_PORT, LCD_CS_PIN);
-	while (len) {
-		lcd_send_spi(*buf);
-		buf++;
-		len--;
-	}
-	gpio_set(LCD_CS_PORT, LCD_CS_PIN);
-}
-*/
-
 static lcd_st7586_ret_t lcd_reset(LcdSt7586 *self) {
 	gpio_set(self->reset_port, self->reset_pin);
 	vTaskDelay(10);
@@ -62,6 +29,8 @@ static lcd_st7586_ret_t lcd_reset(LcdSt7586 *self) {
 	vTaskDelay(10);
 	gpio_set(self->reset_port, self->reset_pin);
 	vTaskDelay(10);
+
+	return LCD_ST7586_RET_OK;
 }
 
 
@@ -71,6 +40,8 @@ static lcd_st7586_ret_t lcd_send_command(LcdSt7586 *self, uint8_t reg) {
 	self->spi->vmt->select(self->spi);
 	self->spi->vmt->send(self->spi, &reg, sizeof(reg));
 	self->spi->vmt->deselect(self->spi);
+
+	return LCD_ST7586_RET_OK;
 }
 
 
@@ -80,6 +51,8 @@ static lcd_st7586_ret_t lcd_send_data(LcdSt7586 *self, uint8_t reg) {
 	self->spi->vmt->select(self->spi);
 	self->spi->vmt->send(self->spi, &reg, sizeof(reg));
 	self->spi->vmt->deselect(self->spi);
+
+	return LCD_ST7586_RET_OK;
 }
 
 
@@ -89,6 +62,8 @@ static lcd_st7586_ret_t lcd_send_data_buf(LcdSt7586 *self, const uint8_t *buf, s
 	self->spi->vmt->select(self->spi);
 	self->spi->vmt->send(self->spi, buf, len);
 	self->spi->vmt->deselect(self->spi);
+
+	return LCD_ST7586_RET_OK;
 }
 
 
@@ -128,43 +103,97 @@ static lcd_st7586_ret_t lcd_init_controller(LcdSt7586 *self) {
         lcd_send_data(self, 0x00);
         lcd_send_data(self, 0x00);
         lcd_send_command(self, 0x9F);
-//      display_white(); // Clear whole DDRAM by ¡°0¡± (384 x 160 x 2)
-
         lcd_send_command(self, 0x29); // Display ON
+
+	return LCD_ST7586_RET_OK;
 }
 
-/*
-static void lcd_black(void)  {
-	uint8_t data[121];
-	for (size_t i = 0; i < 120; i++) {
-		data[i] = 0xff;
-	}
 
-	lcd_send_command(0x2c);
-	for(uint32_t i = 0; i < 170; i++) {
-		lcd_send_data_buf(data, 121);
-	}
-}
-*/
-
-static void lcd_pattern(LcdSt7586 *self)  {
+static lcd_st7586_ret_t lcd_clear(LcdSt7586 *self)  {
 	uint8_t data[128] = {0};
 
 	lcd_send_command(self, 0x2c);
 	for(uint32_t i = 0; i < 160; i++) {
-		for (size_t j = 0; j < 128; j++) {
-			data[j] = ((i % 4) << 6) | ((i % 4) << 3);
-		}
 		lcd_send_data_buf(self, data, 128);
 	}
+
+	return LCD_ST7586_RET_OK;
 }
+
+
+/***************************************************************************************************
+ * Framebuffer interface API
+ ***************************************************************************************************/
+
+
+static fb_ret_t lcd_st7586_fb_write(Fb *self, size_t seek, const void *buf, size_t len, enum fb_mode mode) {
+	LcdSt7586 *lcd = self->parent;
+
+	/* No support for framebuffer conversion yet. */
+	if (mode != FB_MODE_G2) {
+		return FB_RET_FAILED;
+	}
+	if (seek >= lcd->dmem_size) {
+		return FB_RET_FAILED;
+	}
+	if ((seek + len) > lcd->dmem_size) {
+		return FB_RET_FAILED;
+	}
+	memcpy(lcd->dmem + seek, buf, len);
+
+	return FB_RET_OK;
+}
+
+
+static fb_ret_t lcd_st7586_fb_read(Fb *self, size_t seek, void *buf, size_t len, enum fb_mode mode) {
+	LcdSt7586 *lcd = self->parent;
+
+	/* No support for framebuffer conversion yet. */
+	if (mode != FB_MODE_G2) {
+		return FB_RET_FAILED;
+	}
+	if (seek >= lcd->dmem_size) {
+		return FB_RET_FAILED;
+	}
+	if ((seek + len) > lcd->dmem_size) {
+		return FB_RET_FAILED;
+	}
+	memcpy(buf, lcd->dmem + seek, len);
+
+	return FB_RET_OK;
+}
+
+
+static fb_ret_t lcd_st7586_fb_flush(Fb *self) {
+	LcdSt7586 *lcd = self->parent;
+	uint8_t *buf = lcd->dmem;
+
+	uint8_t data[128] = {0};
+	lcd_send_command(lcd, 0x2c);
+	for(uint32_t i = 0; i < 160; i++) {
+		for (size_t j = 0; j < 60 ; j++) {
+			uint8_t p = *buf;
+			data[8 + j * 2] = (p & 0xc0) >> 3 | (p & 0x30) << 2;
+			data[8 + j * 2 + 1] = (p & 0x0c) << 1 | (p & 0x03) << 6;
+			buf++;
+		}
+		lcd_send_data_buf(lcd, data, 128);
+	}
+
+	return FB_RET_OK;
+}
+
+
+static const struct fb_vmt lcd_st7586_fb_vmt = {
+	.write = lcd_st7586_fb_write,
+	.read = lcd_st7586_fb_read,
+	.flush = lcd_st7586_fb_flush,
+};
 
 
 lcd_st7586_ret_t lcd_st7586_init(LcdSt7586 *self, SpiDev *spi, uint32_t reset_port, uint32_t reset_pin, uint32_t cd_port, uint32_t cd_pin) {
 	memset(self, 0, sizeof(LcdSt7586));
 
-	//self->power.parent = self;
-	//self->power.vmt = &generic_power_vmt;
 	self->spi = spi;
 	self->reset_port = reset_port;
 	self->reset_pin = reset_pin;
@@ -172,7 +201,17 @@ lcd_st7586_ret_t lcd_st7586_init(LcdSt7586 *self, SpiDev *spi, uint32_t reset_po
 	self->cd_pin = cd_pin;
 
 	lcd_init_controller(self);
-	lcd_pattern(self);
+	lcd_clear(self);
+
+	/* Initialize the framebuffer memory */
+	self->dmem = calloc(240 * 160 / 4, sizeof(uint8_t));
+	if (self->dmem == NULL) {
+		return LCD_ST7586_RET_FAILED;
+	}
+	self->dmem_size = 240 * 160 / 4;
+
+	self->fb.parent = self;
+	self->fb.vmt = &lcd_st7586_fb_vmt;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 	return LCD_ST7586_RET_OK;

@@ -10,6 +10,7 @@
 
 #include <main.h>
 #include <interfaces/spi.h>
+#include <interfaces/fb.h>
 
 typedef enum  {
 	LCD_ST7586_RET_OK = 0,
@@ -24,6 +25,10 @@ typedef struct lcs_st7586 {
 	uint32_t cd_pin;
 
 	SpiDev *spi;
+	Fb fb;
+
+	uint8_t *dmem;
+	size_t dmem_size;
 
 } LcdSt7586;
 
