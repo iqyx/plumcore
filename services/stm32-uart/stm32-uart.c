@@ -162,28 +162,6 @@ static stream_ret_t stream_write(Stream *self, const void *buf, size_t size) {
 }
 
 
-static stream_ret_t stream_read(Stream *self, void *buf, size_t size, size_t *read) {
-	if (u_assert(self != NULL) ||
-	    u_assert(buf != NULL) ||
-	    u_assert(size > 0)) {
-		return STREAM_RET_FAILED;
-	}
-	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
-
-	size_t r = xStreamBufferReceive(stm32_uart->rxbuf, buf, size, portMAX_DELAY);
-	if (r == 0) {
-		return STREAM_RET_EOF;
-	} else if (r > 0) {
-		if (read != NULL) {
-			*read = r;
-		}
-		return STREAM_RET_OK;
-	}
-
-	return STREAM_RET_FAILED;
-}
-
-
 static stream_ret_t stream_write_timeout(Stream *self, const void *buf, size_t size, size_t *written, uint32_t timeout_ms) {
 	if (u_assert(self != NULL) ||
 	    u_assert(buf != NULL) ||
@@ -231,17 +209,54 @@ static stream_ret_t stream_read_timeout(Stream *self, void *buf, size_t size, si
 	}
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
 
-	size_t r = xStreamBufferReceive(stm32_uart->rxbuf, buf, size, pdMS_TO_TICKS(timeout_ms));
-	if (r == 0) {
-		return STREAM_RET_TIMEOUT;
-	} else if (r > 0) {
-		if (read != NULL) {
-			*read = r;
-		}
-		return STREAM_RET_OK;
+	/* Allow using constant for the max delay, see @p stream_read below. */
+	if (timeout_ms != portMAX_DELAY) {
+		timeout_ms = pdMS_TO_TICKS(timeout_ms);
 	}
 
-	return STREAM_RET_FAILED;
+	for (size_t i = 0; i < size; i++) {
+		uint8_t c;
+		/* Waiting with timeout for the first byte only. */
+		size_t r = xStreamBufferReceive(stm32_uart->rxbuf, &c, sizeof(c), i ? 0 : timeout_ms);
+
+		if (r == 0) {
+			if (read != NULL) {
+				*read = i;
+			}
+			return i ? STREAM_RET_OK : STREAM_RET_TIMEOUT;
+		} else {
+			if (c == 0x1b) {
+				/* Do not handle timeout. We are sure there is another byte ready
+				 * when ESC is received. Read the next byte after the ESC. */
+				r = xStreamBufferReceive(stm32_uart->rxbuf, &c, sizeof(c), timeout_ms);
+				((uint8_t *)buf)[i] = c;
+			} else if (c == 0x17) {
+				/* Handle end of block (signalled by RTO interrupt). */
+				if (read != NULL) {
+					*read = i;
+				}
+				return STREAM_RET_EOT;
+			} else {
+				((uint8_t *)buf)[i] = c;
+			}
+		}
+	}
+	if (read != NULL) {
+		*read = size;
+	}
+
+	return STREAM_RET_OK;
+}
+
+
+static stream_ret_t stream_read(Stream *self, void *buf, size_t size, size_t *read) {
+	if (u_assert(self != NULL) ||
+	    u_assert(buf != NULL) ||
+	    u_assert(size > 0)) {
+		return STREAM_RET_FAILED;
+	}
+
+	return stream_read_timeout(self, buf, size, read, portMAX_DELAY);
 }
 
 
@@ -351,9 +366,23 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 		uint8_t b = usart_recv(self->port);
 
 		BaseType_t woken = pdFALSE;
+		/* For any character < 0x20, prepend ESC */
+		if (b < 0x20) {
+			const uint8_t esc = 0x1b;
+			xStreamBufferSendFromISR(self->rxbuf, &esc, sizeof(esc), &woken);
+		}
 		/* Do not check the return value. If there was not enough space to save
 		 * the received byte, we have nothing else to do. */
 		xStreamBufferSendFromISR(self->rxbuf, &b, sizeof(b), &woken);
+		portYIELD_FROM_ISR(woken);
+	}
+
+	if (USART_ISR(self->port) & USART_ISR_RTOF) {
+		USART_ICR(self->port) |= USART_ICR_RTOCF;
+
+		BaseType_t woken = pdFALSE;
+		const uint8_t etb = 0x17;
+		xStreamBufferSendFromISR(self->rxbuf, &etb, sizeof(etb), &woken);
 		portYIELD_FROM_ISR(woken);
 	}
 
@@ -369,6 +398,24 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, uint32_t de_port, uint32_t de_pin) {
 	self->de_port = de_port;
 	self->de_pin = de_pin;
+
+	return STM32_UART_RET_OK;
+}
+
+
+stm32_uart_ret_t stm32_uart_set_rto(Stm32Uart *self, bool rto) {
+	self->enable_rto = rto;
+	if (rto) {
+		/* Set receiver timeout enable. 3 character time. */
+		USART_CR2(self->port) |= USART_CR2_RTOEN;
+		USART_RTOR(self->port) = 20L;
+
+		/* Enable timeout interrupt. */
+		USART_CR1(self->port) |= USART_CR1_RTOIE;
+	} else {
+		USART_CR2(self->port) &= ~USART_CR2_RTOEN;
+		USART_CR1(self->port) &= ~USART_CR1_RTOIE;
+	}
 
 	return STM32_UART_RET_OK;
 }
