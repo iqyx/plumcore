@@ -17,6 +17,7 @@ typedef enum stream_ret {
 	STREAM_RET_FAILED,
 	STREAM_RET_TIMEOUT,
 	STREAM_RET_EOF,
+	STREAM_RET_EOT,
 } stream_ret_t;
 
 typedef struct stream Stream;
@@ -76,7 +77,7 @@ struct stream_vmt {
 	 *         STREAM_RET_FAILED on error.
 	 */
 	stream_ret_t (*write_timeout)(Stream *self, const void *buf, size_t size, size_t *written, uint32_t timeout_ms);
-	
+
 	/**
 	 * @brief Read data from a stream until timeout occurs
 	 *
