@@ -21,6 +21,8 @@
 
 #define MODULE_NAME "stm32-uart"
 
+#define USART_CR1_FIFOEN (1 << 29)
+
 
 /*********************************************************************************************************************
  * Uart interface implementation
@@ -292,6 +294,10 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, uint32_t port) {
 	usart_set_stopbits(self->port, USART_STOPBITS_1);
 	usart_set_parity(self->port, USART_PARITY_NONE);
 	usart_set_flow_control(self->port, USART_FLOWCONTROL_NONE);
+
+	/* Enable FIFO mode */
+	USART_CR1(self->port) |= USART_CR1_FIFOEN;
+
 	usart_enable(self->port);
 
 	/* Allocate IPC primitives. */
@@ -304,6 +310,7 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, uint32_t port) {
 	if (self->txmutex == NULL) {
 		goto err;
 	}
+
 
 	/* Enable RX not empty interrupt to receive data. */
 	USART_CR3(self->port) |= USART_CR3_OVRDIS;
@@ -338,18 +345,18 @@ stm32_uart_ret_t stm32_uart_free(Stm32Uart *self) {
 
 
 stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
-	/** @TODO tested on L4 only */
+	BaseType_t woken = pdFALSE;
 
-	if ((USART_ISR(self->port) & USART_ISR_TXE)) {
+	while ((USART_ISR(self->port) & USART_ISR_TXE)) {
 		uint8_t b = 0;
 		size_t r = xStreamBufferReceiveFromISR(self->txbuf, &b, sizeof(b), 0);
 		if (r > 0) {
 			usart_send(self->port, b);
 		}
 		if (r == 0) {
-			/* No more bytes to send. Clear and disable the interrupt. */
-			USART_RQR(self->port) |= USART_RQR_TXFRQ;
+			/* No more bytes to send. Disable the interrupt. */
 			USART_CR1(self->port) &= ~USART_CR1_TXEIE;
+			break;
 		}
 	}
 
@@ -362,10 +369,9 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 		USART_ICR(self->port) |= USART_ICR_TCCF;
 	}
 
-	if ((USART_ISR(self->port) & USART_ISR_RXNE)) {
+	while ((USART_ISR(self->port) & USART_ISR_RXNE)) {
 		uint8_t b = usart_recv(self->port);
 
-		BaseType_t woken = pdFALSE;
 		/* For any character < 0x20, prepend ESC */
 		if (b < 0x20) {
 			const uint8_t esc = 0x1b;
@@ -374,13 +380,11 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 		/* Do not check the return value. If there was not enough space to save
 		 * the received byte, we have nothing else to do. */
 		xStreamBufferSendFromISR(self->rxbuf, &b, sizeof(b), &woken);
-		portYIELD_FROM_ISR(woken);
 	}
 
 	if (USART_ISR(self->port) & USART_ISR_RTOF) {
 		USART_ICR(self->port) |= USART_ICR_RTOCF;
 
-		BaseType_t woken = pdFALSE;
 		const uint8_t etb = 0x17;
 		xStreamBufferSendFromISR(self->rxbuf, &etb, sizeof(etb), &woken);
 		portYIELD_FROM_ISR(woken);
@@ -391,6 +395,7 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 		USART_ICR(self->port) |= USART_ICR_ORECF;
 	}
 
+	portYIELD_FROM_ISR(woken);
 	return STM32_UART_RET_OK;
 }
 
