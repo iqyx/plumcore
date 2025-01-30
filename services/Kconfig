@@ -59,6 +59,10 @@ menu "Low-level platform drivers"
 			bool "NBUS peripheral bus driver for STM32 FDCAN"
 			default n
 
+		config SERVICE_NBUS2
+			bool "NBUS2 protocol MAC"
+			default n
+
 		config SERVICE_NBUS_SWITCH
 			bool "NBUS CAN-FD switch"
 			default n
