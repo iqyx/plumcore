@@ -35,9 +35,6 @@ struct nbus_pbuf {
 	uint8_t ke[B2S_KE_LEN];
 	uint8_t km[B2S_KM_LEN];
 
-	uint8_t dstid[4];
-	uint8_t srcid[4];
-
 	uint8_t *buf;
 	size_t buf_size;
 	size_t buf_len;
