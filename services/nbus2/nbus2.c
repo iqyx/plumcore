@@ -17,6 +17,7 @@
 #include "blake2s-siv.h"
 #include "halfsiphash.h"
 #include <chacha20.h>
+#include "pbuf.h"
 
 #define MODULE_NAME "nbus"
 
@@ -292,6 +293,55 @@ static nbus_ret_t nbus_pbuf_transmit(struct nbus_pbuf *self, Nbus *nbus) {
 }
 
 
+static nbus_ret_t nbus_pbuf_dispatch(Nbus *self, struct nbus_pbuf *pbuf) {
+	/* We are going to traverse the socket list, obtain the mutex first. Do not block if unable. */
+	if (xSemaphoreTake(self->socket_lock, 0) != pdTRUE) {
+		return NBUS_RET_FAILED;
+	}
+
+	/* Try to match the socket naively. Receive everything for now. */
+	for (size_t i = 0; i < NBUS_SOCKET_COUNT; i++) {
+		if (self->sockets[i].used && self->sockets[i].enabled) {
+			if (xQueueSend(self->sockets[i].rx_queue, &pbuf, 0) != pdTRUE) {
+				/* Couldn't queue the pbuf, treat as failed reception. */
+				break;
+			}
+			/* Return! First match only, we are transferring the ownership
+			 * of the packet buffer to the receiver. */
+			xSemaphoreGive(self->socket_lock);
+			return NBUS_RET_OK;
+		}
+	}
+
+	/* Release the packet buffer if dispatching failed (we are the owner
+	 * and nobody was interested). */
+	nbus_pbuf_release(self, pbuf);
+	xSemaphoreGive(self->socket_lock);
+	return NBUS_RET_FAILED;
+}
+
+
+static struct nbus_pbuf *nbus_pbuf_collect_one(Nbus *self) {
+	if (xSemaphoreTake(self->socket_lock, 0) != pdTRUE) {
+		return NULL;
+	}
+
+	for (size_t i = 0; i < NBUS_SOCKET_COUNT; i++) {
+		if (self->sockets[i].used && self->sockets[i].enabled) {
+			struct nbus_pbuf *pbuf = NULL;
+			if (xQueueReceive(self->sockets[i].tx_queue, &pbuf, 0) != pdTRUE) {
+				continue;
+			}
+			xSemaphoreGive(self->socket_lock);
+			return pbuf;
+		}
+	}
+
+	xSemaphoreGive(self->socket_lock);
+	return NULL;
+}
+
+
 static void addr_to_str(uint8_t addr[4], char *s, size_t size) {
 	snprintf(s, size, "0x%02x%02x%02x%02x", addr[0], addr[1], addr[2], addr[3]);
 }
@@ -318,48 +368,46 @@ static void nbus_mac_task(void *p) {
 			/* Cannot allocate a buffer, we must drop the packet. Wait at least for EOT. */
 			stream_wait_for_eot(self);
 			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("buffer allocation error"));
-			goto err;
+			continue;
 		}
 
-		if (nbus_pbuf_receive_header(pbuf, self) != NBUS_RET_OK) {
-			stream_wait_for_eot(self);
-			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("packet header reception error"));
-			goto err;
+		nbus_ret_t ret = nbus_pbuf_receive_header(pbuf, self);
+		if (ret == NBUS_RET_OK) {
+			ret = nbus_pbuf_receive_data(pbuf, self);
+			if (ret == NBUS_RET_OK) {
+				/* End of packet. No additional data should be in the receive buffer. Check for EOT now
+				 * before a new packet reception starts. The packet is considered valid regardless of any
+				 * discarded additional data. */
+				if (stream_eot_expect(self) != NBUS_RET_OK) {
+					/* No EOT, additional data received, wait for one. */
+					stream_wait_for_eot(self);
+				}
+				//print_pbuf(self, pbuf, "received ");
+				marker(GPIOE, GPIO10, true);
+
+				/* Dispatch the received packet to the right socket, optionally discard the packet
+				 * if there is no suitable socket bound. Give up the pbuf ownership. */
+				nbus_pbuf_dispatch(self, pbuf);
+			}
 		}
-		/* After first 24 bytes */
 		marker(GPIOE, GPIO11, false);
 
-		if (nbus_pbuf_receive_data(pbuf, self) != NBUS_RET_OK) {
+		if (ret != NBUS_RET_OK) {
 			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("packet data reception error"));
-			goto err;
-		}
-		//print_pbuf(self, pbuf, "received ");
-
-		/* End of packet. No additional data should be in the receive buffer. Check for EOT now
-		 * before a new packet reception starts. */
-		if (stream_eot_expect(self) != NBUS_RET_OK) {
-			/* No EOT, additional data received, wait for one. */
 			stream_wait_for_eot(self);
-			//goto err;
+			nbus_pbuf_release(self, pbuf);
+			continue;
 		}
 
-		//self->stream->vmt->write(self->stream, pbuf->buf, pbuf->buf_len);
-		nbus_pbuf_release(self, pbuf);
+		pbuf = nbus_pbuf_collect_one(self);
+		if (pbuf != NULL) {
+			nbus_pbuf_transmit(pbuf, self);
 
-		struct nbus_pbuf *txp = nbus_pbuf_allocate(self);
-		uint8_t txbuf[256] = {0};
-		uint8_t dstid[4] = {0, 0, 0, 1};
-		nbus_pbuf_send(txp, txbuf, sizeof(txbuf), dstid, 1);
-		nbus_pbuf_transmit(txp, self);
-		nbus_pbuf_release(self, txp);
-		/* Consume echo until EOT. */
-		stream_wait_for_eot(self);
+			/* Consume echo until EOT. */
+			stream_wait_for_eot(self);
 
-		continue;
-
-err:
-		nbus_pbuf_release(self, pbuf);
-		marker(GPIOE, GPIO10, false);
+			nbus_pbuf_release(self, pbuf);
+		}
 	}
 	vTaskDelete(NULL);
 }
@@ -376,11 +424,83 @@ static void nbus_hk_task(void *p) {
 }
 
 
+
+/* ****************************************** Datagram API ************************************************************/
+
+static datagram_ret_t nbus_socket_write(Datagram *datagram, const void *buf, size_t len, const struct datagram_msg *msg) {
+	struct nbus_socket *self = datagram->parent;
+	(void)buf;
+	(void)len;
+	(void)msg;
+
+	struct nbus_pbuf *pbuf = nbus_pbuf_allocate(self->parent);
+	if (pbuf == NULL) {
+		return DATAGRAM_RET_FAILED;
+	}
+
+	uint8_t dstid[4] = {0, 0, 0, 1};
+	nbus_pbuf_send(pbuf, buf, len, dstid, 1);
+
+	if (xQueueSend(self->tx_queue, &pbuf, 0) != pdTRUE) {
+		nbus_pbuf_release(self->parent, pbuf);
+		return DATAGRAM_RET_FAILED;
+	}
+
+	return DATAGRAM_RET_OK;
+}
+
+
+static datagram_ret_t nbus_socket_read(Datagram *datagram, void *buf, size_t *len, struct datagram_msg *msg) {
+	struct nbus_socket *self = datagram->parent;
+	(void)buf;
+	(void)len;
+	(void)msg;
+
+	struct nbus_pbuf *pbuf = NULL;
+	if (xQueueReceive(self->rx_queue, &pbuf, portMAX_DELAY) != pdTRUE) {
+		return DATAGRAM_RET_FAILED;
+	}
+
+	/* Interested in data? */
+	if (buf != NULL && len != NULL && *len > 0) {
+		if (*len >= (pbuf->buf_len - 24)) {
+			memcpy(buf, pbuf->buf + 24, pbuf->buf_len - 24);
+			*len = pbuf->buf_len - 24;
+		} else {
+			/* Interested, but the buffer is not big enough. */
+			nbus_pbuf_release(self->parent, pbuf);
+			return DATAGRAM_RET_FAILED;
+		}
+	}
+
+	/* Interested in metadata? */
+	if (msg != NULL) {
+		/** @todo */
+	}
+
+	/* Not needed anymore. */
+	nbus_pbuf_release(self->parent, pbuf);
+	return DATAGRAM_RET_OK;
+}
+
+static const struct datagram_vmt nbus_socket_vmt = {
+	.write = nbus_socket_write,
+	.read = nbus_socket_read,
+};
+
+
+
 nbus_ret_t nbus_init(Nbus *self, Stream *stream) {
 	memset(self, 0, sizeof(Nbus));
 	self->stream = stream;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialize protocol driver"));
+
+	/* Allocate packet buffers. */
+	self->pbuf_lock = xSemaphoreCreateMutex();
+	if (self->pbuf_lock == NULL) {
+		goto err;
+	}
 
 	for (size_t i = 0; i < NBUS_PBUF_COUNT; i++) {
 		self->pbufs[i].buf = malloc(NBUS_PBUF_DATA_SIZE);
@@ -388,6 +508,23 @@ nbus_ret_t nbus_init(Nbus *self, Stream *stream) {
 			goto err;
 		}
 		self->pbufs[i].buf_size = NBUS_PBUF_DATA_SIZE;
+		self->pbufs[i].s = xSemaphoreCreateBinary();
+		if (self->pbufs[i].s == NULL) {
+			goto err;
+		}
+	}
+
+	/* Sockets are allocated within the Nbus object, initialize the locking mutex. */
+	self->socket_lock = xSemaphoreCreateMutex();
+	if (self->socket_lock == NULL) {
+		goto err;
+	}
+	for (size_t i = 0; i < NBUS_SOCKET_COUNT; i++) {
+		self->sockets[i].tx_queue = xQueueCreate(NBUS_SOCKET_TX_QUEUE_LEN, sizeof(struct nbus_pbuf *));
+		self->sockets[i].rx_queue = xQueueCreate(NBUS_SOCKET_RX_QUEUE_LEN, sizeof(struct nbus_pbuf *));
+		if (self->sockets[i].tx_queue == NULL || self->sockets[i].rx_queue == NULL) {
+			goto err;
+		}
 	}
 
 	xTaskCreate(nbus_mac_task, "nbus-mac", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->mac_task));
@@ -418,28 +555,130 @@ nbus_ret_t nbus_set_mac_key(Nbus *self, const uint8_t *mac_key, size_t mac_key_l
 }
 
 
+
+/* ************************************* packet buffer pool manipulation ******************************************** */
+
+
+/**
+ * @brief Allocate a packet buffer from the pool
+ *
+ * After this function returns, @p pbuf ownership transfers to the caller.
+ */
 struct nbus_pbuf *nbus_pbuf_allocate(Nbus *self) {
+	if (u_assert(self->pbuf_lock != NULL)) {
+		/* Used before initialization. Something is very wrong. */
+		return NULL;
+	}
+
+	if (xSemaphoreTake(self->pbuf_lock, portMAX_DELAY) != pdTRUE) {
+		return NULL;
+	}
+
 	for (size_t i = 0; i < NBUS_PBUF_COUNT; i++) {
-		if (self->pbufs[i].used == false) {
-			self->pbufs[i].used = true;
+		if (self->pbufs[i].state == NBUS_PBUF_STATE_EMPTY) {
+			/* On the first free pbuf match, mark as allocated and clear it. */
+			self->pbufs[i].state = NBUS_PBUF_STATE_ALLOCATED;
 			self->pbufs[i].buf_len = 0;
-			self->pbufs[i].buf_size = NBUS_PBUF_DATA_SIZE;
+
+			/* It is sufficient to clear the header. */
 			memset(self->pbufs[i].buf, 0, 24);
 
 			/* Prepare keys for the new pbuf */
 			b2s_derive_keys(self->mac_key, self->mac_key_len, self->pbufs[i].ke, self->pbufs[i].km);
 
+			xSemaphoreGive(self->pbuf_lock);
 			return &(self->pbufs[i]);
 		}
 	}
+
+	/* No free packet buffer found. */
+	xSemaphoreGive(self->pbuf_lock);
 	return NULL;
 }
 
 
+/**
+ * @brief Release the previously allocated packet buffer
+ */
 nbus_ret_t nbus_pbuf_release(Nbus *self, struct nbus_pbuf *pbuf) {
-	(void)self;
+	if (u_assert(self->pbuf_lock != NULL) ||
+	    u_assert(pbuf != NULL)) {
+		return NBUS_RET_FAILED;
+	}
 
-	pbuf->used = false;
+	if (xSemaphoreTake(self->pbuf_lock, portMAX_DELAY) != pdTRUE) {
+		return NBUS_RET_FAILED;
+	}
+
+	pbuf->state = NBUS_PBUF_STATE_EMPTY;
+
+	xSemaphoreGive(self->pbuf_lock);
+	return NBUS_RET_OK;
+}
+
+
+
+/* ******************************************** nbus socket manipulation **********************************************/
+
+
+struct nbus_socket *nbus_socket_allocate(Nbus *self) {
+	if (u_assert(self->socket_lock != NULL)) {
+		return NULL;
+	}
+
+	if (xSemaphoreTake(self->socket_lock, portMAX_DELAY) != pdTRUE) {
+		return NULL;
+	}
+
+	for (size_t i = 0; i < NBUS_SOCKET_COUNT; i++) {
+		if (self->sockets[i].used == false) {
+			/* On the first free pbuf match, mark as allocated and clear it. */
+			self->sockets[i].used = true;
+			self->sockets[i].parent = self;
+			/** @todo do not enable until bound */
+			self->sockets[i].enabled = true;
+
+			self->sockets[i].local_id = 0;
+			self->sockets[i].local_id_mask = 0;
+			self->sockets[i].local_ep = 0;
+			self->sockets[i].remote_id = 0;
+			self->sockets[i].remote_id_mask = 0;
+			self->sockets[i].remote_ep = 0;
+
+			self->sockets[i].datagram.vmt = &nbus_socket_vmt;
+			self->sockets[i].datagram.parent = &(self->sockets[i]);
+
+			xSemaphoreGive(self->socket_lock);
+			return &(self->sockets[i]);
+		}
+	}
+
+	xSemaphoreGive(self->socket_lock);
+	return NULL;
+}
+
+nbus_ret_t nbus_socket_release(Nbus *self, struct nbus_socket *socket) {
+	if (u_assert(self->pbuf_lock != NULL) ||
+	    u_assert(socket != NULL)) {
+		return NBUS_RET_FAILED;
+	}
+
+	if (xSemaphoreTake(self->pbuf_lock, portMAX_DELAY) != pdTRUE) {
+		return NBUS_RET_FAILED;
+	}
+
+	socket->used = false;
+
+	xSemaphoreGive(self->pbuf_lock);
+	return NBUS_RET_OK;
+}
+
+
+nbus_ret_t nbus_socket_bind(struct nbus_socket *socket, const uint8_t *id, uint8_t ep) {
+	(void)socket;
+	(void)id;
+	(void)ep;
 
 	return NBUS_RET_OK;
+
 }
