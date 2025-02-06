@@ -13,7 +13,6 @@
 #include <interfaces/datagram.h>
 #include "blake2s-siv.h"
 #include <main.h>
-#include "pbuf.h"
 
 
 #define NBUS_TIMEOUT_MS 10000
@@ -22,6 +21,12 @@
 #define NBUS_SOCKET_COUNT 4
 #define NBUS_SOCKET_TX_QUEUE_LEN 2
 #define NBUS_SOCKET_RX_QUEUE_LEN 2
+
+/** Key length in bytes for packet encryption. */
+#define NBUS_PBUF_KE_LEN 16
+
+/** Key length in bytes for packet MAC/SIV generation. */
+#define NBUS_PBUF_KM_LEN 16
 
 typedef enum {
 	NBUS_RET_OK = 0,
@@ -43,13 +48,64 @@ struct nbus_socket {
 	QueueHandle_t tx_queue;
 	QueueHandle_t rx_queue;
 
-	uint8_t *local_id;
-	uint8_t *local_id_mask;
+	uint8_t local_id[4];
+	uint8_t local_id_mask[4];
 	uint32_t local_ep;
 
-	uint8_t *remote_id;
-	uint8_t *remote_id_mask;
+	uint8_t remote_id[4];
+	uint8_t remote_id_mask[4];
 	uint32_t remote_ep;
+};
+
+enum nbus_pbuf_state {
+	/**
+	 * Packet buffer resides in the pool of free buffers usually owned
+	 * by the service implementing the interface. The pool is the sole
+	 * owner of the buffer. No operations nor access are possible.
+	 */
+	NBUS_PBUF_STATE_EMPTY = 0,
+
+	/**
+	 * Packet buffer was returned by the allocator factory function/method.
+	 * Now the owner is whoever received the returned pointer. After using
+	 * the buffer, it must be manually freed.
+	 */
+	NBUS_PBUF_STATE_ALLOCATED,
+
+	/**
+	 * The buffer may not be freed immediately. Wait for garbage collection.
+	 */
+	NBUS_PBUF_STATE_GC,
+};
+
+struct nbus_pbuf {
+	enum nbus_pbuf_state state;
+
+	uint8_t ke[NBUS_PBUF_KE_LEN];
+	uint8_t km[NBUS_PBUF_KM_LEN];
+
+	/**
+	 * Preallocated packet/datagram buffer. More complex allocators may
+	 * allocate the requested number of bytes.
+	 */
+	uint8_t *buf;
+
+	/**
+	 * The allocated buffer size in bytes.
+	 */
+	size_t buf_size;
+
+	/**
+	 * Length of the packet in the buffer (that is, number of bytes actually used.
+	 */
+	size_t buf_len;
+
+	/**
+	 * Semaphore handle to allow waiting on the packet buffer (when receiving
+	 * and sending packets/datagrams)
+	 */
+	SemaphoreHandle_t s;
+
 };
 
 typedef struct nbus {
@@ -74,6 +130,10 @@ nbus_ret_t nbus_set_mac_key(Nbus *self, const uint8_t *mac_key, size_t mac_key_l
 
 struct nbus_pbuf *nbus_pbuf_allocate(Nbus *self);
 nbus_ret_t nbus_pbuf_release(Nbus *self, struct nbus_pbuf *pbuf);
+nbus_ret_t nbus_pbuf_set_destination(struct nbus_pbuf *self, const uint8_t id[4], uint8_t ep);
+nbus_ret_t nbus_pbuf_set_source(struct nbus_pbuf *self, const uint8_t id[4], uint8_t ep);
+nbus_ret_t nbus_pbuf_get_destination(struct nbus_pbuf *self, uint8_t id[4], uint8_t *ep);
+nbus_ret_t nbus_pbuf_get_source(struct nbus_pbuf *self, uint8_t id[4], uint8_t *ep);
 
 struct nbus_socket *nbus_socket_allocate(Nbus *self);
 nbus_ret_t nbus_socket_release(Nbus *self, struct nbus_socket *socket);

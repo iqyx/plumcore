@@ -17,7 +17,6 @@
 #include "blake2s-siv.h"
 #include "halfsiphash.h"
 #include <chacha20.h>
-#include "pbuf.h"
 
 #define MODULE_NAME "nbus"
 
@@ -245,34 +244,25 @@ static nbus_ret_t nbus_pbuf_receive_data(struct nbus_pbuf *self, Nbus *nbus) {
 }
 
 
-static nbus_ret_t nbus_pbuf_send(struct nbus_pbuf *self, void *buf, size_t len, uint8_t dst_id[4], uint8_t dst_ep) {
-	if ((len + 24) > self->buf_size) {
-		return NBUS_RET_FAILED;
-	}
-	memcpy(self->buf + 24, buf, len);
-	self->buf_len = len + 24;
+static nbus_ret_t nbus_pbuf_transmit(struct nbus_pbuf *self, Nbus *nbus) {
 
 	self->buf[8] = 'n';
 	self->buf[9] = '2';
 
-	self->buf[10] = len / 256;
-	self->buf[11] = len % 256;
+	self->buf[10] = (self->buf_len - 24) / 256;
+	self->buf[11] = (self->buf_len - 24) % 256;
 
 	self->buf[12] = nbus_tx_counter / 256;
 	self->buf[13] = nbus_tx_counter % 256;
 	nbus_tx_counter++;
 
-	/* Set IDs and endpoints. */
-	self->buf[14] = (dst_ep & 0xf) << 4 | (nbus_my_ep & 0xf);
+	/* buf[14] are endpoints. */
+
+	/* Clear flags */
+	/** @todo set flags */
 	self->buf[15] = 0;
-	memcpy(self->buf + 16, dst_id, 4);
-	memcpy(self->buf + 20, nbus_my_id, 4);
 
-	return NBUS_RET_OK;
-}
-
-
-static nbus_ret_t nbus_pbuf_transmit(struct nbus_pbuf *self, Nbus *nbus) {
+	/* buf[16-23] are destination and source id. */
 
 	/* Compute SIV first */
 	halfsiphash(self->buf + 8, self->buf_len - 8, self->km, self->buf, 8);
@@ -302,6 +292,18 @@ static nbus_ret_t nbus_pbuf_dispatch(Nbus *self, struct nbus_pbuf *pbuf) {
 	/* Try to match the socket naively. Receive everything for now. */
 	for (size_t i = 0; i < NBUS_SOCKET_COUNT; i++) {
 		if (self->sockets[i].used && self->sockets[i].enabled) {
+			/* If the socket is locally bound, check the destination ID. */
+			if (memcmp(self->sockets[i].local_id, (uint8_t[4]){0, 0, 0, 0}, 4)) {
+				uint8_t dst_addr[4] = {0};
+				uint8_t dst_ep = 0;
+				nbus_pbuf_get_destination(pbuf, dst_addr, &dst_ep);
+				if (memcmp(dst_addr, self->sockets[i].local_id, 4) || dst_ep != self->sockets[i].local_ep) {
+					/* Not ours, not interested. */
+					continue;
+				}
+
+			}
+
 			if (xQueueSend(self->sockets[i].rx_queue, &pbuf, 0) != pdTRUE) {
 				/* Couldn't queue the pbuf, treat as failed reception. */
 				break;
@@ -433,13 +435,35 @@ static datagram_ret_t nbus_socket_write(Datagram *datagram, const void *buf, siz
 	(void)len;
 	(void)msg;
 
+	/* Socket must be bound to a local ID and EP. */
+	if (!memcmp(self->local_id, (uint8_t[4]){0, 0, 0, 0}, 4)) {
+		return DATAGRAM_RET_FAILED;
+	}
+
 	struct nbus_pbuf *pbuf = nbus_pbuf_allocate(self->parent);
 	if (pbuf == NULL) {
 		return DATAGRAM_RET_FAILED;
 	}
 
-	uint8_t dstid[4] = {0, 0, 0, 1};
-	nbus_pbuf_send(pbuf, buf, len, dstid, 1);
+	/* Check if there is space required for the whole datagram. */
+	if ((len + 24) > pbuf->buf_size) {
+		nbus_pbuf_release(self->parent, pbuf);
+		return DATAGRAM_RET_FAILED;
+	}
+
+	/* Set all required packet fields + copy data. */
+	nbus_pbuf_set_source(pbuf, self->local_id, self->local_ep);
+	if (memcmp(self->remote_id, (uint8_t[4]){0, 0, 0, 0}, 4)) {
+		nbus_pbuf_set_destination(pbuf, self->remote_id, self->remote_ep);
+	} else if (msg != NULL && msg->addr_size == 4 && memcmp(msg->dst_addr, (uint8_t[4]){0, 0, 0, 0}, 4)) {
+		nbus_pbuf_set_destination(pbuf, msg->dst_addr, msg->dst_port);
+	} else {
+		/* Cannot determine destination ID. */
+		nbus_pbuf_release(self->parent, pbuf);
+		return DATAGRAM_RET_FAILED;
+	}
+	memcpy(pbuf->buf + 24, buf, len);
+	pbuf->buf_len = len + 24;
 
 	if (xQueueSend(self->tx_queue, &pbuf, 0) != pdTRUE) {
 		nbus_pbuf_release(self->parent, pbuf);
@@ -475,7 +499,13 @@ static datagram_ret_t nbus_socket_read(Datagram *datagram, void *buf, size_t *le
 
 	/* Interested in metadata? */
 	if (msg != NULL) {
-		/** @todo */
+		msg->addr_size = 4;
+		uint8_t dst_ep = 0;
+		uint8_t src_ep = 0;
+		nbus_pbuf_get_destination(pbuf, msg->dst_addr, &dst_ep);
+		msg->dst_port = dst_ep;
+		nbus_pbuf_get_source(pbuf, msg->src_addr, &src_ep);
+		msg->src_port = src_ep;
 	}
 
 	/* Not needed anymore. */
@@ -617,6 +647,56 @@ nbus_ret_t nbus_pbuf_release(Nbus *self, struct nbus_pbuf *pbuf) {
 }
 
 
+nbus_ret_t nbus_pbuf_set_destination(struct nbus_pbuf *self, const uint8_t id[4], uint8_t ep) {
+	self->buf[14] &= ~0xf0;
+	self->buf[14] |= (ep & 0x0f) << 4;
+	memcpy(&(self->buf[16]), id, 4);
+
+	return NBUS_RET_OK;
+}
+
+
+nbus_ret_t nbus_pbuf_set_source(struct nbus_pbuf *self, const uint8_t id[4], uint8_t ep) {
+	self->buf[14] &= ~0x0f;
+	self->buf[14] |= ep & 0x0f;
+	memcpy(&(self->buf[20]), id, 4);
+
+	return NBUS_RET_OK;
+}
+
+
+nbus_ret_t nbus_pbuf_get_destination(struct nbus_pbuf *self, uint8_t id[4], uint8_t *ep) {
+	memcpy(id, &(self->buf[16]), 4);
+	*ep = self->buf[14] >> 4;
+
+	return NBUS_RET_OK;
+}
+
+
+nbus_ret_t nbus_pbuf_get_source(struct nbus_pbuf *self, uint8_t id[4], uint8_t *ep) {
+	memcpy(id, &(self->buf[20]), 4);
+	*ep = self->buf[14] >> 0x0f;
+
+	return NBUS_RET_OK;
+}
+
+
+static nbus_ret_t nbus_pbuf_send(struct nbus_pbuf *self, void *buf, size_t len, uint8_t dst_id[4], uint8_t dst_ep) {
+	if ((len + 24) > self->buf_size) {
+		return NBUS_RET_FAILED;
+	}
+	memcpy(self->buf + 24, buf, len);
+	self->buf_len = len + 24;
+
+
+	/* Set IDs and endpoints. */
+	self->buf[14] = (dst_ep & 0xf) << 4 | (nbus_my_ep & 0xf);
+	memcpy(self->buf + 16, dst_id, 4);
+	memcpy(self->buf + 20, nbus_my_id, 4);
+
+	return NBUS_RET_OK;
+}
+
 
 /* ******************************************** nbus socket manipulation **********************************************/
 
@@ -638,11 +718,11 @@ struct nbus_socket *nbus_socket_allocate(Nbus *self) {
 			/** @todo do not enable until bound */
 			self->sockets[i].enabled = true;
 
-			self->sockets[i].local_id = 0;
-			self->sockets[i].local_id_mask = 0;
+			memset(self->sockets[i].local_id, 0, 4);
+			memset(self->sockets[i].local_id_mask, 0, 4);
 			self->sockets[i].local_ep = 0;
-			self->sockets[i].remote_id = 0;
-			self->sockets[i].remote_id_mask = 0;
+			memset(self->sockets[i].remote_id, 0, 4);
+			memset(self->sockets[i].remote_id_mask, 0, 4);
 			self->sockets[i].remote_ep = 0;
 
 			self->sockets[i].datagram.vmt = &nbus_socket_vmt;
@@ -678,6 +758,10 @@ nbus_ret_t nbus_socket_bind(struct nbus_socket *socket, const uint8_t *id, uint8
 	(void)socket;
 	(void)id;
 	(void)ep;
+
+	memcpy(socket->local_id, id, 4);
+	memcpy(socket->local_id_mask, (uint8_t[4]){0xff, 0xff, 0xff, 0xff}, 4);
+	socket->local_ep = ep;
 
 	return NBUS_RET_OK;
 
