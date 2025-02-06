@@ -22,18 +22,20 @@
 typedef enum datagram_ret {
 	DATAGRAM_RET_OK = 0,
 	DATAGRAM_RET_FAILED,
+	DATAGRAM_RET_BAD_ARG,
 	DATAGRAM_RET_TIMEOUT,
 } datagram_ret_t;
 
 /**
  * @brief Additional datagram metadata
  */
+#define DATAGRAM_MSG_ADDR_SIZE_MAX 4
 struct datagram_msg {
 	size_t addr_size;
-	uint8_t *local_addr;
-	uint32_t local_port;
-	uint8_t *remote_addr;
-	uint32_t remote_port;
+	uint8_t dst_addr[DATAGRAM_MSG_ADDR_SIZE_MAX];
+	uint32_t dst_port;
+	uint8_t src_addr[DATAGRAM_MSG_ADDR_SIZE_MAX];
+	uint32_t src_port;
 };
 
 typedef struct datagram Datagram;
