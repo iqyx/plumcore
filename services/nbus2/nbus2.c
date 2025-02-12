@@ -107,34 +107,6 @@ static nbus_ret_t stream_receive_expect(Nbus *self, uint8_t *buf, size_t size) {
 
 
 /**
- * @brief Check for EOT at the end of the NBUS packet
- *
- * This is specific to the underlying implementation of the UART driver. If the number of bytes requested
- * during the read is the same as the number of received bytes, EOT is never returned because it is not
- * even attempted to be read from the StreamBuffer. It cannot be reasonably implemented because peek()
- * is not available.
- *
- * We are using the fact there is a interpacket delay after EOT so we may safely read one byte from
- * the stream if done *immediately* and should receive zero bytes with EOT return value. If anything other
- * is received, we may ignore it (actually we must because we lost framing).
- *
- * @return NBUS_RET_OK if EOT is correctly detected or
- *         NBUS_RET_FAILED if some data is still left but no EOT was received. Most probably a malformed
- *         packet, missing interpacket delay, interference, etc.
- */
-static nbus_ret_t stream_eot_expect(Nbus *self) {
-	uint8_t buf = 0;
-	//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("expect EOT"));
-	if (self->stream->vmt->read_timeout(self->stream, &buf, sizeof(buf), NULL, 0) == STREAM_RET_EOT) {
-		//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("EOT"));
-		return NBUS_RET_OK;
-	}
-
-	return NBUS_RET_FAILED;
-}
-
-
-/**
  * @brief Wait for any gap in the input stream
  *
  * This function is used whenever the MAC loses framing. It waits for a timeout
@@ -144,7 +116,7 @@ static nbus_ret_t stream_eot_expect(Nbus *self) {
 static nbus_ret_t stream_wait_for_eot(Nbus *self) {
 	uint8_t buf[8];
 	//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("wait for EOT"));
-	while (self->stream->vmt->read_timeout(self->stream, buf, sizeof(buf), NULL, 10) == STREAM_RET_OK) {
+	while (self->stream->vmt->read_timeout(self->stream, buf, sizeof(buf), NULL, 1) == STREAM_RET_OK) {
 		;
 	}
 	return NBUS_RET_OK;
@@ -301,7 +273,6 @@ static nbus_ret_t nbus_pbuf_dispatch(Nbus *self, struct nbus_pbuf *pbuf) {
 					/* Not ours, not interested. */
 					continue;
 				}
-
 			}
 
 			if (xQueueSend(self->sockets[i].rx_queue, &pbuf, 0) != pdTRUE) {
@@ -367,7 +338,8 @@ static void nbus_mac_task(void *p) {
 	while (true) {
 		struct nbus_pbuf *pbuf = nbus_pbuf_allocate(self);
 		if (pbuf == NULL) {
-			/* Cannot allocate a buffer, we must drop the packet. Wait at least for EOT. */
+			/* Cannot allocate a buffer, we must drop the packet. Wait at least for EOT,
+			 * also yielding allowing other tasks to run. */
 			stream_wait_for_eot(self);
 			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("buffer allocation error"));
 			continue;
@@ -375,39 +347,25 @@ static void nbus_mac_task(void *p) {
 
 		nbus_ret_t ret = nbus_pbuf_receive_header(pbuf, self);
 		if (ret == NBUS_RET_OK) {
+			marker(GPIOE, GPIO11, false);
 			ret = nbus_pbuf_receive_data(pbuf, self);
 			if (ret == NBUS_RET_OK) {
-				/* End of packet. No additional data should be in the receive buffer. Check for EOT now
-				 * before a new packet reception starts. The packet is considered valid regardless of any
-				 * discarded additional data. */
-				if (stream_eot_expect(self) != NBUS_RET_OK) {
-					/* No EOT, additional data received, wait for one. */
-					stream_wait_for_eot(self);
-				}
-				//print_pbuf(self, pbuf, "received ");
-				marker(GPIOE, GPIO10, true);
-
-				/* Dispatch the received packet to the right socket, optionally discard the packet
+				/* End of packet. No additional data should be in the receive buffer.
+				 * Dispatch the received packet to the right socket, optionally discard the packet
 				 * if there is no suitable socket bound. Give up the pbuf ownership. */
 				nbus_pbuf_dispatch(self, pbuf);
 			}
 		}
-		marker(GPIOE, GPIO11, false);
-
+		/* Do not do 'else'! This must catch wrong status 'ret' from both inner conditions. */
 		if (ret != NBUS_RET_OK) {
-			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("packet data reception error"));
-			stream_wait_for_eot(self);
 			nbus_pbuf_release(self, pbuf);
-			continue;
 		}
 
 		pbuf = nbus_pbuf_collect_one(self);
 		if (pbuf != NULL) {
+			/* Transmit and consume echo until EOT, we are not interested in the echo now. */
 			nbus_pbuf_transmit(pbuf, self);
-
-			/* Consume echo until EOT. */
 			stream_wait_for_eot(self);
-
 			nbus_pbuf_release(self, pbuf);
 		}
 	}
@@ -675,7 +633,7 @@ nbus_ret_t nbus_pbuf_get_destination(struct nbus_pbuf *self, uint8_t id[4], uint
 
 nbus_ret_t nbus_pbuf_get_source(struct nbus_pbuf *self, uint8_t id[4], uint8_t *ep) {
 	memcpy(id, &(self->buf[20]), 4);
-	*ep = self->buf[14] >> 0x0f;
+	*ep = self->buf[14] & 0x0f;
 
 	return NBUS_RET_OK;
 }
