@@ -227,20 +227,20 @@ static stream_ret_t stream_read_timeout(Stream *self, void *buf, size_t size, si
 			}
 			return i ? STREAM_RET_OK : STREAM_RET_TIMEOUT;
 		} else {
-			if (c == 0x1b) {
+			//if (c == 0x1b) {
 				/* Do not handle timeout. We are sure there is another byte ready
 				 * when ESC is received. Read the next byte after the ESC. */
-				r = xStreamBufferReceive(stm32_uart->rxbuf, &c, sizeof(c), timeout_ms);
-				((uint8_t *)buf)[i] = c;
-			} else if (c == 0x17) {
+				//r = xStreamBufferReceive(stm32_uart->rxbuf, &c, sizeof(c), timeout_ms);
+				//((uint8_t *)buf)[i] = c;
+			//} else if (c == 0x17) {
 				/* Handle end of block (signalled by RTO interrupt). */
-				if (read != NULL) {
-					*read = i;
-				}
-				return STREAM_RET_EOT;
-			} else {
+				//if (read != NULL) {
+					//*read = i;
+				//}
+				//return STREAM_RET_EOT;
+			//} else {
 				((uint8_t *)buf)[i] = c;
-			}
+			//}
 		}
 	}
 	if (read != NULL) {
@@ -349,6 +349,7 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 
 	while ((USART_ISR(self->port) & USART_ISR_TXE)) {
 		uint8_t b = 0;
+		/** @todo 1 us! */
 		size_t r = xStreamBufferReceiveFromISR(self->txbuf, &b, sizeof(b), 0);
 		if (r > 0) {
 			usart_send(self->port, b);
@@ -369,25 +370,19 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 		USART_ICR(self->port) |= USART_ICR_TCCF;
 	}
 
-	while ((USART_ISR(self->port) & USART_ISR_RXNE)) {
-		uint8_t b = usart_recv(self->port);
-
-		/* For any character < 0x20, prepend ESC */
-		if (b < 0x20) {
-			const uint8_t esc = 0x1b;
-			xStreamBufferSendFromISR(self->rxbuf, &esc, sizeof(esc), &woken);
-		}
-		/* Do not check the return value. If there was not enough space to save
-		 * the received byte, we have nothing else to do. */
-		xStreamBufferSendFromISR(self->rxbuf, &b, sizeof(b), &woken);
+	/* Aggregate multiple receptions until the FIFO is empty or bbuf full. */
+	uint8_t bbuf[32];
+	size_t bbuf_len = 0;
+	while ((USART_ISR(self->port) & USART_ISR_RXNE) && (bbuf_len < sizeof(bbuf))) {
+		bbuf[bbuf_len] = usart_recv(self->port);
+		bbuf_len++;
+	}
+	if (bbuf_len > 0) {
+		xStreamBufferSendFromISR(self->rxbuf, bbuf, bbuf_len, &woken);
 	}
 
 	if (USART_ISR(self->port) & USART_ISR_RTOF) {
 		USART_ICR(self->port) |= USART_ICR_RTOCF;
-
-		const uint8_t etb = 0x17;
-		xStreamBufferSendFromISR(self->rxbuf, &etb, sizeof(etb), &woken);
-		portYIELD_FROM_ISR(woken);
 	}
 
 	/* Enabling the RXNE interrupt also enables ORE. We must handle it properly. */
@@ -413,7 +408,7 @@ stm32_uart_ret_t stm32_uart_set_rto(Stm32Uart *self, bool rto) {
 	if (rto) {
 		/* Set receiver timeout enable. 3 character time. */
 		USART_CR2(self->port) |= USART_CR2_RTOEN;
-		USART_RTOR(self->port) = 20L;
+		USART_RTOR(self->port) = 200L;
 
 		/* Enable timeout interrupt. */
 		USART_CR1(self->port) |= USART_CR1_RTOIE;
