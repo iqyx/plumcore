@@ -212,6 +212,14 @@ menu "High level device drivers"
 	config SERVICE_LCD_ST7586
 		bool "ST7586 LCD driver"
 		default n
+
+	config SERVICE_ALS_VCNL4035
+		bool "VCNL4035 ALS/proximity sensor"
+		default n
+
+	config SERVICE_ADC_LDC1X1X
+		bool "LDC1312, LDC1314 Multi-Channel 12-Bit Inductance to Digital Converter driver"
+		default n
 endmenu
 
 menu "Filesystem and memory management services"
@@ -403,6 +411,10 @@ menu "User interface services"
 
 	config SERVICE_FB_CONSOLE
 		bool "Simple text console on a framebuffer device"
+		default n
+
+	config SERVICE_SENSOR_KEYPAD
+		bool "Keypad using Sensor devices"
 		default n
 endmenu
 
