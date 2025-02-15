@@ -18,6 +18,7 @@
 #include "u_assert.h"
 
 #include <libopencm3/stm32/i2c.h>
+#include <libopencm3/stm32/rcc.h>
 
 #include "interface_spidev.h"
 #include "stm32-i2c.h"
@@ -31,7 +32,7 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 	//~ i2c_reset(self->locm3_i2c);
 	i2c_enable_analog_filter(self->locm3_i2c);
 	i2c_set_digital_filter(self->locm3_i2c, 0);
-	i2c_set_speed(self->locm3_i2c, i2c_speed_sm_100k, 16);
+	i2c_set_speed(self->locm3_i2c, i2c_speed_sm_100k, rcc_apb1_frequency / 1e6);
 	i2c_enable_stretching(self->locm3_i2c);
 	i2c_set_7bit_addr_mode(self->locm3_i2c);
 	i2c_peripheral_enable(self->locm3_i2c);
@@ -66,7 +67,7 @@ stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, uint32_t locm3_i2c) {
 
 	stm32_i2c_bus_init(self);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("bus initialized"));
-		
+
 	return STM32_I2C_RET_OK;
 }
 
