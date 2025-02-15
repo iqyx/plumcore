@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Simple interface for reading sensor values
  *
- * Copyright (c) 2017-2021, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2017-2025, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
