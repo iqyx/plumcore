@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * nbus2 messaging bus implementation
  *
