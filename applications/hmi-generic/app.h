@@ -1,0 +1,32 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Generic HMI implementation
+ *
+ * Copyright (c) 2025, Marek Koza (qyx@krtko.org)
+ * All rights reserved.
+ */
+
+#pragma once
+
+#include <interfaces/datagram.h>
+#include <interfaces/fb.h>
+#include <interfaces/i2c-bus.h>
+#include <services/nbus2/nbus2.h>
+
+
+typedef enum {
+	APP_RET_OK = 0,
+	APP_RET_FAILED,
+} app_ret_t;
+
+typedef struct {
+	TaskHandle_t com_task;
+	TaskHandle_t input_task;
+	Fb *fb;
+	I2cBus *i2c;
+} App;
+
+
+app_ret_t app_init(App *self);
+app_ret_t app_free(App *self);
+

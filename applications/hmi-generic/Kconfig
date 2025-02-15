@@ -1,0 +1,11 @@
+config APP_HMI_GENERIC
+	bool "A generic HMI application with LCD, presence detection, speaker, keyboard"
+
+menu "Generic HMI application config"
+	depends on APP_HMI_GENERIC
+
+	config APP_NAME
+		string
+		default "hmi-generic"
+
+endmenu
