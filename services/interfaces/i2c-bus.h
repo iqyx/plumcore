@@ -37,6 +37,7 @@
 typedef enum {
 	I2C_BUS_RET_OK = 0,
 	I2C_BUS_RET_FAILED,
+	I2C_BUS_RET_NACK,
 } i2c_bus_ret_t;
 
 typedef struct {
