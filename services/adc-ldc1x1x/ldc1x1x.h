@@ -29,6 +29,8 @@ typedef struct ldc1x1x {
 	uint8_t preselect_cmd_addr;
 
 	Sensor out[4];
+
+	SemaphoreHandle_t select_lock;
 } Ldc1x1x;
 
 

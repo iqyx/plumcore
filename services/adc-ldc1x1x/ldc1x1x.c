@@ -23,8 +23,9 @@
 
 static ldc1x1x_ret_t ldc1x1x_select(Ldc1x1x *self) {
 	if (self->preselect_cmd != NULL) {
+		//vTaskDelay(1);
 		self->i2c->transfer(self->i2c->parent, self->preselect_cmd_addr, self->preselect_cmd, self->preselect_cmd_len, NULL, 0);
-		vTaskDelay(1);
+		//vTaskDelay(1);
 	}
 	return LDC1X1X_RET_OK;
 }
@@ -57,19 +58,25 @@ static ldc1x1x_ret_t ldc_read(Ldc1x1x *self, uint8_t addr, uint16_t *reg) {
 static sensor_ret_t ldc1x1x_sensor_value_f(Sensor *sensor, float *value) {
 	Ldc1x1x *self = sensor->parent;
 
-	ldc1x1x_select(self);
+	if (xSemaphoreTake(self->select_lock, portMAX_DELAY) == pdTRUE) {
+		ldc1x1x_select(self);
+		if (value != NULL) {
+			for (size_t i = 0; i < 4; i++) {
+				if (sensor == &(self->out[i])) {
+					uint16_t val = 0;
+					ldc_read(self, 0x00 + i * 2, &val);
+					*value = val;
 
-	if (value != NULL) {
-		for (size_t i = 0; i < 4; i++) {
-			if (sensor == &(self->out[i])) {
-				uint16_t val = 0;
-				ldc_read(self, 0x00 + i * 2, &val);
-				*value = val;
-				return SENSOR_RET_OK;
+					xSemaphoreGive(self->select_lock);
+					return SENSOR_RET_OK;
+				}
 			}
 		}
+		xSemaphoreGive(self->select_lock);
+		return SENSOR_RET_FAILED;
 	}
 
+	/* No mutex free, not obtained for some reason. */
 	return SENSOR_RET_FAILED;
 }
 
@@ -89,6 +96,12 @@ ldc1x1x_ret_t ldc1x1x_init(Ldc1x1x *self, I2cBus *i2c, uint8_t addr) {
 	memset(self, 0, sizeof(Ldc1x1x));
 	self->i2c = i2c;
 	self->addr = addr;
+
+	self->select_lock = xSemaphoreCreateMutex();
+	if (self->select_lock == NULL) {
+		return LDC1X1X_RET_FAILED;
+	}
+
 
 	for (size_t i = 0; i < 4; i++) {
 		self->out[i].vmt = &ldc1x1x_sensor_vmt;
