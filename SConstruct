@@ -121,7 +121,7 @@ if conf["FW_IMAGE_ELF"] == "y":
 	env["LOAD_ADDRESS"] = conf["ELF_IMAGE_LOAD_ADDRESS"]
 
 if conf["ELF_IMAGE_XIP"] == "y":
-	env["LOAD_ADDRESS"] = int(conf["ELF_IMAGE_LOAD_ADDRESS"], 0) + 0x100
+	env["LOAD_ADDRESS"] = int(conf["ELF_IMAGE_LOAD_ADDRESS"], 0) + 0x200
 
 env.Append(LINKFLAGS = [
 	"-Wl,--defsym=LOAD_ADDRESS=%s" % env["LOAD_ADDRESS"],

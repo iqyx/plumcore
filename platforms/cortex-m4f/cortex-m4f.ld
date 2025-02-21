@@ -42,7 +42,7 @@ ENTRY(reset_handler)
 /* Define sections. */
 SECTIONS
 {
-	.text : {
+	.text : ALIGN(0x200) {
 		*(.vectors)	/* Vector table */
 		*(.text*)	/* Program code */
 		. = ALIGN(4);
@@ -95,7 +95,7 @@ SECTIONS
 	} >ram
 	. = ALIGN(4);
 
-	.data : ALIGN(0x100) {
+	.data : ALIGN(0x200) {
 		_data = .;
 		*(.data*)	/* Read-write initialized data */
 		*(.ramtext*)    /* "text" functions to run in ram */
