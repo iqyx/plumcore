@@ -7,6 +7,7 @@
  */
 
 #include <main.h>
+#include <interfaces/event.h>
 #include "app.h"
 
 #define MODULE_NAME "hmi"
@@ -47,10 +48,17 @@ static void com_task(void *p) {
 static void input_task(void *p) {
 	App *self = p;
 
-
 	while (true) {
+		enum event_type type = EV_TYPE_NONE;
+		enum event_code code = EV_CODE_NONE;
+		int32_t value = 0;
 
-		vTaskDelay(1000);
+		if (self->input->vmt->listen(self->input, &type, &code, &value) == EV_RET_OK) {
+			if (value == 1) {
+				/* On key down. */
+				self->speaker->vmt->start(self->speaker);
+			}
+		}
 	}
 	vTaskDelete(NULL);
 }
@@ -69,6 +77,19 @@ app_ret_t app_init(App *self) {
 	self->i2c = NULL;
 	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_I2C, 0, (Interface **)&self->i2c) != ISERVICELOCATOR_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no suitable i2c device found"));
+		return APP_RET_FAILED;
+	}
+
+	/** @todo configure which input device to use.  */
+	self->input = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_EVENT, 0, (Interface **)&self->input) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no suitable input device found"));
+		return APP_RET_FAILED;
+	}
+
+	self->speaker = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SINK, 0, (Interface **)&self->speaker) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no suitable speaker found"));
 		return APP_RET_FAILED;
 	}
 

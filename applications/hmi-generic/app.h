@@ -11,6 +11,8 @@
 #include <interfaces/datagram.h>
 #include <interfaces/fb.h>
 #include <interfaces/i2c-bus.h>
+#include <interfaces/event.h>
+#include <interfaces/waveform-sink.h>
 #include <services/nbus2/nbus2.h>
 
 
@@ -24,6 +26,8 @@ typedef struct {
 	TaskHandle_t input_task;
 	Fb *fb;
 	I2cBus *i2c;
+	Event *input;
+	WaveformSink *speaker;
 } App;
 
 
