@@ -23,9 +23,8 @@
 
 static ldc1x1x_ret_t ldc1x1x_select(Ldc1x1x *self) {
 	if (self->preselect_cmd != NULL) {
-		//vTaskDelay(1);
 		self->i2c->transfer(self->i2c->parent, self->preselect_cmd_addr, self->preselect_cmd, self->preselect_cmd_len, NULL, 0);
-		//vTaskDelay(1);
+		vTaskDelay(1);
 	}
 	return LDC1X1X_RET_OK;
 }
