@@ -15,6 +15,7 @@
 #include <main.h>
 
 #include <interfaces/sensor.h>
+#include <services/stm32-sai/stm32-sai.h>
 
 #include "sensor-keypad.h"
 
@@ -26,7 +27,15 @@ static sensor_keypad_ret_t check_state(SensorKeypad *self) {
 		bool new_down = key->value > key->ema + key->threshold;
 		if (new_down != key->down) {
 			key->down = new_down;
-			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("key state changed code = %u, state = %u"), key->code, key->down);
+			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("value = %f, ema = %f"), key->value, key->ema);
+
+
+			struct sensor_keypad_event ev = {
+				.type = key->code ? key->code : EV_TYPE_RAW,
+				.code = key->code,
+				.value = key->down ? 1 : 0
+			};
+			BaseType_t ret = xQueueSend(self->event_queue, &ev, 0);
 		}
 	}
 
@@ -65,6 +74,30 @@ static void keypad_task(void *p) {
 }
 
 
+static event_ret_t sensor_keypad_event_listen(Event *event, enum event_type *type, enum event_code *code, int32_t *value) {
+	SensorKeypad *self = event->parent;
+	struct sensor_keypad_event ev = {0};
+	xQueueReceive(self->event_queue, &ev, portMAX_DELAY);
+	if (type != NULL) {
+		*type = ev.type;
+	}
+	if (code != NULL) {
+		*code = ev.code;
+	}
+	if (value != NULL) {
+		*value = ev.value;
+	}
+
+	return EV_RET_OK;
+}
+
+
+static const struct event_vmt sensor_keypad_event_vmt = {
+	.subscribe = NULL,
+	.listen = &sensor_keypad_event_listen,
+};
+
+
 sensor_keypad_ret_t sensor_keypad_init(SensorKeypad *self, struct sensor_keypad_key *keys) {
 	if (u_assert(self != NULL) ||
 	    u_assert(keys != NULL)) {
@@ -73,11 +106,22 @@ sensor_keypad_ret_t sensor_keypad_init(SensorKeypad *self, struct sensor_keypad_
 	memset(self, 0, sizeof(SensorKeypad));
 	self->keys = keys;
 
+	self->event_queue = xQueueCreate(SENSOR_KEYPAD_EVENT_QUEUE_SIZE, sizeof(struct sensor_keypad_event));
+	if (self->event_queue == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot allocate event queue"));
+		goto err;
+	}
+
 	xTaskCreate(keypad_task, "sensor-keypad", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->keypad_task));
 	if (self->keypad_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		goto err;
 	}
+
+	self->event.parent = self;
+	self->event.vmt = &sensor_keypad_event_vmt;
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("init ok"));
 
 	return SENSOR_KEYPAD_RET_OK;
 err:
