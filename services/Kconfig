@@ -224,6 +224,10 @@ menu "High level device drivers"
 	config SERVICE_ADC_LDC1X1X
 		bool "LDC1312, LDC1314 Multi-Channel 12-Bit Inductance to Digital Converter driver"
 		default n
+
+	config SERVICE_NCN26010
+		bool "OnSemi NCN26010 10Base-T1S ethernet MAC/PHY driver service"
+		default n
 endmenu
 
 menu "Filesystem and memory management services"
