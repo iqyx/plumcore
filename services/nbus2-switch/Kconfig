@@ -1,0 +1,4 @@
+config SERVICE_NBUS2_SWITCH
+	bool "nbus2 protocol switch"
+	default n
+
