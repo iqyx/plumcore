@@ -47,6 +47,7 @@
 #include <services/stm32-adc/stm32-adc.h>
 #include <services/stm32-watchdog/watchdog.h>
 #include <services/stm32-spi/stm32-spi.h>
+#include <services/stm32-dac/stm32-dac.h>
 
 /* High level drivers */
 #include <services/spi-flash/spi-flash.h>
@@ -55,6 +56,7 @@
 #include <services/stm32-clock/stm32-clock.h>
 
 #if !defined(CONFIG_APP_BL)
+	#include <services/nbus2-switch/nbus2-switch.h>
 	#include <services/generic-power/generic-power.h>
 	#include <services/nbus2/nbus2.h>
 
@@ -95,34 +97,75 @@ int32_t port_early_init(void) {
 
 
 /**********************************************************************************************************************
- * NBUS2 init
+ * NBUS2 backplane init
  **********************************************************************************************************************/
-Stm32Uart nbus_uart;
-static void nbus_port_init(void) {
+
+Stm32Uart nbus_bp_uart;
+Nbus nbus_bp;
+
+static void nbus_bp_port_init(void) {
 	/* USART2 RX/TX */
 	gpio_mode_setup(GPIOD, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO5 | GPIO6);
 	gpio_set_output_options(GPIOD, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO5 | GPIO6);
 	gpio_set_af(GPIOD, GPIO_AF7, GPIO5 | GPIO6);
 
-	/* Driver enable */
+	/* Driver enable (shutdown), permanently on. */
 	gpio_mode_setup(GPIOD, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO4);
 	gpio_clear(GPIOD, GPIO4);
 
 	rcc_periph_clock_enable(RCC_USART2);
 
-	stm32_uart_init(&nbus_uart, USART2);
-	stm32_uart_set_rto(&nbus_uart, true);
-	nbus_uart.uart.vmt->set_bitrate(&nbus_uart.uart, 1000000);
+	stm32_uart_init(&nbus_bp_uart, USART2);
+	stm32_uart_set_rto(&nbus_bp_uart, true);
+	nbus_bp_uart.uart.vmt->set_bitrate(&nbus_bp_uart.uart, 1000000);
 
 	nvic_enable_irq(NVIC_USART2_IRQ);
 	nvic_set_priority(NVIC_USART2_IRQ, 5 * 16);
 
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&(nbus_uart.stream), "nbus-uart");
+	nbus_init(&nbus_bp, &nbus_bp_uart.stream);
+	nbus_set_mac_key(&nbus_bp, (uint8_t *)"abcd", 4);
 }
 
 void usart2_isr(void) {
-	stm32_uart_interrupt_handler(&nbus_uart);
+	stm32_uart_interrupt_handler(&nbus_bp_uart);
 }
+
+
+/**********************************************************************************************************************
+ * NBUS2 front panel ports init
+ **********************************************************************************************************************/
+
+Stm32Uart nbus_uart[4];
+Nbus nbus[4];
+
+static void nbus_port0_init(void) {
+	/* USART3 RX/TX */
+	gpio_mode_setup(GPIOD, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO8 | GPIO9);
+	gpio_set_output_options(GPIOD, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO8 | GPIO9);
+	gpio_set_af(GPIOD, GPIO_AF7, GPIO8 | GPIO9);
+
+	/* Driver enable. */
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO14);
+	gpio_clear(GPIOB, GPIO14);
+
+	rcc_periph_clock_enable(RCC_USART3);
+
+	stm32_uart_init(&(nbus_uart[0]), USART3);
+	stm32_uart_set_rto(&(nbus_uart[0]), true);
+	stm32_uart_set_de(&(nbus_uart[0]), GPIOB, GPIO14);
+	nbus_uart[0].uart.vmt->set_bitrate(&(nbus_uart[0].uart), 1000000);
+
+	nvic_enable_irq(NVIC_USART3_IRQ);
+	nvic_set_priority(NVIC_USART3_IRQ, 5 * 16);
+
+	nbus_init(&(nbus[0]), &(nbus_uart[0]).stream);
+	nbus_set_mac_key(&(nbus[0]), (uint8_t *)"abcd", 4);
+}
+
+void usart3_isr(void) {
+	stm32_uart_interrupt_handler(&(nbus_uart[0]));
+}
+
 
 
 void vPortSetupTimerInterrupt(void);
@@ -153,56 +196,80 @@ static void port_setup_default_gpio(void) {
 }
 
 
-uint8_t packet_buffer[1024];
-Nbus nbus;
+/**********************************************************************************************************************
+ * Buck converter init
+ **********************************************************************************************************************/
+#if !defined(CONFIG_APP_BL)
+Stm32Dac dac1_1;
+GenericPower buck;
+GenericPower out_port[4];
+
+static void buck_dac_init(void) {
+	generic_power_init(&buck);
+	generic_power_set_vref(&buck, 3.3f);
+
+	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
+	rcc_periph_clock_enable(RCC_DAC1);
+	stm32_dac_init(&dac1_1, DAC1, DAC_CHANNEL1);
+	generic_power_set_voltage_dac(&buck, &dac1_1.dac_iface, NULL);
+
+	/* Setup excitation enable GPIO output. Not inverted. */
+	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO5);
+	gpio_clear(GPIOC, GPIO5);
+	generic_power_set_enable_gpio(&buck, GPIOC, GPIO5, false);
+
+	/* Enable the power converter. */
+	buck.power.vmt->set_voltage(&buck.power, 0.9f);
+	vTaskDelay(10);
+	buck.power.vmt->enable(&buck.power, true);
+	vTaskDelay(10);
+
+	for (uint32_t i = 0; i < 4; i++) {
+		generic_power_init(&(out_port[i]));
+	}
+
+	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
+	gpio_clear(GPIOB, GPIO11);
+	generic_power_set_enable_gpio(&out_port[1], GPIOB, GPIO11, false);
+
+	for (uint32_t i = 0; i < 4; i++) {
+		out_port[i].power.vmt->enable(&(out_port[i].power), true);
+	}
+
+
+}
+#endif
+
+
+Nbus2Switch sw;
+
 int32_t port_init(void) {
 	port_setup_default_gpio();
+
 
 	#if !defined(CONFIG_APP_BL)
 		stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_MEDIUM_PERF);
 		stm32_clock_wait_init_done(&cmgr);
+
+		buck_dac_init();
+
+		/** @todo initialize ports in a more sane way */
+		nbus_bp_port_init();
+		nbus_port0_init();
+
+		/** @todo move to the application controlling the board. Catch traffic
+		 *        destined to this device and make its API accessible. */
+		struct nbus_socket *local_socket = nbus_socket_allocate(&nbus_bp);
+		nbus_socket_bind(local_socket, (uint8_t[4]){0x00, 0x00, 0x00, 0x25}, 1);
+
+		/** @todo create nbus2 switch inside of the application, not here. */
+		nbus2_switch_init(&sw);
+
+		struct nbus_socket *bp_socket = nbus_socket_allocate(&nbus_bp);
+		nbus2_switch_add_port(&sw, &bp_socket->datagram, 0, 0);
+		struct nbus_socket *port0_socket = nbus_socket_allocate(&(nbus[0]));
+		nbus2_switch_add_port(&sw, &port0_socket->datagram, GPIOE, GPIO11);
 	#endif
-
-
-	#if !defined(CONFIG_APP_BL)
-		nbus_port_init();
-		nbus_init(&nbus, &nbus_uart.stream);
-		nbus_set_mac_key(&nbus, (uint8_t *)"abcd", 4);
-
-		struct nbus_socket *socket = nbus_socket_allocate(&nbus);
-		while (true) {
-///*
-			uint8_t local_id[] = {0x00, 0x00, 0x00, 0x25};
-			nbus_socket_bind(socket, local_id, 1);
-
-			struct datagram_msg rxmsg = {0};
-			size_t len = sizeof(packet_buffer);
-			if (socket->datagram.vmt->read(&socket->datagram, packet_buffer, &len, &rxmsg) == DATAGRAM_RET_OK) {
-
-				struct datagram_msg txmsg = {
-					.addr_size = rxmsg.addr_size,
-					.dst_port = rxmsg.src_port,
-				};
-				memcpy(txmsg.dst_addr, rxmsg.src_addr, 4);
-				socket->datagram.vmt->write(&socket->datagram, packet_buffer, len, &txmsg);
-			}
-//*/
-/*
-			uint8_t local_id[] = {0x00, 0x00, 0x00, 0x37};
-			nbus_socket_bind(socket, local_id, 1);
-			struct datagram_msg txmsg = {
-				.addr_size = 4,
-				.dst_port = 1,
-			};
-			memcpy(txmsg.dst_addr, (uint8_t[4]){0x22, 0x33, 0x44, 0x55}, 4);
-			socket->datagram.vmt->write(&socket->datagram, packet_buffer, 32, &txmsg);
-			vTaskDelay(100);
-*/
-		}
-
-		nbus_socket_release(&nbus, socket);
-	#endif
-
 
 	return PORT_INIT_OK;
 }
