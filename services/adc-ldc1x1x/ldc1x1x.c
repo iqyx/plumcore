@@ -62,9 +62,12 @@ static sensor_ret_t ldc1x1x_sensor_value_f(Sensor *sensor, float *value) {
 		if (value != NULL) {
 			for (size_t i = 0; i < 4; i++) {
 				if (sensor == &(self->out[i])) {
-					uint16_t val = 0;
-					ldc_read(self, 0x00 + i * 2, &val);
-					*value = val;
+					uint16_t msb = 0;
+					ldc_read(self, 0x00 + i * 2, &msb);
+					uint16_t lsb = 0;
+					ldc_read(self, 0x00 + i * 2 + 1, &lsb);
+
+					*value = msb * 65536 + lsb;
 
 					xSemaphoreGive(self->select_lock);
 					return SENSOR_RET_OK;
