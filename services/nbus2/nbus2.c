@@ -347,7 +347,6 @@ static void nbus_mac_task(void *p) {
 
 		nbus_ret_t ret = nbus_pbuf_receive_header(pbuf, self);
 		if (ret == NBUS_RET_OK) {
-			marker(GPIOE, GPIO11, false);
 			ret = nbus_pbuf_receive_data(pbuf, self);
 			if (ret == NBUS_RET_OK) {
 				/* End of packet. No additional data should be in the receive buffer.
@@ -393,11 +392,6 @@ static datagram_ret_t nbus_socket_write(Datagram *datagram, const void *buf, siz
 	(void)len;
 	(void)msg;
 
-	/* Socket must be bound to a local ID and EP. */
-	if (!memcmp(self->local_id, (uint8_t[4]){0, 0, 0, 0}, 4)) {
-		return DATAGRAM_RET_FAILED;
-	}
-
 	struct nbus_pbuf *pbuf = nbus_pbuf_allocate(self->parent);
 	if (pbuf == NULL) {
 		return DATAGRAM_RET_FAILED;
@@ -410,7 +404,18 @@ static datagram_ret_t nbus_socket_write(Datagram *datagram, const void *buf, siz
 	}
 
 	/* Set all required packet fields + copy data. */
-	nbus_pbuf_set_source(pbuf, self->local_id, self->local_ep);
+	if (memcmp(self->local_id, (uint8_t[4]){0, 0, 0, 0}, 4)) {
+		/* Socket localy bound. */
+		nbus_pbuf_set_source(pbuf, self->local_id, self->local_ep);
+	} else if (msg != NULL && msg->addr_size == 4 && memcmp(msg->src_addr, (uint8_t[4]){0, 0, 0, 0}, 4)) {
+		/* Source ID/EP supplied using msg. */
+		nbus_pbuf_set_source(pbuf, msg->src_addr, msg->src_port);
+	} else {
+		/* Cannot determine source ID. */
+		nbus_pbuf_release(self->parent, pbuf);
+		return DATAGRAM_RET_FAILED;
+	}
+
 	if (memcmp(self->remote_id, (uint8_t[4]){0, 0, 0, 0}, 4)) {
 		nbus_pbuf_set_destination(pbuf, self->remote_id, self->remote_ep);
 	} else if (msg != NULL && msg->addr_size == 4 && memcmp(msg->dst_addr, (uint8_t[4]){0, 0, 0, 0}, 4)) {
@@ -420,6 +425,7 @@ static datagram_ret_t nbus_socket_write(Datagram *datagram, const void *buf, siz
 		nbus_pbuf_release(self->parent, pbuf);
 		return DATAGRAM_RET_FAILED;
 	}
+
 	memcpy(pbuf->buf + 24, buf, len);
 	pbuf->buf_len = len + 24;
 
