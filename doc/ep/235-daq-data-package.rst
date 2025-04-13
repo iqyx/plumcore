@@ -10,7 +10,7 @@ EP-235: DAQ data package
 .. image:: https://img.shields.io/badge/plumCore-0.8.0--dev-gray?labelColor=purple
 
 
-.. contents:: 
+.. contents::
 
 
 Introduction
@@ -64,7 +64,7 @@ Package, the top-level data structure
 
 Top level data structure is a CBOR map with indefinite length with a ``PPKG = 1`` key/value
 pair at the beginning. It is called a *package*. ``PPKG`` is an abbreviation for *plumCore package*,
-``1`` is the current format version. This results in the following encoding:
+``1`` is the current format major version. This results in the following encoding:
 
 .. code-block:: python
 
@@ -78,6 +78,9 @@ pair at the beginning. It is called a *package*. ``PPKG`` is an abbreviation for
 This structure allows maintaining a constant 8 byte string at the beginning of a file or datagram
 allowing tools to automatically identify the format and version.
 
+This package structure is called the *plain* package. It doesn't contain any measures to
+check or maintain data integrity and confidentiality.
+
 In case a ``COSE`` signature is used, the header changes:
 
 .. code-block:: python
@@ -90,7 +93,7 @@ In case a ``COSE`` signature is used, the header changes:
 		0xbf
 			# COSE headers
 			0xff
-		0x02 
+		0x02
 			# COSE payload goes here encoded as a byte string
 		0x03
 			# COSE signature goes here
@@ -103,3 +106,52 @@ package one after the other in a common flash memory media which contains
 ``0xff`` bytes when erased. However, beginning of a package needs to be aligned to
 a 8 byte boundary in the media region (RAM region, file, flash media partition).
 The padding between the successive packages SHALL be filled with ``0xff`` bytes.
+
+
+Package versions
+---------------------------
+
+As mentioned in the previous section, the package header contains the format major
+version number. This is considered sufficient and a *limitation by design*, because
+major version number is the only version component which could eventually require
+a specific code for the package parser or builder following a version bump according
+to Semantic Versioning 2.0.
+
+All other changes to the package format, minor or patch, MUST be made in a compatible
+manner, eg. by defining new keys.
+
+
+Package payload
+----------------------
+
+Package payload is always composed of individual key-value pairs. For plain packages,
+these pairs are inserted directly in the top-level ``CBOR`` map and the package is
+encoded as a whole. If ``COSE`` is used to sign and/or encrypt the package, the individual
+payload key-value pairs are encoded as a map and the result is used as a byte string
+payload for ``COSE`` processing.
+
+All recognized keys have both numeric and string equivalents. Numeric keys SHOULD BE used
+in applications where encoding efficiency is important.
+
+The following keys are recognized:
+
+============= ============ ====== =====================================================================
+Integer rep.  String rep.  Type   Description
+============= ============ ====== =====================================================================
+``1``         ``dat``      bstr   A single measurement or a n-dimensional array of measurements
+                                  encoded as a binary string
+``2``         ``fmt``      map    Data format specification. Includes all required data about possible
+                                  compression, coding, FEC, etc.
+``3``         ``ax``       array  Array of maps of axis definitions
+``4``         ``ser``      tstr   Unique topic of the measurement series
+``5``         ``seq``      uint   Sequence of the package within a series
+``6``         ``env``      map    Environmental (and other) conditions at the place in the time the
+                                  measurement was taken.
+``7``         ``src``      map    Data source specification.
+============= ============ ====== =====================================================================
+
+Description of the content is following in next sections.
+
+
+
+
