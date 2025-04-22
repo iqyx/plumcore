@@ -138,3 +138,4 @@ nbus_ret_t nbus_pbuf_get_source(struct nbus_pbuf *self, uint8_t id[4], uint8_t *
 struct nbus_socket *nbus_socket_allocate(Nbus *self);
 nbus_ret_t nbus_socket_release(Nbus *self, struct nbus_socket *socket);
 nbus_ret_t nbus_socket_bind(struct nbus_socket *socket, const uint8_t *id, uint8_t ep);
+nbus_ret_t nbus_socket_connect(struct nbus_socket *socket, const uint8_t *id, uint8_t ep);

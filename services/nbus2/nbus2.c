@@ -730,3 +730,17 @@ nbus_ret_t nbus_socket_bind(struct nbus_socket *socket, const uint8_t *id, uint8
 	return NBUS_RET_OK;
 
 }
+
+
+nbus_ret_t nbus_socket_connect(struct nbus_socket *socket, const uint8_t *id, uint8_t ep) {
+	(void)socket;
+	(void)id;
+	(void)ep;
+
+	memcpy(socket->remote_id, id, 4);
+	memcpy(socket->remote_id_mask, (uint8_t[4]){0xff, 0xff, 0xff, 0xff}, 4);
+	socket->remote_ep = ep;
+
+	return NBUS_RET_OK;
+
+}
