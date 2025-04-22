@@ -16,16 +16,17 @@
 static void com_task(void *p) {
 	App *self = p;
 
-	struct nbus_socket *socket = nbus_socket_allocate(&nbus);
 	while (true) {
-		uint8_t local_id[] = {0x00, 0x00, 0x00, 0x10};
-		nbus_socket_bind(socket, local_id, 1);
 
 		struct datagram_msg rxmsg = {0};
 		static uint8_t packet_buffer[1024];
 		size_t len = sizeof(packet_buffer);
 
-		if (socket->datagram.vmt->read(&socket->datagram, packet_buffer, &len, &rxmsg) == DATAGRAM_RET_OK) {
+		if (self->socket->datagram.vmt->read(&self->socket->datagram, packet_buffer, &len, &rxmsg) == DATAGRAM_RET_OK) {
+			/* COnnect the socket to the remote device once the display is accessed.
+			 * It is needed to send input events back. */
+			nbus_socket_connect(self->socket, rxmsg.src_addr, rxmsg.src_port);
+
 			uint32_t offset = packet_buffer[0] << 24 | packet_buffer[1] << 16 | packet_buffer[2] << 8 | packet_buffer[3];
 			len -= 4;
 
@@ -40,7 +41,6 @@ static void com_task(void *p) {
 		}
 
 	}
-	nbus_socket_release(&nbus, socket);
 	vTaskDelete(NULL);
 }
 
@@ -57,7 +57,32 @@ static void input_task(void *p) {
 			if (value == 1) {
 				/* On key down. */
 				self->speaker->vmt->start(self->speaker);
+				struct __attribute__((packed)) {
+					uint16_t type;
+					uint16_t code;
+					int32_t value;
+				} evdata = {
+					type,
+					code,
+					value
+				};
+
+				self->socket->datagram.vmt->write(&self->socket->datagram, &evdata, sizeof(evdata), NULL);
 			}
+		}
+	}
+	vTaskDelete(NULL);
+}
+
+
+static void reader_task(void *p) {
+	App *self = p;
+
+	while (true) {
+		uint8_t buf[8];
+		size_t read = 0;
+		if (self->reader->vmt->read(self->reader, buf, sizeof(buf), &read) == STREAM_RET_OK) {
+			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("reader: read %u bytes"), read);
 		}
 	}
 	vTaskDelete(NULL);
@@ -93,6 +118,12 @@ app_ret_t app_init(App *self) {
 		return APP_RET_FAILED;
 	}
 
+	/* Create nbus2 API */
+	self->socket = nbus_socket_allocate(&nbus);
+	uint8_t local_id[] = {0x00, 0x00, 0x00, 0x10};
+	nbus_socket_bind(self->socket, local_id, 1);
+
+
 	xTaskCreate(com_task, "hmi-com", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->com_task));
 	if (self->com_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create application com task"));
@@ -105,6 +136,19 @@ app_ret_t app_init(App *self) {
 		goto err;
 	}
 
+	/* Discover optional barcode reader and start its task. */
+	self->reader = NULL;
+	if (iservicelocator_query_name_type(locator, "reader", ISERVICELOCATOR_TYPE_STREAM, (Interface **)&self->reader) == ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("barcode reader found"));
+
+		xTaskCreate(reader_task, "hmi-reader", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->reader_task));
+		if (self->reader_task == NULL) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create application reader task"));
+			goto err;
+		}
+	}
+
+
 
 	return APP_RET_OK;
 err:
@@ -113,5 +157,6 @@ err:
 
 
 app_ret_t app_free(App *self) {
+	nbus_socket_release(&nbus, self->socket);
 	return APP_RET_OK;
 }

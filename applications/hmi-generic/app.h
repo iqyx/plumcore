@@ -13,6 +13,7 @@
 #include <interfaces/i2c-bus.h>
 #include <interfaces/event.h>
 #include <interfaces/waveform-sink.h>
+#include <interfaces/stream.h>
 #include <services/nbus2/nbus2.h>
 
 
@@ -24,10 +25,16 @@ typedef enum {
 typedef struct {
 	TaskHandle_t com_task;
 	TaskHandle_t input_task;
+	TaskHandle_t reader_task;
+
+	Stream *reader;
 	Fb *fb;
 	I2cBus *i2c;
 	Event *input;
 	WaveformSink *speaker;
+
+	/* nbus2 API */
+	struct nbus_socket *socket;
 } App;
 
 
