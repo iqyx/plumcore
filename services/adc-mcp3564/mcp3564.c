@@ -243,6 +243,7 @@ mcp3564_ret_t mcp3564_set_stp_enable(Mcp3564 *self, bool en) {
 
 mcp3564_ret_t mcp3564_set_mux(Mcp3564 *self, enum mcp3564_mux muxp, enum mcp3564_mux muxm) {
 	self->regs[MCP3564_REG_MUX] = (muxp << 4) | muxm;
+	mcp3564_write_reg(self, MCP3564_REG_MUX, MCP3564_REG_SIZES[MCP3564_REG_MUX], self->regs[MCP3564_REG_MUX], NULL);
 	return MCP3564_RET_OK;
 }
 
