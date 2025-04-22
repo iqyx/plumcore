@@ -31,7 +31,7 @@ static sensor_keypad_ret_t check_state(SensorKeypad *self) {
 
 
 			struct sensor_keypad_event ev = {
-				.type = key->code ? key->code : EV_TYPE_RAW,
+				.type = key->type ? key->type : EV_TYPE_RAW,
 				.code = key->code,
 				.value = key->down ? 1 : 0
 			};
