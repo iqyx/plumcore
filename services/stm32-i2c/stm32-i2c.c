@@ -20,7 +20,6 @@
 #include <libopencm3/stm32/i2c.h>
 #include <libopencm3/stm32/rcc.h>
 
-#include "interface_spidev.h"
 #include "stm32-i2c.h"
 #include <i2c-bus.h>
 
