@@ -229,6 +229,9 @@ menu "High level device drivers"
 	config SERVICE_NCN26010
 		bool "OnSemi NCN26010 10Base-T1S ethernet MAC/PHY driver service"
 		default n
+
+	source "services/iis2iclx/Kconfig"
+
 endmenu
 
 menu "Filesystem and memory management services"

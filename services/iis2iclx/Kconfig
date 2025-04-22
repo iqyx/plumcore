@@ -1,0 +1,3 @@
+config SERVICE_INERTIAL_IIS2ICLX
+	bool "ST IIS2ICLX 2 axis inclinometer"
+	default n
