@@ -8,6 +8,7 @@
 
 #include <main.h>
 #include <interfaces/event.h>
+#include "cbor.h"
 #include "app.h"
 
 #define MODULE_NAME "hmi"
@@ -19,14 +20,72 @@ static void com_task(void *p) {
 	while (true) {
 
 		struct datagram_msg rxmsg = {0};
-		static uint8_t packet_buffer[1024];
-		size_t len = sizeof(packet_buffer);
-
-		if (self->socket->datagram.vmt->read(&self->socket->datagram, packet_buffer, &len, &rxmsg) == DATAGRAM_RET_OK) {
+		size_t len = PACKET_BUFFER_SIZE;
+		if (self->socket->datagram.vmt->read(&self->socket->datagram, self->packet_buffer, &len, &rxmsg) == DATAGRAM_RET_OK) {
 			/* COnnect the socket to the remote device once the display is accessed.
 			 * It is needed to send input events back. */
 			nbus_socket_connect(self->socket, rxmsg.src_addr, rxmsg.src_port);
 
+			CborParser parser;
+			CborValue parser_map;
+			CborValue val;
+
+			if (cbor_parser_init(self->packet_buffer, len, 0, &parser, &parser_map) != CborNoError || !cbor_value_is_map(&parser_map)) {
+				/* No valid CBOR and the top level structure is not a map. */
+				continue;
+			}
+
+			/* Find and get command. */
+			char command[16];
+			size_t command_len = 0;
+			if (cbor_value_map_find_value(&parser_map, "c", &val) == CborNoError && cbor_value_is_text_string(&val)) {
+				command_len = sizeof(command);
+				cbor_value_copy_text_string(&val, command, &command_len, NULL);
+			}
+
+			/* Find and get update bitmap as a byte string. */
+			uint8_t bitmap[20];
+			size_t bitmap_len = 0;
+			if (cbor_value_map_find_value(&parser_map, "b", &val) == CborNoError && cbor_value_is_byte_string(&val)) {
+				bitmap_len = sizeof(bitmap);
+				cbor_value_copy_byte_string(&val, bitmap, &bitmap_len, NULL);
+			}
+
+			/* Find and get update buffer as a byte string. */
+			size_t update_len = UPDATE_BUFFER_SIZE;
+			if (cbor_value_map_find_value(&parser_map, "d", &val) == CborNoError && cbor_value_is_byte_string(&val)) {
+				update_len = UPDATE_BUFFER_SIZE;
+				cbor_value_copy_byte_string(&val, self->update_buffer, &update_len, NULL);
+			}
+
+			/* PoC of framebuffer update. */
+			const uint32_t w = 240;
+			const uint32_t h = 160;
+			size_t chunk_offset = 0;
+			for (size_t y = 0; y < (h / 16); y++) {
+				for (size_t x = 0; x < (w / 16); x++) {
+					/* Check if this chunk needs updating. */
+					size_t chunk_id = y * (w / 16) + x;
+					if (bitmap[bitmap_len - 1 - (chunk_id / 8)] & (1 << (chunk_id % 8))) {
+						for (size_t cy = 0; cy < 16; cy++) {
+							self->fb->vmt->write(
+								self->fb,
+								/* Calculate position within the framebuffer to update. */
+								(y * 16 + cy) * (w / 4) + (x * 16) / 4,
+								self->update_buffer + chunk_offset,
+								4, /* Line of chunk in G2 mode is always 4 bytes long. */
+								FB_MODE_G2
+							);
+							chunk_offset += 4;
+						}
+					}
+				}
+			}
+			self->fb->vmt->flush(self->fb);
+
+
+
+/*
 			uint32_t offset = packet_buffer[0] << 24 | packet_buffer[1] << 16 | packet_buffer[2] << 8 | packet_buffer[3];
 			len -= 4;
 
@@ -38,6 +97,7 @@ static void com_task(void *p) {
 			if ((offset + len) == 9600) {
 				self->fb->vmt->flush(self->fb);
 			}
+*/
 		}
 
 	}
@@ -57,17 +117,27 @@ static void input_task(void *p) {
 			if (value == 1) {
 				/* On key down. */
 				self->speaker->vmt->start(self->speaker);
-				struct __attribute__((packed)) {
-					uint16_t type;
-					uint16_t code;
-					int32_t value;
-				} evdata = {
-					type,
-					code,
-					value
-				};
 
-				self->socket->datagram.vmt->write(&self->socket->datagram, &evdata, sizeof(evdata), NULL);
+				uint8_t response[64];
+				CborEncoder encoder;
+				CborEncoder encoder_map;
+				cbor_encoder_init(&encoder, response, sizeof(response), 0);
+				cbor_encoder_create_map(&encoder, &encoder_map, CborIndefiniteLength);
+
+				cbor_encode_text_stringz(&encoder_map, "c");
+				cbor_encode_text_stringz(&encoder_map, "event");
+
+				cbor_encode_text_stringz(&encoder_map, "type");
+				cbor_encode_int(&encoder_map, type);
+				cbor_encode_text_stringz(&encoder_map, "code");
+				cbor_encode_int(&encoder_map, code);
+				cbor_encode_text_stringz(&encoder_map, "value");
+				cbor_encode_int(&encoder_map, value);
+
+				cbor_encoder_close_container(&encoder, &encoder_map);
+
+				size_t response_len = cbor_encoder_get_buffer_size(&encoder, response);
+				self->socket->datagram.vmt->write(&self->socket->datagram, response, response_len, NULL);
 			}
 		}
 	}

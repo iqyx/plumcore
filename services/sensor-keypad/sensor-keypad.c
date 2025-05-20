@@ -112,7 +112,7 @@ sensor_keypad_ret_t sensor_keypad_init(SensorKeypad *self, struct sensor_keypad_
 		goto err;
 	}
 
-	xTaskCreate(keypad_task, "sensor-keypad", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->keypad_task));
+	xTaskCreate(keypad_task, "sensor-keypad", configMINIMAL_STACK_SIZE + 192, (void *)self, 1, &(self->keypad_task));
 	if (self->keypad_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		goto err;

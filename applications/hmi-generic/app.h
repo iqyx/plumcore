@@ -22,6 +22,9 @@ typedef enum {
 	APP_RET_FAILED,
 } app_ret_t;
 
+#define PACKET_BUFFER_SIZE 1024
+#define UPDATE_BUFFER_SIZE 1024
+
 typedef struct {
 	TaskHandle_t com_task;
 	TaskHandle_t input_task;
@@ -35,6 +38,8 @@ typedef struct {
 
 	/* nbus2 API */
 	struct nbus_socket *socket;
+	uint8_t packet_buffer[PACKET_BUFFER_SIZE];
+	uint8_t update_buffer[UPDATE_BUFFER_SIZE];
 } App;
 
 
