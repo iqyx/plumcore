@@ -48,7 +48,7 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 
 
 static i2c_bus_ret_t stm32_i2c_transfer(Stm32I2c *self, uint8_t addr, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen) {
-	if (xSemaphoreTake(self->bus_lock, portMAX_DELAY) == pdTRUE) {
+	if (xSemaphoreTake(self->bus_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
 		xSemaphoreTake(self->wait_lock, 0);
 		if (txdata != NULL) {
 			/* Implemented according to Master communication initialization (address phase) in RM0440. */
@@ -102,6 +102,10 @@ static i2c_bus_ret_t stm32_i2c_transfer(Stm32I2c *self, uint8_t addr, const uint
 			I2C_CR2(self->locm3_i2c) |= I2C_CR2_STOP;
 		}
 	} else {
+		/* Try to restart I2C peripheral here. */
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("bus stuck, restarting"));
+		stm32_i2c_bus_init(self);
+		xSemaphoreGive(self->bus_lock);
 		return I2C_BUS_RET_FAILED;
 	}
 
