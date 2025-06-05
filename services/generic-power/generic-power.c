@@ -13,7 +13,9 @@
 
 #include <main.h>
 #include <interfaces/power.h>
+#include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
+#include <libopencm3/stm32/timer.h>
 #include <interfaces/dac.h>
 
 #include "generic-power.h"
@@ -30,9 +32,17 @@ static power_ret_t generic_power_enable(Power *self, bool enable) {
 
 	power->enabled = enable;
 	if (enable != power->enable_invert) {
-		gpio_set(power->locm3_enable_port, power->locm3_enable_pin);
+		if (power->timer) {
+			timer_set_oc_value(power->timer, power->timer_oc, (uint32_t)((power->voltage_v / power->vref_v) * 255.0f));
+		} else {
+			gpio_set(power->locm3_enable_port, power->locm3_enable_pin);
+		}
 	} else {
-		gpio_clear(power->locm3_enable_port, power->locm3_enable_pin);
+		if (power->timer) {
+			timer_set_oc_value(power->timer, power->timer_oc, 255 - (uint32_t)((power->voltage_v / power->vref_v) * 255.0f));
+		} else {
+			gpio_clear(power->locm3_enable_port, power->locm3_enable_pin);
+		}
 	}
 
 	return POWER_RET_OK;
@@ -42,6 +52,7 @@ static power_ret_t generic_power_enable(Power *self, bool enable) {
 static power_ret_t generic_power_set_voltage(Power *self, float voltage_v) {
 	GenericPower *power = (GenericPower *)self->parent;
 
+	power->voltage_v = voltage_v;
 	if (power->dac_p == NULL || power->vref_v == 0.0f) {
 		/* No DAC is set, cannot set output voltage. The same applies if we don't know the reference voltage. */
 		return POWER_RET_FAILED;
@@ -103,6 +114,35 @@ generic_power_ret_t generic_power_set_enable_gpio(GenericPower *self, uint32_t p
 	self->enable_invert = invert;
 	return GENERIC_POWER_RET_OK;
 }
+
+
+generic_power_ret_t generic_power_set_pwm(GenericPower *self, uint32_t timer, enum tim_oc_id timer_oc) {
+	if (!(TIM_CR1(timer) & TIM_CR1_CEN)) {
+		/* Timer counter is not enbaled. */
+		timer_set_mode(timer, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
+		timer_continuous_mode(timer);
+		timer_direction_up(timer);
+		timer_enable_preload(timer);
+		timer_enable_break_main_output(timer);
+		timer_disable_preload(timer);
+		/* Always configure for 4 MHz output */
+		/** @todo check the computation, it should probably be more elaborate than this. */
+		timer_set_prescaler(timer, (rcc_apb1_frequency / 4e6) - 1);
+		timer_set_period(timer, 255);
+		timer_enable_counter(timer);
+	}
+
+	timer_enable_oc_preload(timer, timer_oc);
+	timer_set_oc_mode(timer, timer_oc, TIM_OCM_PWM1);
+	timer_set_oc_value(timer, timer_oc, 0);
+	timer_enable_oc_output(timer, timer_oc);
+
+	self->timer = timer;
+	self->timer_oc = timer_oc;
+
+	return GENERIC_POWER_RET_OK;
+}
+
 
 generic_power_ret_t generic_power_set_voltage_dac(GenericPower *self, Dac *dac_p, Dac *dac_m) {
 	if (dac_p && dac_m) {

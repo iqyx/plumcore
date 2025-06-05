@@ -9,6 +9,7 @@
 #pragma once
 
 #include <main.h>
+#include <libopencm3/stm32/timer.h>
 #include <interfaces/power.h>
 #include <interfaces/dac.h>
 
@@ -23,6 +24,11 @@ typedef struct generic_power {
 	uint32_t locm3_enable_port;
 	uint32_t locm3_enable_pin;
 	bool enable_invert;
+
+	/* If timer is enabled (nonzero), use a timer to generate PWM
+	 * on the configured GPIO output. */
+	uint32_t timer;
+	enum tim_oc_id timer_oc;
 
 	/* Setting of the output voltage is only supported if at least one DAC device is available. In this case
 	 * a single ended output voltage is set referenced to the ground. If a second DAC device is available,
@@ -43,5 +49,6 @@ generic_power_ret_t generic_power_init(GenericPower *self);
 generic_power_ret_t generic_power_free(GenericPower *self);
 
 generic_power_ret_t generic_power_set_enable_gpio(GenericPower *self, uint32_t port, uint32_t pin, bool invert);
+generic_power_ret_t generic_power_set_pwm(GenericPower *self, uint32_t timer, enum tim_oc_id timer_oc);
 generic_power_ret_t generic_power_set_voltage_dac(GenericPower *self, Dac *dac_p, Dac *dac_m);
 generic_power_ret_t generic_power_set_vref(GenericPower *self, float vref_v);
