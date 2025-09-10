@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->
+<svg width="800px" height="800px" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <clipPath id="clip-ruler">
+      <rect width="32" height="32"/>
+    </clipPath>
+  </defs>
+  <g id="ruler" clip-path="url(#clip-ruler)">
+    <g id="Group_3252" data-name="Group 3252" transform="translate(-208 -52)">
+      <g id="Group_3248" data-name="Group 3248">
+        <g id="Group_3247" data-name="Group 3247">
+          <g id="Group_3246" data-name="Group 3246">
+            <path id="Path_4017" data-name="Path 4017" d="M239.258,52.2a1,1,0,0,0-1.09.217l-29.75,29.75a1,1,0,0,0,.707,1.707h29.75a1,1,0,0,0,1-1V53.125A1,1,0,0,0,239.258,52.2ZM211.539,81.875l26.336-26.336V60.5h-2.062a1,1,0,1,0,0,2h2.062v2.324h-2.062a1,1,0,1,0,0,2h2.062v2.322h-2.062a1,1,0,1,0,0,2h2.062v2.323h-2.062a1,1,0,1,0,0,2h2.062v2.323h-2.062a1,1,0,1,0,0,2h2.062v2.083Z" fill="#344952"/>
+          </g>
+        </g>
+      </g>
+      <g id="Group_3251" data-name="Group 3251">
+        <g id="Group_3250" data-name="Group 3250">
+          <g id="Group_3249" data-name="Group 3249">
+            <path id="Path_4018" data-name="Path 4018" d="M231.777,68.994a.751.751,0,0,0-.817.164l-5.8,5.8a.75.75,0,0,0,.531,1.281h5.8a.75.75,0,0,0,.75-.75v-5.8A.751.751,0,0,0,231.777,68.994Zm-1.037,5.747H227.5L230.74,71.5Z" fill="#344952"/>
+          </g>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>
