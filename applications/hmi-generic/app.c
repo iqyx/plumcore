@@ -83,21 +83,21 @@ static void com_task(void *p) {
 			}
 			self->fb->vmt->flush(self->fb);
 
+			/* After the flush is done, send an ack to receive the next update. */
+			uint8_t response[64];
+			CborEncoder encoder;
+			CborEncoder encoder_map;
+			cbor_encoder_init(&encoder, response, sizeof(response), 0);
+			cbor_encoder_create_map(&encoder, &encoder_map, CborIndefiniteLength);
 
+			cbor_encode_text_stringz(&encoder_map, "c");
+			cbor_encode_text_stringz(&encoder_map, "ua");
 
-/*
-			uint32_t offset = packet_buffer[0] << 24 | packet_buffer[1] << 16 | packet_buffer[2] << 8 | packet_buffer[3];
-			len -= 4;
+			/* Send a single {"c": "ua"} value */
+			cbor_encoder_close_container(&encoder, &encoder_map);
 
-			if ((offset + len) > 9600) {
-				continue;
-			}
-			self->fb->vmt->write(self->fb, offset, packet_buffer + 4, len, FB_MODE_G2);
-
-			if ((offset + len) == 9600) {
-				self->fb->vmt->flush(self->fb);
-			}
-*/
+			size_t response_len = cbor_encoder_get_buffer_size(&encoder, response);
+			self->socket->datagram.vmt->write(&self->socket->datagram, response, response_len, NULL);
 		}
 
 	}
