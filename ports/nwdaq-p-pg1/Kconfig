@@ -1,0 +1,22 @@
+config PORT_NWDAQ_P_PG1
+	bool "nwDaq p-pg1 power-grid switch"
+
+	menu "Configuraton"
+		depends on PORT_NWDAQ_P_PG1
+
+		config PORT_NAME
+			string
+			default "nwdaq-p-pg1"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
+		config MCU_FAMILY
+			string
+			default "stm32g4"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+	endmenu
