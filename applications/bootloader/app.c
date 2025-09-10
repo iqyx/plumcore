@@ -39,6 +39,8 @@ static app_ret_t bl_step(App *self) {
 			break;
 
 		case BL_STATE_BOOT:
+			/* Give serial drivers some time to correctly output buffered log messages. */
+			vTaskDelay(100);
 			switch (chainloader_boot(&self->chainloader)) {
 				case CHAINLOADER_RET_OK:
 					/* unreachable */ break;
@@ -64,6 +66,7 @@ static app_ret_t bl_step(App *self) {
 			}
 
 			if (chainloader_check_signature(&self->chainloader, pubkey) == CHAINLOADER_RET_OK) {
+				u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("signature check OK"));
 				bl_set_state(self, BL_STATE_BOOT);
 			} else {
 				bl_set_state(self, BL_STATE_ALL_FAILED);
