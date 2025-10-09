@@ -128,7 +128,7 @@ const struct cli_table_cell files_file_table[] = {
 };
 
 
-
+/** @todo unused code, update Stream API
 static char base85chars[85 + 1] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#";
 
 static void cli_print_base85(ServiceCli *self, const uint8_t *buf, size_t len) {
@@ -150,6 +150,7 @@ static void cli_print_base85(ServiceCli *self, const uint8_t *buf, size_t len) {
 		}
 	}
 }
+*/
 
 
 static void size_to_str(size_t size, char *s, size_t len) {
