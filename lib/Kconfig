@@ -69,3 +69,7 @@ config LIB_BLAKE2S_MICRO
 config LIB_PLUMCORE_CONFIGLIB
 	bool "plumCore configuration library/helpers"
 	default y
+
+config LIB_XZ_EMBEDDED
+	bool "xz-embedded LZMA decompressor"
+	default n

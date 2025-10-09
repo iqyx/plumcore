@@ -1,0 +1,22 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["LIB_XZ_EMBEDDED"] == "y":
+
+	env.Git("https://github.com/tukaani-project/xz-embedded", branch='master')
+	# env.Patch("remove-fallthrough-warning.patch")
+
+	objs.append(env.Object([
+		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '/linux/lib/xz/xz_crc32.c')),
+		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '/linux/lib/xz/xz_dec_bcj.c')),
+		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '/linux/lib/xz/xz_dec_lzma2.c')),
+		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '/linux/lib/xz/xz_dec_stream.c')),
+	]))
+
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR']),
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/linux/include/linux'),
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/linux/lib/xz'),
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/userspace'),
+	])
