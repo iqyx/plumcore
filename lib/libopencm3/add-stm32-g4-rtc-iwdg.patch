@@ -48,6 +48,8 @@ index 53118d3c..d4a20e7f 100644
  #       include <libopencm3/stm32/l1/rtc.h>
  #elif defined(STM32L4)
  #       include <libopencm3/stm32/l4/rtc.h>
+ #elif defined(STM32H7)
+ #       include <libopencm3/stm32/h7/rtc.h>
 +#elif defined(STM32G4)
 +#       include <libopencm3/stm32/g4/rtc.h>
  #else
