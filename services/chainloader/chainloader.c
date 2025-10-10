@@ -17,7 +17,7 @@
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/cortex.h>
 #include <cbor.h>
-#include <blake2.h>
+#include <blake2s.h>
 #include <ed25519.h>
 
 #include "chainloader.h"
@@ -176,7 +176,7 @@ static chainloader_ret_t chainloader_elf_b2s(ChainLoader *self, uint8_t *exclude
 	/* Part immediately following the excluded range to the end of the ELF. */
 	blake2s_update(&s, exclude + exclude_size, elf_size - (exclude - self->membuf) - exclude_size);
 
-	blake2s_final(&s, h, 32);
+	blake2s_final(&s, h);
 
 	return CHAINLOADER_RET_OK;
 }
