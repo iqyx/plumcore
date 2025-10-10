@@ -5,7 +5,10 @@ Import("objs")
 if conf["LIB_XZ_EMBEDDED"] == "y":
 
 	env.Git("https://github.com/tukaani-project/xz-embedded", branch='master')
-	# env.Patch("remove-fallthrough-warning.patch")
+
+	# Enjoy your python
+	decoders = ['-D' + k[4:] for k,v in conf.items() if k.startswith('LIB_XZ_DEC') and v == 'y']
+	env.Append(CFLAGS = decoders)
 
 	objs.append(env.Object([
 		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '/linux/lib/xz/xz_crc32.c')),

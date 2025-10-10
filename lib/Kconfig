@@ -73,3 +73,23 @@ config LIB_PLUMCORE_CONFIGLIB
 config LIB_XZ_EMBEDDED
 	bool "xz-embedded LZMA decompressor"
 	default n
+
+	menu "xz-embedded configuration"
+		depends on LIB_XZ_EMBEDDED
+
+		config LIB_XZ_DEC_ARM
+			bool "BCJ filter decoder for ARM"
+			default n
+
+		config LIB_XZ_DEC_ARMTHUMB
+			bool "BCJ filter decoder for ARMTHUMB"
+			default n
+
+		config LIB_XZ_DEC_ARM64
+			bool "BCJ filter decoder for ARM64"
+			default n
+
+		config LIB_XZ_DEC_RISCV
+			bool "BCJ filter decoder for RISCV"
+			default n
+	endmenu
