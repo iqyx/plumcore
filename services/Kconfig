@@ -184,6 +184,10 @@ menu "High level device drivers"
 		bool "TI BQ35100 primary battery gauge"
 		default n
 
+	config SERVICE_BQ76922
+		bool "TI BQ76922 battery gauge"
+		default n
+
 	config SERVICE_ATSHA204
 		bool "ATSHA204 Atmel CryptoAuthentication IC"
 		default n
