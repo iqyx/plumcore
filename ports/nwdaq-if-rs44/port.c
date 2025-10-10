@@ -219,7 +219,7 @@ static void buck_dac_init(void) {
 	generic_power_set_enable_gpio(&buck, GPIOC, GPIO5, false);
 
 	/* Enable the power converter. */
-	buck.power.vmt->set_voltage(&buck.power, 0.9f);
+	buck.power.vmt->set_voltage(&buck.power, 0.70f);
 	vTaskDelay(10);
 	buck.power.vmt->enable(&buck.power, true);
 	vTaskDelay(10);
