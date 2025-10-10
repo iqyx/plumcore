@@ -1,0 +1,22 @@
+config PORT_NWDAQ_S2_MAIN_G4
+	bool "nwdaq-s2-main-g4 main module for the S2 platform"
+
+	menu "Configuraton"
+		depends on PORT_NWDAQ_S2_MAIN_G4
+
+		config PORT_NAME
+			string
+			default "nwdaq-s2-main-g4"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
+		config MCU_FAMILY
+			string
+			default "stm32g4"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+	endmenu

@@ -1,0 +1,22 @@
+config PORT_BT_LED_CTRL
+	bool "BT LED light controller"
+
+	menu "Configuraton"
+		depends on PORT_BT_LED_CTRL
+
+		config PORT_NAME
+			string
+			default "bt-led-ctrl"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
+		config MCU_FAMILY
+			string
+			default "stm32g4"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+	endmenu
