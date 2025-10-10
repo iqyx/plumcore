@@ -1,0 +1,116 @@
+/* Compile with protoc -I=. -I=../lib/other/nanopb/generator/proto/ --python_out=. umesh_cert.proto */
+
+syntax = "proto2";
+import "nanopb.proto";
+
+/*
+ * The year is required. If it is the only field present, the whole year is
+ * considered starting on 1st of January and ending on 32st of December.
+ * The day is optional and its value is a number of days from the beginning
+ * of the year computed as if each month has exactly 31 days. The time field
+ * is a number of seconds passed from the midnight.
+ */
+message Date {
+    required int32 year = 1;
+    optional int32 day = 2;
+    optional int32 time = 3;
+}
+
+/*
+ * A message digest (hash) is used to convert a message before signing with
+ * a private key. MD5 and SHA1 hashes are considered old and broken and are
+ * not allowed.
+ */
+enum DigestAlgorithm {
+    SHA2_256 = 1;
+    SHA3_256 = 2;
+}
+
+/*
+ * A subject trust level field is used in the signature data to show how much
+ * the signer trusts the subject. This value can be used in an authentication or
+ * authorization process to exclude weak certificate relationships.
+ */
+enum SubjectTrustLevel {
+    LOW = 1;
+    MEDIUM = 2;
+    HIGH = 3;
+    ULTIMATE = 4;
+}
+
+
+message Key {
+    required bytes identity = 1 [(nanopb).max_size = 32];
+
+    oneof sk {
+        bytes ed25519_sk = 2 [(nanopb).max_size = 32];
+    }
+}
+
+/*
+ * The data of the certificate itself which will be signed. Each signature
+ * signs the same CertificateSignedData message.
+ */
+message CertificateSignedData {
+    required bytes identity = 1 [(nanopb).max_size = 32];
+    optional Date valid_from = 2;
+    optional Date valid_to = 3;
+    optional Date generated_on = 4;
+
+    /* Optional contact information. */
+    optional string subject_name = 5;
+    optional string subject_email = 6;
+    optional string subject_comment = 7;
+
+    oneof pk {
+        bytes ed25519_pk = 8 [(nanopb).max_size = 32];
+    }
+}
+
+/*
+ * Additional data attached to the signature. It is signed together with
+ * the CertificateSignedData message, but varies in each signature.
+ */
+message CertificateSignatureData {
+    optional Date signed_on = 1;
+    optional Date valid_from = 2;
+    optional Date valid_to = 3;
+    optional SubjectTrustLevel trust_level = 4;
+}
+
+
+message CertificateSignature {
+    /* The CertificateSignatureData is required, but can be empty. */
+    required CertificateSignatureData signature_data = 1;
+
+    required bytes signer_identity = 2 [(nanopb).max_size = 32];
+    optional bytes subject_identity = 3 [(nanopb).max_size = 32];
+
+    /*
+     * The digest algorithm must be always known. It is used to convert
+     * a concatenation of CertificateSignedData and CertificateSignatureData
+     * serialized messages before signing.
+     */
+    required DigestAlgorithm digest_algorithm = 4;
+
+    /*
+     * Signature of the message digest. Different algorithms can be used,
+     * but the CertificateSignature message can containt only a single signature.
+     */
+    oneof signature {
+        bytes ed25519_signature = 5 [(nanopb).max_size = 64];
+    }
+}
+
+/*
+ * Each certificate comprises of a single CertificateSignedContent field with all the required
+ * keys and additional information which are secured with digital signatures in a variable
+ * number of CertificateSignature fields, one for each peer who validated and signed our
+ * certificate content.
+ */
+message Certificate {
+    required CertificateSignedData content = 1;
+    repeated CertificateSignature signature = 2;
+}
+
+
