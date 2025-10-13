@@ -349,8 +349,12 @@ menu "System services"
 		config CHAINLOADER_DEBUG_LOGGING
 			bool "Enable debug logging"
 			default n
-
 	endmenu
+
+	config SERVICE_FLASH_UPDATER
+		bool "Flash firmware updater"
+		default n
+	
 endmenu
 
 menu "Data manipulation/evaluation/processing services"

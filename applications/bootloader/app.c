@@ -1,6 +1,7 @@
 #include <main.h>
 
 #include <services/chainloader/chainloader.h>
+#include <interfaces/flash.h>
 
 #include "app.h"
 #include <base64.h>
@@ -16,6 +17,8 @@ static const char *bl_states[] = {
 	"boot",
 	"all-failed",
 	"check-signature",
+	"find-update",
+	"validate-update",
 };
 
 
@@ -66,7 +69,7 @@ static app_ret_t bl_step(App *self) {
 			}
 
 			if (chainloader_check_signature(&self->chainloader, pubkey) == CHAINLOADER_RET_OK) {
-				u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("signature check OK"));
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("signature check OK"));
 				bl_set_state(self, BL_STATE_BOOT);
 			} else {
 				bl_set_state(self, BL_STATE_ALL_FAILED);
@@ -74,9 +77,44 @@ static app_ret_t bl_step(App *self) {
 			break;
 		}
 
+		case BL_STATE_FIND_UPDATE: {
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Trying to initialize flash-updater"));
+
+			Flash *target = NULL;
+			if (iservicelocator_query_name_type(locator, "app", ISERVICELOCATOR_TYPE_FLASH, (Interface **)&target) != ISERVICELOCATOR_RET_OK) {
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("no update target found, skipping update check"));
+				bl_set_state(self, BL_STATE_FIND_APP);
+			}
+
+			Flash *update = NULL;
+			if (iservicelocator_query_name_type(locator, "update", ISERVICELOCATOR_TYPE_FLASH, (Interface **)&update) != ISERVICELOCATOR_RET_OK) {
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("no update partition found, skipping update check"));
+				bl_set_state(self, BL_STATE_FIND_APP);
+			}
+
+			if (flash_updater_init(&self->updater, target) == FLASH_UPDATER_RET_OK &&
+			    flash_updater_set_source_flash(&self->updater, update) == FLASH_UPDATER_RET_OK) {
+				bl_set_state(self, BL_STATE_VALIDATE_UPDATE);
+
+			}
+			break;
+		}
+
+		case BL_STATE_VALIDATE_UPDATE: {
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("validating update sources"));
+			if (flash_updater_validate_source(&self->updater) == FLASH_UPDATER_RET_OK) {
+				/* Continue with the update process. */
+				bl_set_state(self, BL_STATE_FIND_APP);
+				break;
+			}
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("cannot find update image, continuing boot"));
+			bl_set_state(self, BL_STATE_FIND_APP);
+			break;
+		}
+
 		case BL_STATE_INIT:
 		default:
-			bl_set_state(self, BL_STATE_FIND_APP);
+			bl_set_state(self, BL_STATE_FIND_UPDATE);
 	}
 	return APP_RET_OK;
 }
@@ -84,6 +122,7 @@ static app_ret_t bl_step(App *self) {
 
 static void bl_task(void *p) {
 	App *self = p;
+	self->state = BL_STATE_INIT;
 	while (true) {
 		bl_step(self);
 	}
@@ -94,7 +133,7 @@ static void bl_task(void *p) {
 app_ret_t app_init(App *self) {
 	memset(self, 0, sizeof(App));
 
-	xTaskCreate(bl_task, "app", configMINIMAL_STACK_SIZE + 2048, (void *)self, 1, &(self->task));
+	xTaskCreate(bl_task, "app", configMINIMAL_STACK_SIZE + 3072, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		return APP_RET_FAILED;
 	}
