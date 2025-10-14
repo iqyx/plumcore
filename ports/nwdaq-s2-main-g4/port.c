@@ -145,6 +145,8 @@ Stm32Flash iflash;
 FlashVolStatic pv_iflash;
 
 Flash *lv_bl;
+Flash *lv_conf;
+Flash *lv_mib;
 Flash *lv_app;
 Flash *lv_update;
 
@@ -152,9 +154,20 @@ static void port_flash_init(void) {
 	stm32_flash_init(&iflash);
 
 	flash_vol_static_init(&pv_iflash, &iflash.flash);
-	flash_vol_static_create(&pv_iflash, "bootloader", 0, 64 * 1024, &lv_bl);
-	flash_vol_static_create(&pv_iflash, "app", 64 * 1024, 128 * 1024, &lv_app);
-	flash_vol_static_create(&pv_iflash, "update", 192 * 1024, 64 * 1024, &lv_update);
+	flash_vol_static_create(&pv_iflash, "bootloader", 0,          60 * 1024,  &lv_bl);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_bl, "bootloader");
+
+	flash_vol_static_create(&pv_iflash, "bootconf",   60 * 1024,  2 * 1024,   &lv_conf);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_conf, "bootconf");
+
+	flash_vol_static_create(&pv_iflash, "mib",        62 * 1024,  2 * 1024,   &lv_mib);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_mib, "mib");
+
+	flash_vol_static_create(&pv_iflash, "app",        64 * 1024,  128 * 1024, &lv_app);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_app, "app");
+
+	flash_vol_static_create(&pv_iflash, "update",     192 * 1024, 64 * 1024,  &lv_update);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_update, "update");
 }
 
 
@@ -236,7 +249,7 @@ int32_t port_init(void) {
 	port_setup_default_gpio();
 	console_init();
 	port_flash_init();
-	xz_test();
+	//xz_test();
 
 	#if !defined(CONFIG_APP_BL)
 		gpio_set(GPIOA, GPIO5);

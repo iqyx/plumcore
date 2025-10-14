@@ -16,7 +16,12 @@
 #include <xz.h>
 
 #include "flash-updater.h"
+#include <interfaces/flash.h>
+#include <interfaces/fs.h>
+#include <interfaces/stream.h>
 #include <services/chainloader/tinyelf.h>
+#include <blake2s.h>
+#include <ed25519.h>
 
 #define MODULE_NAME "flash-updater"
 
@@ -38,7 +43,7 @@ static flash_updater_ret_t abstract_source_read(FlashUpdater *self, const size_t
 
 
 static flash_updater_ret_t load_xz_image_cache(FlashUpdater *self, size_t block) {
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("load_xz_image_cache block %lu"), block);
+	//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("load_xz_image_cache block %lu"), block);
 
 	size_t block_start = 0;
 	size_t block_end = block;
@@ -51,7 +56,7 @@ static flash_updater_ret_t load_xz_image_cache(FlashUpdater *self, size_t block)
 	/* Determine if the newly requested block is successive to the current one,
 	 * continue decoding if yes. Restart the decoder if no. */
 	if (block > self->image_cache_block) {
-		block_start = self->image_cache_block;
+		block_start = self->image_cache_block + 1;
 	}
 	self->image_cache_block = block;
 
@@ -68,7 +73,7 @@ static flash_updater_ret_t load_xz_image_cache(FlashUpdater *self, size_t block)
 		self->xz_pos = 0;
 	}
 
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("start = %lu, end = %lu"), block_start, block_end);
+	//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("start = %lu, end = %lu"), block_start, block_end);
 
 	for (size_t b = block_start; b <= block_end; b++) {
 		//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("read xz block %lu"), b);
@@ -100,7 +105,7 @@ static flash_updater_ret_t load_xz_image_cache(FlashUpdater *self, size_t block)
 			/* Nothing more to decode. Handle incomplete last cache buffer. */
 
 			if (ret == XZ_STREAM_END) {
-				u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("xz stream end while decoding cache block %lu"), b);
+				//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("xz: stream end while decoding cache block %lu"), b);
 				//osize += self->xz_buf.out_pos;
 				return FLASH_UPDATER_RET_OK;
 			}
@@ -128,7 +133,7 @@ static flash_updater_ret_t load_xz_image_cache(FlashUpdater *self, size_t block)
 					break;
 
 				default:
-					u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("XZ decoding error %d at block %lu"), ret, b);
+					u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: decoding error %d at block %lu"), ret, b);
 					break;
 			}
 			return FLASH_UPDATER_RET_FAILED;
@@ -195,7 +200,14 @@ flash_updater_ret_t flash_updater_init(FlashUpdater *self, Flash *target) {
 	memset(self, 0, sizeof(FlashUpdater));
 	self->target = target;
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing"));
+	flash_block_ops_t flash_ops = {0};
+	if (self->target->vmt->get_size(self->target, 0, &self->target_size, &flash_ops) != FLASH_RET_OK ||
+	    self->target->vmt->get_size(self->target, 1, &self->target_erase_size, &flash_ops) != FLASH_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot retrieve target flash metadata"));
+		return FLASH_UPDATER_RET_FAILED;
+	}
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized, target flash size = %lu KB, erase_size = %lu KB"), self->target_size / 1024, self->target_erase_size / 1024);
+
 	return FLASH_UPDATER_RET_OK;
 }
 
@@ -228,9 +240,118 @@ flash_updater_ret_t flash_updater_set_source_flash(FlashUpdater *self, Flash *fl
 
 	/** @todo read flash properties here */
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("update access method set to: flash volume"));
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("source access method = flash volume"));
 
 	return FLASH_UPDATER_RET_OK;
+}
+
+
+static void progress_bar(FlashUpdater *self, size_t pos, size_t total) {
+	if (self->console == NULL) {
+		return;
+	}
+
+	char s[16];
+	int32_t len = snprintf(s, sizeof(s), "\r%u / %u [", pos, total);
+	self->console->vmt->write(self->console, s, len);
+	for (uint32_t i = 0; i <= total; i++) {
+		if (i < pos) {
+			self->console->vmt->write(self->console, "#", 1);
+		} else {
+			self->console->vmt->write(self->console, " ", 1);
+		}
+	}
+	self->console->vmt->write(self->console, "]", 1);
+}
+
+
+static void progress_bar_finish(FlashUpdater *self) {
+	if (self->console == NULL) {
+		return;
+	}
+
+	self->console->vmt->write(self->console, "\r\n", 2);
+}
+
+
+
+flash_updater_ret_t flash_updater_find_signature(FlashUpdater *self) {
+	struct tinyelf_section_header hdr = {0};
+	if (tinyelf_section_find_by_name(&self->elf, ".sign.ed25519", &hdr) != TINYELF_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("update signature not found"));
+		return FLASH_UPDATER_RET_FAILED;
+	}
+	self->ed25519_sig_pos = hdr.offset;
+	self->ed25519_sig_size = hdr.size;
+
+	return FLASH_UPDATER_RET_OK;
+}
+
+
+static flash_updater_ret_t flash_updater_elf_b2s(FlashUpdater *self, uint8_t h[32]) {
+	/* Part before the exclude region. */
+	blake2s_state s;
+	blake2s_init(&s, 32);
+
+	/* Do not include this part if the signature position is 0. */
+	for (size_t i = 0; i < (self->ed25519_sig_pos / 4); i++) {
+		uint8_t buf[4];
+		if (abstract_image_read(self, i * 4, buf, 4) != FLASH_UPDATER_RET_OK) {
+			return FLASH_UPDATER_RET_FAILED;
+		}
+		if ((i % 256) == 0) {
+			progress_bar(self, i / 256, self->elf_size / 1024);
+		}
+		blake2s_update(&s, buf, 4);
+	}
+
+	/* Exclusion is included as a zero buffer. Do not explude if exclude size is 0. */
+	uint8_t hm[32] = {0};
+	if (self->ed25519_sig_size % 32) {
+		return FLASH_UPDATER_RET_FAILED;
+	}
+	for (size_t i = 0; i < (self->ed25519_sig_size / 32); i++) {
+		blake2s_update(&s, hm, sizeof(hm));
+	}
+
+	/* Part immediately following the excluded range to the end of the ELF. */
+	for (size_t i = (self->ed25519_sig_pos + self->ed25519_sig_size) / 4; i < (self->elf_size / 4); i++) {
+		uint8_t buf[4];
+		if (abstract_image_read(self, i * 4, buf, 4) != FLASH_UPDATER_RET_OK) {
+			return FLASH_UPDATER_RET_FAILED;
+		}
+		if ((i % 256) == 0) {
+			progress_bar(self, i / 256, self->elf_size / 1024);
+		}
+		blake2s_update(&s, buf, 4);
+	}
+	progress_bar_finish(self);
+	blake2s_final(&s, h);
+	return FLASH_UPDATER_RET_OK;
+}
+
+
+flash_updater_ret_t flash_updater_check_signature(FlashUpdater *self, const uint8_t pubkey[32]) {
+	/* Blake2s hash of the ELF file must be computed with the signature section
+	 * excluded and replaced with zeros. */
+	uint8_t h[32] = {0};
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("checking update ELF signature..."));
+
+	uint8_t sig[64] = {0};
+	if (abstract_image_read(self, self->ed25519_sig_pos, sig, self->ed25519_sig_size) != FLASH_UPDATER_RET_OK) {
+		return FLASH_UPDATER_RET_FAILED;
+	}
+
+	if (flash_updater_find_signature(self) == FLASH_UPDATER_RET_OK &&
+	    flash_updater_elf_b2s(self, h) == FLASH_UPDATER_RET_OK &&
+	    ed25519_verify(sig, pubkey, h, 32) == ED25519_VERIFY_OK) {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("update ELF signature verified OK"));
+		return FLASH_UPDATER_RET_OK;
+	}
+
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("update ELF signature verification failed"));
+	return FLASH_UPDATER_RET_FAILED;
 }
 
 
@@ -241,10 +362,10 @@ flash_updater_ret_t flash_updater_validate_source(FlashUpdater *self) {
 	}
 
 	if (!memcmp(magic, &(uint8_t[])ELF_MAGIC, ELF_MAGIC_LEN)) {
-		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("raw ELF source update image detected"));
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("raw ELF source found"));
 		self->method = FLASH_UPDATER_SOURCE_METHOD_RAW;
 	} else if (!memcmp(magic, &(uint8_t[])XZ_MAGIC, XZ_MAGIC_LEN)) {
-		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("compressed XZ source update image detected"));
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("XZ compressed ELF source found"));
 		self->method = FLASH_UPDATER_SOURCE_METHOD_XZ;
 
 		/* initialize the decompressor before the image is accessed. */
@@ -271,17 +392,72 @@ flash_updater_ret_t flash_updater_validate_source(FlashUpdater *self) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("update ELF parsing error"));
 		return FLASH_UPDATER_RET_FAILED;
 	}
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("update ELF image header found and parsed"));
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("ELF header OK"));
 
 	struct tinyelf_section_header hdr = {0};
-	if (tinyelf_section_find_by_name(&self->elf, ".sign.ed25519", &hdr) == TINYELF_RET_OK) {
-		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("update contains ed25519 signature, verification not implemented"));
-	}
-
 	if (tinyelf_section_find_by_name(&self->elf, ".comment", &hdr) == TINYELF_RET_OK) {
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("comment section found, size = %lu"), hdr.size);
 	}
 
+	self->elf_size = self->elf.elf_header.shoff + self->elf.elf_header.shentsize * self->elf.elf_header.shnum;
+
+	return FLASH_UPDATER_RET_OK;
+}
+
+
+flash_updater_ret_t flash_updater_write(FlashUpdater *self) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("erasing target..."));
+
+	/* Workaround for erasing the whole flash volume, full volume erase doesn't work properly. */
+	for (size_t i = 0; i < (self->target_size / self->target_erase_size); i++) {
+		progress_bar(self, i, self->target_size / self->target_erase_size);
+		if (self->target->vmt->erase(self->target, i * self->target_erase_size, self->target_erase_size) != FLASH_RET_OK) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("target flash erasing failed"));
+			return FLASH_UPDATER_RET_FAILED;
+		}
+	}
+	progress_bar_finish(self);
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("writing target..."));
+
+	/* 32bit ELF is 4-byte aligned but we are writing in 8 byte double-words.
+	 * Write one double-word more. */
+	/** @todo handle in a more generic way */
+	for (size_t i = 0; i < (self->elf_size / 8 + 1); i++) {
+		uint8_t block[8];
+		if (abstract_image_read(self, i * 8, block, 8) != FLASH_UPDATER_RET_OK) {
+			return FLASH_UPDATER_RET_FAILED;
+		}
+		if (self->target->vmt->write(self->target, i * 8, block, 8) != FLASH_RET_OK) {
+			return FLASH_UPDATER_RET_FAILED;
+		}
+		if (self->console && (i % 128) == 0) {
+			progress_bar(self, i / 128, self->elf_size / 1024);
+		}
+	}
+	progress_bar_finish(self);
+
+	return FLASH_UPDATER_RET_OK;
+}
+
+
+flash_updater_ret_t flash_updater_set_console(FlashUpdater *self, Stream *console) {
+	self->console = console;
+
+	return FLASH_UPDATER_RET_OK;
+}
+
+
+flash_updater_ret_t flash_updater_disable_update(FlashUpdater *self) {
+	/* Disables any further update simply by corrupting the update ELF (rewriting its header). */
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("disable further updates, nuke the source"));
+
+	uint8_t buf[8] = {0};
+	if (self->flash) {
+		if (self->flash->vmt->write(self->flash, 0, buf, sizeof(buf)) != FLASH_RET_OK) {
+			return FLASH_UPDATER_RET_FAILED;
+		}
+	}
 
 	return FLASH_UPDATER_RET_OK;
 }

@@ -33,7 +33,7 @@ static flash_ret_t stm32_flash_get_size(Flash *flash, uint32_t i, size_t *size, 
 			*ops = FLASH_BLOCK_OPS_ERASE;
 			break;
 		case 1:
-			*size = STM32_FLASH_SIZE;
+			*size = STM32_FLASH_SECTOR_SIZE;
 			*ops = FLASH_BLOCK_OPS_ERASE;
 			break;
 		case 2:

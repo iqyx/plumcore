@@ -14,6 +14,7 @@
 #include <main.h>
 #include <interfaces/flash.h>
 #include <interfaces/fs.h>
+#include <interfaces/stream.h>
 #include <services/chainloader/tinyelf.h>
 #include <xz.h>
 
@@ -43,6 +44,8 @@ typedef struct flash_updater {
 	/* Flash device target to write the image to. Must always be set.
 	 * NULL means the service is not initialized properly. */
 	Flash *target;
+	size_t target_size;
+	size_t target_erase_size;
 
 	/* Source for update images. Can be filesystem or an object store
 	 * with a @p Fs interface. */
@@ -62,6 +65,12 @@ typedef struct flash_updater {
 
 	/* Update ELF image. */
 	Elf elf;
+	size_t elf_size;
+
+	size_t ed25519_sig_pos;
+	size_t ed25519_sig_size;
+
+	Stream *console;
 
 } FlashUpdater;
 
@@ -76,4 +85,8 @@ flash_updater_ret_t flash_updater_free(FlashUpdater *self);
 flash_updater_ret_t flash_updater_set_source_fs(FlashUpdater *self, Fs *fs);
 flash_updater_ret_t flash_updater_set_source_flash(FlashUpdater *self, Flash *flash);
 flash_updater_ret_t flash_updater_validate_source(FlashUpdater *self);
-
+flash_updater_ret_t flash_updater_write(FlashUpdater *self);
+flash_updater_ret_t flash_updater_set_console(FlashUpdater *self, Stream *console);
+flash_updater_ret_t flash_updater_find_signature(FlashUpdater *self);
+flash_updater_ret_t flash_updater_check_signature(FlashUpdater *self, const uint8_t pubkey[32]);
+flash_updater_ret_t flash_updater_disable_update(FlashUpdater *self);
