@@ -1,0 +1,11 @@
+config APP_SAMPLE_NBUS2_SERVICE
+	bool "Sample nbus2 service application"
+
+menu "Application configuration"
+ 	depends on APP_SAMPLE_NBUS2_SERVICE
+
+	config APP_NAME
+		string
+		default "sample-nbus2-service"
+
+endmenu
