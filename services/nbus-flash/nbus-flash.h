@@ -12,8 +12,8 @@
 #include <stdbool.h>
 
 #include <main.h>
-#include <services/nbus/nbus.h>
 #include <interfaces/flash.h>
+#include <interfaces/datagram.h>
 
 
 #define NBUS_FLASH_MAIN_EP 1
@@ -30,17 +30,20 @@ typedef enum {
 
 
 typedef struct nbus_flash {
-	NbusChannel channel;
+	Datagram *d;
 	TaskHandle_t nbus_task;
 	uint8_t rx_buf[NBUS_FLASH_RX_BUF_LEN];
 	uint8_t tx_buf[NBUS_FLASH_TX_BUF_LEN];
 
 	/* Single session support now. */
 	uint32_t sid;
+	uint8_t src_addr[4];
+	uint32_t src_port;
+
 	Flash *flash;
 
 } NbusFlash;
 
 
-nbus_flash_ret_t nbus_flash_init(NbusFlash *self, NbusChannel *parent, const char *name);
+nbus_flash_ret_t nbus_flash_init(NbusFlash *self, Datagram *d);
 nbus_flash_ret_t nbus_flash_free(NbusFlash *self);

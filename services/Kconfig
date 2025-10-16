@@ -122,10 +122,6 @@ menu "NBUS protocol drivers"
 	config SERVICE_NBUS_MQ_POLL
 		bool "NBUS message queue bridge - polling interface"
 		default n
-
-	config SERVICE_NBUS_FLASH
-		bool "NBUS flash access interface"
-		default n
 endmenu
 
 
@@ -354,7 +350,7 @@ menu "System services"
 	config SERVICE_FLASH_UPDATER
 		bool "Flash firmware updater"
 		default n
-	
+
 endmenu
 
 menu "Data manipulation/evaluation/processing services"
@@ -547,6 +543,10 @@ menu "Communication protocols"
 			bool "MQTT protocol support over a raw TCP connection"
 			select LIB_WOLFMQTT
 			default y
+
+		config SERVICE_NBUS_FLASH
+			bool "NBUS flash access interface"
+			default n
 	endmenu
 endmenu
 

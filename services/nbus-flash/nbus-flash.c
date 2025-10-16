@@ -15,9 +15,11 @@
 #include <main.h>
 #include <cbor.h>
 
-#include <interfaces/flash.h>
+#include <libopencm3/cm3/scb.h>
 
-#include <blake2.h>
+#include <interfaces/flash.h>
+#include <interfaces/datagram.h>
+
 #include "nbus-flash.h"
 
 #define MODULE_NAME "nbus-flash"
@@ -191,7 +193,7 @@ static nbus_flash_ret_t process_cc_erase(NbusFlash *self, CborValue *imap, CborE
 		cbor_encode_text_stringz(omap, "erasing failed");
 		return NBUS_FLASH_RET_FAILED;
 	}
-	
+
 	/* We need to return something */
 	cbor_encode_text_stringz(omap, "ret");
 	cbor_encode_text_stringz(omap, "ok");
@@ -227,7 +229,7 @@ static nbus_flash_ret_t process_cc_write(NbusFlash *self, CborValue *imap, CborE
 		cbor_encode_text_stringz(omap, "writing failed");
 		return NBUS_FLASH_RET_FAILED;
 	}
-	
+
 	cbor_encode_text_stringz(omap, "ret");
 	cbor_encode_text_stringz(omap, "ok");
 
@@ -257,9 +259,20 @@ static nbus_flash_ret_t process_cc_read(NbusFlash *self, CborValue *imap, CborEn
 		cbor_encode_text_stringz(omap, "reading failed");
 		return NBUS_FLASH_RET_FAILED;
 	}
-	
+
 	cbor_encode_text_stringz(omap, "d");
 	cbor_encode_byte_string(omap, buf, len);
+
+	return NBUS_FLASH_RET_OK;
+}
+
+
+static nbus_flash_ret_t process_cc_reset(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
+
+	SCB_AIRCR = (SCB_AIRCR_VECTKEY | SCB_AIRCR_SYSRESETREQ);
+	while (true) {
+		;
+	}
 
 	return NBUS_FLASH_RET_OK;
 }
@@ -300,12 +313,19 @@ static nbus_flash_ret_t process_main_ep(NbusFlash *self, uint8_t *buf, size_t le
 				ret = process_cc_write(self, &map, &encoder_map);
 			} else if (!strcmp(s, "read")) {
 				ret = process_cc_read(self, &map, &encoder_map);
+			} else if (!strcmp(s, "reset")) {
+				ret = process_cc_reset(self, &map, &encoder_map);
 			};
 
 			/* Close the container and send the map in all circumstances (even if empty). */
 			cbor_encoder_close_container(&encoder, &encoder_map);
 			size_t tx_len = cbor_encoder_get_buffer_size(&encoder, self->tx_buf);
-			nbus_channel_send(&self->channel, NBUS_FLASH_MAIN_EP, self->tx_buf, tx_len);
+
+			struct datagram_msg txmsg = {0};
+			txmsg.addr_size = 4;
+			txmsg.dst_port = self->src_port;
+			memcpy(&txmsg.dst_addr, &self->src_addr, 4);
+			self->d->vmt->write(self->d, self->tx_buf, tx_len, &txmsg);
 
 			return ret;
 		}
@@ -320,12 +340,11 @@ static void nbus_task(void *p) {
 	NbusFlash *self = p;
 
 	while (true) {
-		nbus_endpoint_t ep = 0;
-		size_t len = 0;
-		nbus_ret_t ret = nbus_channel_receive(&self->channel, &ep, &self->rx_buf, NBUS_FLASH_RX_BUF_LEN, &len, 1000);
-
-		/* Dispatch received messages. */
-		if (ret == NBUS_RET_OK && ep == NBUS_FLASH_MAIN_EP) {
+		size_t len = NBUS_FLASH_RX_BUF_LEN;
+		struct datagram_msg rxmsg = {0};
+		if (self->d->vmt->read(self->d, &self->rx_buf, &len, &rxmsg) == DATAGRAM_RET_OK) {
+			self->src_port = rxmsg.src_port;
+			memcpy(&self->src_addr, &rxmsg.src_addr, 4);
 			process_main_ep(self, self->rx_buf, len);
 		}
 	}
@@ -334,13 +353,10 @@ static void nbus_task(void *p) {
 }
 
 
-nbus_flash_ret_t nbus_flash_init(NbusFlash *self, NbusChannel *parent, const char *name) {
+nbus_flash_ret_t nbus_flash_init(NbusFlash *self, Datagram *d) {
 	memset(self, 0, sizeof(NbusFlash));
 
-	nbus_channel_init(&self->channel, name);
-	nbus_channel_set_parent(&self->channel, parent);
-	nbus_channel_set_interface(&self->channel, NBUS_FLASH_INTERFACE_NAME, NBUS_FLASH_INTERFACE_VERSION);
-	nbus_add_channel(parent->nbus, &self->channel);
+	self->d = d;
 
 	xTaskCreate(nbus_task, "nbus-flash", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->nbus_task));
 	if (self->nbus_task == NULL) {
