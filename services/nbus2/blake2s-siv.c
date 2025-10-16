@@ -11,7 +11,7 @@
 #include <string.h>
 
 #include <main.h>
-#include <blake2.h>
+#include <blake2s.h>
 
 #include "blake2s-siv.h"
 
@@ -65,7 +65,7 @@ void b2s_derive_keys(const uint8_t *key, size_t len, uint8_t ke[B2S_KE_LEN], uin
 	u_assert(len > 0);
 
 	uint8_t res[B2S_KE_LEN + B2S_KM_LEN] = {0};
-	blake2s(res, B2S_KE_LEN + B2S_KM_LEN, key, len, NULL, 0);
+	blake2s(res, B2S_KE_LEN + B2S_KM_LEN, NULL, 0, key, len);
 
 	/* Now split the key. */
 	memcpy(ke, res, B2S_KE_LEN);
@@ -84,18 +84,18 @@ void b2s_crypt(uint8_t *buf, size_t len, const uint8_t *siv, size_t siv_len, con
 	uint8_t i = 0;
 	while (len > 0) {
 		/* Generate a BLAKE2S_OUTBYTES of keystream. */
-		uint8_t keystream[BLAKE2S_OUTBYTES] = {0};
+		uint8_t keystream[32] = {0};
 		blake2s_state s;
-		blake2s_init_key(&s, BLAKE2S_OUTBYTES, ke, B2S_KE_LEN);
+		blake2s_init_key(&s, 32, ke, B2S_KE_LEN);
 		blake2s_update(&s, siv, siv_len);
 		uint8_t b[4] = {0, 0, 0, i};
 		blake2s_update(&s, b, sizeof(b));
-		blake2s_final(&s, keystream, BLAKE2S_OUTBYTES);
+		blake2s_final(&s, keystream);
 
 		/* Crunch BLAKE2S_OUTBYTES or less in one step. */
 		size_t block_len = len;
-		if (block_len > BLAKE2S_OUTBYTES) {
-			block_len = BLAKE2S_OUTBYTES;
+		if (block_len > 32) {
+			block_len = 32;
 		}
 		for (size_t j = 0; j < block_len; j++) {
 			buf[j] = buf[j] ^ keystream[j];
@@ -118,7 +118,7 @@ void b2s_siv(const uint8_t *buf, size_t len, uint8_t *siv, size_t siv_len, const
 	u_assert(km != NULL);
 
 	blake2s_state s;
-	blake2s_init_key(&s, BLAKE2S_OUTBYTES, km, B2S_KM_LEN);
+	blake2s_init_key(&s, 32, km, B2S_KM_LEN);
 	blake2s_update(&s, buf, len);
-	blake2s_final(&s, siv, siv_len);
+	blake2s_final(&s, siv);
 }
