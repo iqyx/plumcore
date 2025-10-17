@@ -60,11 +60,6 @@
 	#include <services/generic-power/generic-power.h>
 	#include <services/nbus2/nbus2.h>
 	#include <services/nbus-flash/nbus-flash.h>
-
-	/* System services */
-	Stm32Clock cmgr;
-
-	/* Applets */
 #endif
 
 
@@ -72,6 +67,7 @@
  * Port specific global variables and singleton instances.
  */
 
+Stm32Clock cmgr;
 uint32_t SystemCoreClock;
 Watchdog watchdog;
 // Stm32Rtc rtc;
@@ -281,13 +277,12 @@ static void port_flash_init(void) {
 
 int32_t port_init(void) {
 	port_setup_default_gpio();
+	stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_MEDIUM_PERF);
+	stm32_clock_wait_init_done(&cmgr);
 	port_flash_init();
 
 	#if !defined(CONFIG_APP_BL)
 		gpio_clear(GPIOE, GPIO10);
-
-		stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_MEDIUM_PERF);
-		stm32_clock_wait_init_done(&cmgr);
 
 		buck_dac_init();
 
