@@ -46,21 +46,26 @@ class NbusClient:
 		self._s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self._s.bind((f'fd00:dead:beef::1', 52000))
 		self._s.connect((f'fd00:dead:beef::{self._sid[:4]}:{self._sid[4:]}', 52000 + self._ep))
-		self._s.settimeout(0.1)
+		self._s.settimeout(0.02)
 
 	def call(self, req: dict):
-		self._s.send(cbor2.dumps(req));
-		try:
-			resp = cbor2.loads(self._s.recv(self._mtu))
-		except TimeoutError:
-			return None
-		except Exception as e:
-			return None
+		timeout = 50
+		while True:
+			timeout -= 1
+			if timeout == 0:
+				return None
 
-		# meh, required
-		time.sleep(0.01)
+			self._s.send(cbor2.dumps(req));
+			try:
+				resp = cbor2.loads(self._s.recv(self._mtu))
+				return resp
+			except TimeoutError:
+				continue
+			except Exception as e:
+				return None
 
-		return resp
+		return None
+
 
 class FlashClient:
 
