@@ -50,7 +50,7 @@
 #include <services/stm32-dac/stm32-dac.h>
 
 /* High level drivers */
-#include <services/spi-flash/spi-flash.h>
+#include <services/stm32-flash/stm32-flash.h>
 #include <services/flash-vol-static/flash-vol-static.h>
 #include <services/i2c-eeprom/i2c-eeprom.h>
 #include <services/stm32-clock/stm32-clock.h>
@@ -59,6 +59,7 @@
 	#include <services/nbus2-switch/nbus2-switch.h>
 	#include <services/generic-power/generic-power.h>
 	#include <services/nbus2/nbus2.h>
+	#include <services/nbus-flash/nbus-flash.h>
 
 	/* System services */
 	Stm32Clock cmgr;
@@ -74,6 +75,11 @@
 uint32_t SystemCoreClock;
 Watchdog watchdog;
 // Stm32Rtc rtc;
+
+#if !defined(CONFIG_APP_BL)
+	Nbus2Switch sw;
+	NbusFlash flash_proto;
+#endif
 
 
 int32_t port_early_init(void) {
@@ -100,6 +106,7 @@ int32_t port_early_init(void) {
  * NBUS2 backplane init
  **********************************************************************************************************************/
 
+#if !defined(CONFIG_APP_BL)
 Stm32Uart nbus_bp_uart;
 Nbus nbus_bp;
 
@@ -129,12 +136,14 @@ static void nbus_bp_port_init(void) {
 void usart2_isr(void) {
 	stm32_uart_interrupt_handler(&nbus_bp_uart);
 }
+#endif
 
 
 /**********************************************************************************************************************
  * NBUS2 front panel ports init
  **********************************************************************************************************************/
 
+#if !defined(CONFIG_APP_BL)
 Stm32Uart nbus_uart[4];
 Nbus nbus[4];
 
@@ -165,7 +174,7 @@ static void nbus_port0_init(void) {
 void usart3_isr(void) {
 	stm32_uart_interrupt_handler(&(nbus_uart[0]));
 }
-
+#endif
 
 
 void vPortSetupTimerInterrupt(void);
@@ -180,9 +189,9 @@ void vPortSetupTimerInterrupt(void) {
 
 
 static void port_setup_default_gpio(void) {
-	/* LED1A */
+	/* LED1A, bootloader red LED */
 	gpio_mode_setup(GPIOE, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
-	gpio_clear(GPIOE, GPIO10);
+	gpio_set(GPIOE, GPIO10);
 
 	gpio_mode_setup(GPIOE, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
 	gpio_clear(GPIOE, GPIO11);
@@ -235,19 +244,48 @@ static void buck_dac_init(void) {
 	for (uint32_t i = 0; i < 4; i++) {
 		out_port[i].power.vmt->enable(&(out_port[i].power), true);
 	}
-
-
 }
 #endif
 
 
-Nbus2Switch sw;
+Stm32Flash iflash;
+FlashVolStatic pv_iflash;
+
+Flash *lv_bl;
+Flash *lv_conf;
+Flash *lv_mib;
+Flash *lv_app;
+Flash *lv_update;
+
+static void port_flash_init(void) {
+	stm32_flash_init(&iflash);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)&iflash.flash, "flash0");
+
+	flash_vol_static_init(&pv_iflash, &iflash.flash);
+	flash_vol_static_create(&pv_iflash, "bootloader", 0,          60 * 1024,  &lv_bl);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_bl, "bootloader");
+
+	flash_vol_static_create(&pv_iflash, "bootconf",   60 * 1024,  2 * 1024,   &lv_conf);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_conf, "bootconf");
+
+	flash_vol_static_create(&pv_iflash, "mib",        62 * 1024,  2 * 1024,   &lv_mib);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_mib, "mib");
+
+	flash_vol_static_create(&pv_iflash, "app",        64 * 1024,  128 * 1024, &lv_app);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_app, "app");
+
+	flash_vol_static_create(&pv_iflash, "update",     192 * 1024, 64 * 1024,  &lv_update);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_update, "update");
+}
+
 
 int32_t port_init(void) {
 	port_setup_default_gpio();
-
+	port_flash_init();
 
 	#if !defined(CONFIG_APP_BL)
+		gpio_clear(GPIOE, GPIO10);
+
 		stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_MEDIUM_PERF);
 		stm32_clock_wait_init_done(&cmgr);
 
@@ -257,10 +295,18 @@ int32_t port_init(void) {
 		nbus_bp_port_init();
 		nbus_port0_init();
 
+		for (uint32_t i = 0; i < 10; i++) {
+			gpio_toggle(GPIOE, GPIO11);
+			vTaskDelay(100);
+		}
+
 		/** @todo move to the application controlling the board. Catch traffic
 		 *        destined to this device and make its API accessible. */
-		struct nbus_socket *local_socket = nbus_socket_allocate(&nbus_bp);
-		nbus_socket_bind(local_socket, (uint8_t[4]){0x00, 0x00, 0x00, 0x25}, 1);
+		struct nbus_socket *flash_proto_socket = nbus_socket_allocate(&nbus_bp);
+		nbus_socket_bind(flash_proto_socket, (uint8_t[4]){0x00, 0x00, 0x00, 0x25}, 1);
+
+		/* Access flash partitions to allow updating. */
+		nbus_flash_init(&flash_proto, &flash_proto_socket->datagram);
 
 		/** @todo create nbus2 switch inside of the application, not here. */
 		nbus2_switch_init(&sw);
