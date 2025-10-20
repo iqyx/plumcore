@@ -246,6 +246,11 @@ flash_updater_ret_t flash_updater_set_source_flash(FlashUpdater *self, Flash *fl
 }
 
 
+/**
+ * @todo This progressbar rendering is not functional/pretty on the current implementation
+ * of a graphic terminal console on a framebuffer device. It should be fixed on the terminal
+ * side.
+ */
 static void progress_bar(FlashUpdater *self, size_t pos, size_t total) {
 	if (self->console == NULL) {
 		return;
@@ -371,8 +376,8 @@ flash_updater_ret_t flash_updater_validate_source(FlashUpdater *self) {
 		/* initialize the decompressor before the image is accessed. */
 		xz_crc32_init();
 		self->xz = xz_dec_init(XZ_PREALLOC, 8192);
-		//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("xz_dec_init = %p"), self->xz);
 		if (self->xz == NULL) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: cannot initialize"));
 			return FLASH_UPDATER_RET_FAILED;
 		}
 	} else {
@@ -384,6 +389,7 @@ flash_updater_ret_t flash_updater_validate_source(FlashUpdater *self) {
 	/* Do it again with the right method set. */
 	memset(magic, 0, sizeof(magic));
 	if (abstract_image_read(self, 0, magic, sizeof(magic)) != FLASH_UPDATER_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot find ELF header"));
 		return FLASH_UPDATER_RET_FAILED;
 	}
 
