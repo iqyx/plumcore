@@ -52,13 +52,14 @@
 #include <services/stm32-flash/stm32-flash.h>
 #include <services/flash-vol-static/flash-vol-static.h>
 
-#if !defined(CONFIG_APP_BL)
+#if defined(CONFIG_APP_BL)
+	#include <xz.h>
+#else
+	#include <blake2s.h>
+	#include <services/nbus2/nbus2.h>
 	#include <services/stm32-clock/stm32-clock.h>
 	#include <services/generic-power/generic-power.h>
 #endif
-
-/* Libs */
-#include <xz.h>
 
 #define MODULE_NAME "port"
 
@@ -115,10 +116,40 @@ static void console_init(void) {
 	u_log_set_stream(console);
 }
 
-
 void usart1_isr(void) {
 	stm32_uart_interrupt_handler(&uart1);
 }
+
+
+/**********************************************************************************************************************
+ * Stacking connector nbus2 port init
+ **********************************************************************************************************************/
+
+Stm32Uart nbus2_uart;
+static void nbus2_init(void) {
+	/* USART3 TX half-duplex */
+	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO10);
+	gpio_set_output_options(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO10);
+	gpio_set_af(GPIOB, GPIO_AF7, GPIO10);
+
+	rcc_periph_clock_enable(RCC_USART3);
+	USART_CR3(USART3) |= USART_CR3_HDSEL;
+	USART_CR3(USART3) |= USART_CR3_OVRDIS;
+
+	stm32_uart_init(&nbus2_uart, USART3);
+	stm32_uart_set_rto(&nbus2_uart, true);
+	nbus2_uart.uart.vmt->set_bitrate(&nbus2_uart.uart, 250000);
+
+	nvic_enable_irq(NVIC_USART3_IRQ);
+	nvic_set_priority(NVIC_USART3_IRQ, 7 * 16);
+
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&nbus2_uart.stream, "nbus2_stream");
+}
+
+void usart3_isr(void) {
+	stm32_uart_interrupt_handler(&nbus2_uart);
+}
+
 
 
 void vPortSetupTimerInterrupt(void);
@@ -145,6 +176,8 @@ Stm32Flash iflash;
 FlashVolStatic pv_iflash;
 
 Flash *lv_bl;
+Flash *lv_conf;
+Flash *lv_mib;
 Flash *lv_app;
 Flash *lv_update;
 
@@ -152,98 +185,33 @@ static void port_flash_init(void) {
 	stm32_flash_init(&iflash);
 
 	flash_vol_static_init(&pv_iflash, &iflash.flash);
-	flash_vol_static_create(&pv_iflash, "bootloader", 0, 64 * 1024, &lv_bl);
-	flash_vol_static_create(&pv_iflash, "app", 64 * 1024, 128 * 1024, &lv_app);
-	flash_vol_static_create(&pv_iflash, "update", 192 * 1024, 64 * 1024, &lv_update);
+	flash_vol_static_create(&pv_iflash, "bootloader", 0,          60 * 1024,  &lv_bl);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_bl, "bootloader");
+
+	flash_vol_static_create(&pv_iflash, "bootconf",   60 * 1024,  2 * 1024,   &lv_conf);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_conf, "bootconf");
+
+	flash_vol_static_create(&pv_iflash, "mib",        62 * 1024,  2 * 1024,   &lv_mib);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_mib, "mib");
+
+	flash_vol_static_create(&pv_iflash, "app",        64 * 1024,  128 * 1024, &lv_app);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_app, "app");
+
+	flash_vol_static_create(&pv_iflash, "update",     192 * 1024, 64 * 1024,  &lv_update);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_update, "update");
 }
 
-
-uint8_t bl_xz_in_buf[256];
-uint8_t bl_xz_out_buf[256];
-
-struct xz_buf bl_xz_buf = {
-	bl_xz_in_buf,
-	0,
-	0,
-	bl_xz_out_buf,
-	0,
-	256
-};
-struct xz_dec *bl_xz;
-
-static inline uint32_t get_unaligned_le32(const uint8_t *buf) {
-	return (uint32_t)buf[0]
-			| ((uint32_t)buf[1] << 8)
-			| ((uint32_t)buf[2] << 16)
-			| ((uint32_t)buf[3] << 24);
-}
-
-static void xz_test(void) {
-	xz_crc32_init();
-	bl_xz = xz_dec_init(XZ_PREALLOC, 32768);
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("xz_dec_init = %p"), bl_xz);
-	if (bl_xz == NULL) {
-		return;
-	}
-
-	size_t pos = 0;
-	size_t osize = 0;
-	while (true) {
-		if (bl_xz_buf.in_pos == bl_xz_buf.in_size) {
-			if (lv_update->vmt->read(lv_update, pos, bl_xz_in_buf, 256) != FLASH_RET_OK) {
-				u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("flash reading failed"));
-				return;
-			}
-
-
-			bl_xz_buf.in_pos = 0;
-			bl_xz_buf.in_size = 256;
-			pos += 256;
-			console->vmt->write(console, "#", 1);
-
-		}
-
-		enum xz_ret ret = xz_dec_run(bl_xz, &bl_xz_buf);
-
-		/* Output full buffer size */
-		if (bl_xz_buf.out_pos == bl_xz_buf.out_size) {
-			osize += bl_xz_buf.out_pos;
-			bl_xz_buf.out_pos = 0;
-		}
-
-		if (ret == XZ_OK) {
-			continue;
-		}
-
-		/* Output the rest. */
-		osize += bl_xz_buf.out_pos;
-
-		if (ret == XZ_STREAM_END) {
-			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("stream end, size = %lu"), osize);
-			break;
-		}
-
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("some error ret = %d"), ret);
-		break;
-	}
-
-	xz_dec_end(bl_xz);
-}
-
+struct nbus_socket *socket;
 
 int32_t port_init(void) {
-	//watchdog_init(&watchdog, 8000, 1);
+	watchdog_init(&watchdog, 8000, 1);
 	port_setup_default_gpio();
 	console_init();
 	port_flash_init();
-	xz_test();
 
 	#if !defined(CONFIG_APP_BL)
+		nbus2_init();
 		gpio_set(GPIOA, GPIO5);
-		while (true) {
-			gpio_toggle(GPIOC, GPIO4);
-			vTaskDelay(500);
-		}
 	#endif
 
 	return PORT_INIT_OK;

@@ -13,7 +13,7 @@
 #include <libopencm3/stm32/gpio.h>
 #include <main.h>
 #include "nbus2.h"
-#include <blake2.h>
+#include <blake2s.h>
 #include "blake2s-siv.h"
 #include "halfsiphash.h"
 #include <chacha20.h>
@@ -520,6 +520,10 @@ nbus_ret_t nbus_init(Nbus *self, Stream *stream) {
 			goto err;
 		}
 	}
+
+	/* Set default keys. */
+	self->mac_key = "abcd";
+	self->mac_key_len = 4;
 
 	xTaskCreate(nbus_mac_task, "nbus-mac", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->mac_task));
 	if (self->mac_task == NULL) {

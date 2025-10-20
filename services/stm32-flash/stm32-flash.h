@@ -15,15 +15,7 @@
 #include <libopencm3/cm3/common.h>
 #include <interfaces/flash.h>
 
-/* This is a naive approach. Some STM32 families have non-uniform flash sectors. */
-#if defined(STM32G4)
-	#define STM32_FLASH_SIZE ((uint32_t)MMIO16(0x1fff75e0) << 10UL)
-	#define STM32_FLASH_SECTOR_SIZE 2048
-	#define STM32_FLASH_PAGE_SIZE 8
-	#define STM32_FLASH_BASE 0x08000000
-#else
-	#error "No device electronic signature flash size register defined for this MCU family."
-#endif
+#define STM32_FLASH_BASE 0x08000000
 
 
 typedef enum {
@@ -35,6 +27,9 @@ typedef enum {
 
 typedef struct {
 	bool initialized;
+	size_t flash_size;
+	size_t flash_sector_size;
+	size_t flash_page_size;
 
 	Flash flash;
 } Stm32Flash;

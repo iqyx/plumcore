@@ -2,6 +2,7 @@
 
 #include <main.h>
 #include <services/chainloader/chainloader.h>
+#include <services/flash-updater/flash-updater.h>
 
 
 typedef enum {
@@ -31,12 +32,20 @@ enum bl_state {
 
 	/* Signature checking is requested by bootloader configuration. */
 	BL_STATE_CHECK_SIGNATURE,
+
+	BL_STATE_FIND_UPDATE,
+	BL_STATE_VALIDATE_UPDATE,
+	BL_STATE_FLASH_UPDATE,
+	BL_STATE_DISABLE_UPDATE,
+	BL_STATE_RESET,
 };
 
 typedef struct {
 	/* Chainloader is a service accepting an ELF image residing in a memory,
 	 * performing various actions on it and eventually booting it. */
 	ChainLoader chainloader;
+
+	FlashUpdater updater;
 
 	/* Bootloader state machine state and state. */
 	TaskHandle_t task;
