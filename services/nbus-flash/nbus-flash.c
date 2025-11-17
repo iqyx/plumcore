@@ -64,7 +64,10 @@ static bool cbor_map_get_uint(CborValue *map, const char *key, uint32_t *i) {
 }
 
 
+/* Beware this implementation accepts any flash partition name and is a serious
+ * security hole. */
 static nbus_flash_ret_t process_cc_info(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
+	(void)self;
 	char dev_name[16];
 	cbor_map_get_str(imap, "n", dev_name, sizeof(dev_name));
 
@@ -105,6 +108,8 @@ static nbus_flash_ret_t process_cc_info(NbusFlash *self, CborValue *imap, CborEn
 
 
 static nbus_flash_ret_t process_cc_list(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
+	(void)self;
+	(void)imap;
 	cbor_encode_text_stringz(omap, "d");
 
 	CborEncoder device_list;
@@ -156,6 +161,7 @@ static nbus_flash_ret_t process_cc_open(NbusFlash *self, CborValue *imap, CborEn
 
 
 static nbus_flash_ret_t process_cc_close(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
+	(void)imap;
 	if (self->flash == NULL) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "no session opened");
@@ -268,6 +274,9 @@ static nbus_flash_ret_t process_cc_read(NbusFlash *self, CborValue *imap, CborEn
 
 
 static nbus_flash_ret_t process_cc_reset(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
+	(void)self;
+	(void)imap;
+	(void)omap;
 
 	SCB_AIRCR = (SCB_AIRCR_VECTKEY | SCB_AIRCR_SYSRESETREQ);
 	while (true) {
