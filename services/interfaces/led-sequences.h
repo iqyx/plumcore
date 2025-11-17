@@ -1,0 +1,37 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Common LED sequences
+ *
+ * Copyright (c) 2025, Marek Koza (qyx@krtko.org)
+ * All rights reserved.
+ */
+
+#pragma once
+
+#define LED_SEQ_HEARTBEAT LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_ON | LED_SEQ_TIME_MS(64), \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(128), \
+	LED_SEQ_SET | LED_SEQ_ON | LED_SEQ_TIME_MS(64), \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(1008), \
+	LED_SEQ_END \
+} \
+
+#define LED_SEQ_FAST_BLINK LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_ON | LED_SEQ_TIME_MS(128), \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(128), \
+	LED_SEQ_END \
+} \
+
+#define LED_SEQ_BLINK LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_ON | LED_SEQ_TIME_MS(256), \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(256), \
+	LED_SEQ_END \
+} \
+
+#define LED_SEQ_SLOW_BLINK LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_ON | LED_SEQ_TIME_MS(1008), \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(1008), \
+	LED_SEQ_END \
+} \
+
+
