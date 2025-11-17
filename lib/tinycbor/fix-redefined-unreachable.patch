@@ -1,0 +1,15 @@
+diff --git a/src/compilersupport_p.h b/src/compilersupport_p.h
+index 9251799..62e1842 100644
+--- a/src/compilersupport_p.h
++++ b/src/compilersupport_p.h
+@@ -216,7 +216,9 @@
+ #ifndef unlikely
+ #  define unlikely(x)   __builtin_expect(!!(x), 0)
+ #endif
+-#  define unreachable() __builtin_unreachable()
++#  if !defined(unreachable)
++#    define unreachable() __builtin_unreachable()
++#  endif
+ #elif defined(_MSC_VER)
+ #  define likely(x)     (x)
+ #  define unlikely(x)   (x)

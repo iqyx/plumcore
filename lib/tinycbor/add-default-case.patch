@@ -1,0 +1,12 @@
+diff --git a/src/cborparser.c b/src/cborparser.c
+index 31c8d8b..88186a5 100644
+--- a/src/cborparser.c
++++ b/src/cborparser.c
+@@ -243,6 +243,7 @@ static CborError preparse_value(CborValue *it)
+         case 29:
+         case 30:
+         case Break:
++        default:
+             cbor_assert(false);  /* these conditions can't be reached */
+             return CborErrorUnexpectedBreak;
+         }
