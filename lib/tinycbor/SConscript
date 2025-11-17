@@ -5,7 +5,12 @@ Import("objs")
 if conf["LIB_TINYCBOR"] == "y":
 
 	env.Git('https://github.com/intel/tinycbor', branch='main')
-	env.Patch('add-create-byte-string-array.patch')
+	env.Patch([
+		'add-create-byte-string-array.patch',
+		'add-default-case.patch',
+		'fix-redefined-unreachable.patch',
+		'fix-undefined-flt16.patch',
+	])
 
 	env.Command(
 		File(env['LIB_DEFAULT_REPO_DIR'] + '/src/tinycbor-version.h'),
