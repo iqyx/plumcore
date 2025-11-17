@@ -89,6 +89,7 @@ menu "Low-level platform drivers"
 
 		source "services/stm32-uart/Kconfig"
 		source "services/nbus2-switch/Kconfig"
+		source "services/stm32-gpio/Kconfig"
 	endmenu
 endmenu
 
