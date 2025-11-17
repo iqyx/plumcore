@@ -232,6 +232,7 @@ menu "High level device drivers"
 		default n
 
 	source "services/iis2iclx/Kconfig"
+	source "services/gpio-led/Kconfig"
 
 endmenu
 

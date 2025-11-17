@@ -1,0 +1,3 @@
+config SERVICE_GPIO_LED
+	bool "LED on a GPIO service"
+	default y
