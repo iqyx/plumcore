@@ -2,7 +2,7 @@
  *
  * GPIO interface
  *
- * Copyright (c) 2024, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2024-2025, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -18,21 +18,28 @@ typedef enum {
 } gpio_ret_t;
 
 enum gpio_mode {
-	MODE_INPUT,
+	MODE_INPUT = 0,
 	MODE_OUTPUT,
 	MODE_ALTERNATE,
 	MODE_ANALOG,
 };
 
 enum gpio_pull {
-	PULL_NONE,
-	PULL_WEAK,
-	PULL_STRONG,
+	PULL_NONE = 0,
+	PULL_UP,
+	PULL_DOWN,
 };
 
 enum gpio_otype {
 	OTYPE_PP,
 	OTYPE_OD,
+};
+
+enum gpio_ospeed {
+	OSPEED_LOW = 0,
+	OSPEED_MEDIUM,
+	OSPEED_HIGH,
+	OSPEED_VERYHIGH,
 };
 
 typedef struct gpio Gpio;
@@ -45,6 +52,7 @@ struct gpio_vmt {
 	gpio_ret_t (*set_pinmux)(Gpio *self, uint32_t mux);
 	gpio_ret_t (*set_pull)(Gpio *self, enum gpio_pull pull);
 	gpio_ret_t (*set_otype)(Gpio *self, enum gpio_otype otype);
+	gpio_ret_t (*set_ospeed)(Gpio *self, enum gpio_ospeed ospeed);
 };
 
 
