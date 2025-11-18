@@ -30,9 +30,6 @@
 #include <main.h>
 #include "port.h"
 
-#include "module_led.h"
-#include "interface_led.h"
-
 #include <interfaces/sensor.h>
 #include <interfaces/servicelocator.h>
 #include <interfaces/i2c-bus.h>
@@ -59,6 +56,10 @@
 	#include <services/nbus2/nbus2.h>
 	#include <services/stm32-clock/stm32-clock.h>
 	#include <services/generic-power/generic-power.h>
+	#include <interfaces/led.h>
+	#include <interfaces/led-sequences.h>
+	#include <services/stm32-gpio/stm32-gpio.h>
+	#include <services/gpio-led/gpio-led.h>
 #endif
 
 #define MODULE_NAME "port"
@@ -72,6 +73,11 @@ Watchdog watchdog;
 
 #if !defined(CONFIG_APP_BL)
 	Stm32Clock cmgr;
+	Stm32Gpio gpioa;
+	Stm32Gpio gpiob;
+	Stm32Gpio gpioc;
+	GpioLed led_stat;
+	GpioLed led_error;
 #endif
 
 
@@ -163,15 +169,6 @@ void vPortSetupTimerInterrupt(void) {
 }
 
 
-static void port_setup_default_gpio(void) {
-	/* LEDs */
-	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO4);
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO5);
-	gpio_set(GPIOC, GPIO4);
-	gpio_clear(GPIOA, GPIO5);
-}
-
-
 Stm32Flash iflash;
 FlashVolStatic pv_iflash;
 
@@ -205,13 +202,33 @@ struct nbus_socket *socket;
 
 int32_t port_init(void) {
 	watchdog_init(&watchdog, 8000, 1);
-	port_setup_default_gpio();
 	console_init();
 	port_flash_init();
 
+	stm32_gpio_init(&gpioa, STM32_PORTA);
+	stm32_gpio_init(&gpiob, STM32_PORTB);
+	stm32_gpio_init(&gpioc, STM32_PORTC);
+
+	/* LED1 */
+	gpioc.pin[4].vmt->set_mode(&(gpioc.pin[4]), MODE_OUTPUT);
+	gpiob.pin[0].vmt->set_mode(&(gpiob.pin[0]), MODE_OUTPUT);
+	gpiob.pin[1].vmt->set_mode(&(gpiob.pin[1]), MODE_OUTPUT);
+
+	/* LED2 */
+	gpioa.pin[5].vmt->set_mode(&(gpioa.pin[5]), MODE_OUTPUT);
+	gpioa.pin[6].vmt->set_mode(&(gpioa.pin[6]), MODE_OUTPUT);
+	gpioa.pin[7].vmt->set_mode(&(gpioa.pin[7]), MODE_OUTPUT);
+
+	gpio_led_init(&led_stat, &(gpioc.pin[4]), &(gpiob.pin[0]), &(gpiob.pin[1]));
+	gpio_led_invert(&led_stat, true);
+	led_stat.led.vmt->sequence(&led_stat.led, LED_SEQ_HEARTBEAT);
+
+	gpio_led_init(&led_error, &(gpioa.pin[7]), &(gpioa.pin[6]), &(gpioa.pin[5]));
+	gpio_led_invert(&led_error, true);
+	led_error.led.vmt->set(&led_error.led, LED_COLOR_RGB(0, 255, 255));
+
 	#if !defined(CONFIG_APP_BL)
 		nbus2_init();
-		gpio_set(GPIOA, GPIO5);
 	#endif
 
 	return PORT_INIT_OK;
