@@ -1,0 +1,3 @@
+config SERVICE_SYSLOG
+	bool "Syslog-style system-wide logging service"
+	default y

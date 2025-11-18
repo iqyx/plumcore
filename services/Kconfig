@@ -355,6 +355,8 @@ menu "System services"
 		bool "Flash firmware updater"
 		default n
 
+	source "services/syslog/Kconfig"
+
 endmenu
 
 menu "Data manipulation/evaluation/processing services"
