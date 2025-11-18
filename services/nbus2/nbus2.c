@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <interfaces/stream.h>
 #include <libopencm3/stm32/gpio.h>
 #include <main.h>

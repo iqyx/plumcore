@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <math.h>
 #include <time.h>
+#include <string.h>
 
 #include "config.h"
 #include "FreeRTOS.h"

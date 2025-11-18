@@ -7,6 +7,7 @@
  */
 
 #include <u_log.h>
+#include <stdio.h>
 
 #include "configlib.h"
 
