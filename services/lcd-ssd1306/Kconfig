@@ -1,0 +1,3 @@
+config SERVICE_LCD_SSD1306
+	bool "Driver for SSD1306 over I2C"
+	default n

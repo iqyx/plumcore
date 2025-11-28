@@ -219,6 +219,8 @@ menu "High level device drivers"
 		bool "ST7586 LCD driver"
 		default n
 
+	source "services/lcd-ssd1306/Kconfig"
+
 	config SERVICE_ALS_VCNL4035
 		bool "VCNL4035 ALS/proximity sensor"
 		default n
