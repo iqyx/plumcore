@@ -175,17 +175,13 @@ lcd_ssd1306_ret_t lcd_ssd1306_init(LcdSsd1306 *self, I2cBus *i2c) {
 
 	lcd_init_controller(self);
 
-	/* Initialize the framebuffer memory. There mus tbe a single byte on the beginning
-	 * corresponding to the START_DATA_STREAM value (0x40). We are using 4 bytes
-	 * to keep proper alignment. */
+	/** @todo make the framebuffer size configurable, there are 128x32 displays too */
 	self->dmem_size = 128 * 64 / 8;
 	self->dmem = calloc(self->dmem_size, sizeof(uint8_t));
 	if (self->dmem == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot allocate framebuffer memory"));
 		return LCD_SSD1306_RET_FAILED;
 	}
-
-	vTaskDelay(100);
-	memset(self->dmem, 0x00, self->dmem_size);
 	lcd_send_data(self);
 
 	self->fb.parent = self;
