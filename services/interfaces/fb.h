@@ -18,13 +18,13 @@ typedef enum {
 } fb_ret_t;
 
 enum fb_mode {
-	FB_MODE_G1,
-	FB_MODE_G2,
-	FB_MODE_G4,
-	FB_MODE_G8,
-	FB_MODE_RGBX222,
-	FB_MODE_RGB565,
-	FB_MODE_RGB888,
+	FB_MODE_G1 = 1,
+	FB_MODE_G2 = 2,
+	FB_MODE_G4 = 4,
+	FB_MODE_G8 = 8,
+	FB_MODE_RGBX222 = 6,
+	FB_MODE_RGB565 = 16,
+	FB_MODE_RGB888 = 24,
 };
 
 
@@ -33,6 +33,9 @@ typedef struct fb Fb;
 struct fb_stat {
 	/* Native mode of the framebuffer. */
 	enum fb_mode mode;
+	size_t w;
+	size_t h;
+
 };
 
 struct fb_vmt {

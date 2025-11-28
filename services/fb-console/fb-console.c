@@ -38,49 +38,12 @@
 #define MODULE_NAME "fb-console"
 
 #include "nokia-fonts.inc"
-
-const struct imdata im_plum = {
-        32,
-        30,
-        FB_MODE_G2,
-        {
-                0xff, 0xff, 0x5f, 0xff, 0xff, 0xff, 0xff, 0xff,
-                0xff, 0xff, 0x0b, 0xff, 0xff, 0xff, 0xff, 0xff,
-                0xff, 0xfe, 0x0f, 0xff, 0xff, 0xff, 0xff, 0xff,
-                0xff, 0xfe, 0x0f, 0xff, 0xff, 0xff, 0xff, 0xff,
-                0xff, 0xfe, 0x07, 0xff, 0xaa, 0xaf, 0xff, 0xff,
-                0xff, 0xea, 0x42, 0xf9, 0x55, 0x56, 0xff, 0xff,
-                0xff, 0xab, 0x80, 0xa5, 0x6a, 0x55, 0x7f, 0xff,
-                0xfe, 0xaf, 0xd0, 0x55, 0x5a, 0xa9, 0x5b, 0xff,
-                0xfe, 0xbf, 0xe5, 0x55, 0x55, 0xaa, 0x56, 0xff,
-                0xfa, 0xff, 0x95, 0x6a, 0x95, 0x6a, 0xa5, 0xbf,
-                0xfb, 0xff, 0x56, 0xaa, 0xa9, 0x5a, 0xa9, 0x7f,
-                0xeb, 0xfe, 0x5a, 0xaa, 0xaa, 0x56, 0xa9, 0x5f,
-                0xef, 0xfd, 0x5a, 0xaa, 0xaa, 0x95, 0xaa, 0x5b,
-                0xaf, 0xfd, 0x6a, 0xaa, 0xaa, 0xa5, 0xaa, 0x97,
-                0xaf, 0xf9, 0x6a, 0xaa, 0xaa, 0xa5, 0x6a, 0x97,
-                0xaf, 0xf9, 0x6a, 0xaa, 0xaa, 0xa9, 0x5a, 0x96,
-                0xaf, 0xf9, 0x6a, 0xaa, 0xaa, 0xaa, 0x5a, 0xa6,
-                0xaf, 0xea, 0x5a, 0xaa, 0xaa, 0xaa, 0x56, 0xa5,
-                0xef, 0xee, 0x5a, 0xaa, 0xaa, 0xaa, 0x96, 0xa5,
-                0xeb, 0xaf, 0x5a, 0xaa, 0xaa, 0xaa, 0x96, 0xa5,
-                0xfa, 0xaf, 0x96, 0xaa, 0xaa, 0xaa, 0x95, 0xa5,
-                0xfe, 0xbf, 0xd6, 0xaa, 0xaa, 0xaa, 0x95, 0x96,
-                0xff, 0xbf, 0xd5, 0xaa, 0xaa, 0xaa, 0xa5, 0x97,
-                0xff, 0xff, 0xf5, 0xaa, 0xaa, 0xaa, 0xa5, 0x57,
-                0xff, 0xff, 0xf9, 0x6a, 0xaa, 0xaa, 0x95, 0x5f,
-                0xff, 0xff, 0xfe, 0x5a, 0xaa, 0xaa, 0x95, 0x6f,
-                0xff, 0xff, 0xff, 0x95, 0xaa, 0xaa, 0x55, 0xbf,
-                0xff, 0xff, 0xff, 0xe5, 0x5a, 0xa5, 0x5b, 0xff,
-                0xff, 0xff, 0xff, 0xfe, 0x55, 0x55, 0x7f, 0xff,
-                0xff, 0xff, 0xff, 0xff, 0xe9, 0x6b, 0xff, 0xff,
-        }
-};
+#include "plum-pictures.inc"
 
 
-/***************************************************************************************************
+/**********************************************************************************************************************
  * Stream interface API
- ***************************************************************************************************/
+ **********************************************************************************************************************/
 
 static stream_ret_t stream_write(Stream *self, const void *buf, size_t size) {
 	if (u_assert(self != NULL) ||
@@ -129,10 +92,27 @@ static const struct stream_vmt fb_console_stream_vmt = {
 };
 
 
+/**********************************************************************************************************************
+ * Service implementation
+ **********************************************************************************************************************/
+
 fb_console_ret_t fb_console_init(FbConsole *self, Fb *fb) {
 	memset(self, 0, sizeof(FbConsole));
 
 	self->fb = fb;
+
+	struct fb_stat stat = {0};
+	if (fb->vmt->stat != NULL && self->fb->vmt->stat(self->fb, &stat) == FB_RET_OK) {
+		self->fb_w = stat.w;
+		self->fb_h = stat.h;
+		self->fb_mode = stat.mode;
+		self->fb_bpp = (int)stat.mode;
+	} else {
+		self->fb_w = 240;
+		self->fb_h = 160;
+		self->fb_bpp = 2;
+	}
+
 	self->color = 0x3;
 	self->font = nokia_small_data;
 
@@ -141,29 +121,10 @@ fb_console_ret_t fb_console_init(FbConsole *self, Fb *fb) {
 		goto err;
 	}
 
-	char s[64] = {0};
-	strlcat(s, PORT_BANNER, sizeof(s));
-	strlcat(s, " (", sizeof(s));
-	strlcat(s, PORT_NAME, sizeof(s));
-	strlcat(s, ")", sizeof(s));
-	fb_text(self->fb, s, 40, 0, NULL, 3, nokia_small_bold_data);
-
-	s[0] = '\0';
-	strlcat(s, UMESH_VERSION, sizeof(s));
-	fb_text(self->fb, s, 40, 10, NULL, 3, nokia_small_data);
-
-	s[0] = '\0';
-	strlcat(s, "App: ", sizeof(s));
-	strlcat(s, CONFIG_APP_NAME, sizeof(s));
-	fb_text(self->fb, s, 40, 22, NULL, 3, nokia_small_data);
-
-	fb_image(self->fb, 0, 0, &im_plum);
-
-	self->posy = 40;
 	self->stream.parent = self;
 	self->stream.vmt = &fb_console_stream_vmt;
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized, fb dev (%lu x %lu), %d bpp"), self->fb_w, self->fb_h, self->fb_bpp);
 	return FB_CONSOLE_RET_OK;
 err:
 	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot initialize the service"));
@@ -173,6 +134,16 @@ err:
 
 fb_console_ret_t fb_console_free(FbConsole *self) {
 	(void)self;
+
+	return FB_CONSOLE_RET_OK;
+}
+
+
+fb_console_ret_t fb_console_set_scroll(FbConsole *self, size_t start, size_t end) {
+	self->posy = start;
+	self->scrolly_start = start;
+	self->scrolly_end = end;
+
 	return FB_CONSOLE_RET_OK;
 }
 
@@ -181,8 +152,8 @@ fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len
 	for (size_t i = 0; i < len; i++) {
 		char c = ((const char *)buf)[i];
 
-		if ((self->posy + 8) > 160) {
-			fb_console_scroll(self, 40, 160, 8);
+		if ((self->posy + 8) > self->fb_h) {
+			fb_console_scroll(self, self->scrolly_start, self->scrolly_end, 8);
 			self->posy -= 8;
 		}
 		if (self->state == FB_CONSOLE_NORMAL && c == 0x1b) {
@@ -229,7 +200,7 @@ fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len
 			const char text[2] = {c, '\0'};
 			fb_text(self->fb, text, self->posx, self->posy, &self->posx, self->color, self->font);
 		}
-		if (c == '\n' || (self->posx + 8) >= 240) {
+		if (c == '\n' || (self->posx + 8) >= self->fb_w) {
 			self->posy += 8;
 			self->posx = 0;
 			self->fb->vmt->flush(self->fb);
@@ -242,20 +213,26 @@ fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len
 
 fb_console_ret_t fb_console_scroll(FbConsole *self, size_t r_start, size_t r_end, size_t step) {
 	/** @todo handle the width properly */
+	size_t lb = self->fb_w * self->fb_mode / 8;
 
 	for (size_t y = r_start; y < (r_end - step); y++) {
-		uint8_t d[60];
-		self->fb->vmt->read(self->fb, (y + step) * 60, d, 60, FB_MODE_G2);
-		self->fb->vmt->write(self->fb, y * 60, d, 60, FB_MODE_G2);
+		uint8_t d[lb];
+		self->fb->vmt->read(self->fb, (y + step) * lb, d, lb, self->fb_mode);
+		self->fb->vmt->write(self->fb, y * lb, d, lb, self->fb_mode);
 	}
 	for (size_t y = (r_end - step); y < r_end; y++) {
-		uint8_t d[60] = {0};
-		self->fb->vmt->write(self->fb, y * 60, d, 60, FB_MODE_G2);
+		uint8_t d[lb];
+		memset(d, 0, lb);
+		self->fb->vmt->write(self->fb, y * lb, d, lb, self->fb_mode);
 	}
 
 	return FB_CONSOLE_RET_OK;
 }
 
+
+/**********************************************************************************************************************
+ * Basic drawing primitives (text and image)
+ **********************************************************************************************************************/
 
 /**
  * @brief Render simple text on a framebuffer device
@@ -265,19 +242,24 @@ fb_console_ret_t fb_console_scroll(FbConsole *self, size_t r_start, size_t r_end
 fb_ret_t fb_text(Fb *self, const char *text, size_t posx, size_t posy, size_t *advance, uint8_t color, const struct small_char *font) {
 	/** @todo handle the width properly */
 
+	struct fb_stat stat = {0};
+	if (self->vmt->stat(self, &stat) != FB_RET_OK) {
+		return FB_RET_FAILED;
+	}
+
 	char c;
 	while (c = *text) {
 		for (size_t y = 0; y < 8; y++) {
-			uint8_t d[60];
-			self->vmt->read(self, (posy + y) * 60, d, 60, FB_MODE_G2);
+			size_t lb = stat.w * stat.mode / 8;
+			uint8_t d[lb];
 
+			self->vmt->read(self, (posy + y) * lb, d, lb, stat.mode);
 			for (size_t x = 0; x < font[c - 32].width; x++) {
 				if (font[c - 32].rows[y] & (0x80 >> x)) {
-					d[(x + posx) / 4] |= ((color & 0x03) << 6) >> (((x + posx) % 4) * 2);
+					d[(x + posx) * stat.mode / 8] |= ((color & ((0x01 << stat.mode) - 1)) << (8 - stat.mode)) >> (((x + posx) % (8 / stat.mode)) * stat.mode);
 				}
 			}
-
-			self->vmt->write(self, (posy + y) * 60, d, 60, FB_MODE_G2);
+			self->vmt->write(self, (posy + y) * lb, d, lb, stat.mode);
 		}
 		posx += font[c - 32].advance;
 		if (advance != NULL) {
@@ -297,16 +279,85 @@ fb_ret_t fb_text(Fb *self, const char *text, size_t posx, size_t posy, size_t *a
  * @todo move to the plumcore-grlib library
  */
 fb_ret_t fb_image(Fb *self, size_t posx, size_t posy, const struct imdata *data) {
+	struct fb_stat stat = {0};
+	if (self->vmt->stat(self, &stat) != FB_RET_OK) {
+		return FB_RET_FAILED;
+	}
+
 	for (size_t y = 0; y < data->h; y++) {
-		uint8_t d[60];
-		self->vmt->read(self, (posy + y) * 60, d, 60, FB_MODE_G2);
+		size_t lb = stat.w * stat.mode / 8;
+		uint8_t d[lb];
+		self->vmt->read(self, (posy + y) * lb, d, lb, stat.mode);
 
 		for (size_t x = 0; x < data->w; x++) {
-			d[(x + posx) / 4] = ~(data->data[y * (data->w / 4) + (x / 4)]);
+			d[(x + posx) * stat.mode / 8] = ~(data->data[y * (data->w * stat.mode * stat.mode / 8) + (x * stat.mode / 8)]);
 		}
 
-		self->vmt->write(self, (posy + y) * 60, d, 60, FB_MODE_G2);
+		self->vmt->write(self, (posy + y) * lb, d, lb, stat.mode);
 	}
 
 	return FB_RET_OK;
 }
+
+
+/**********************************************************************************************************************
+ * Some standard banners
+ **********************************************************************************************************************/
+
+fb_console_ret_t fb_console_banner_bootloader(FbConsole *self) {
+	if (self->fb_mode == FB_MODE_G1) {
+		fb_image(self->fb, 0, 0, &im_plum_g1);
+	} else if (self->fb_mode == FB_MODE_G2) {
+		fb_image(self->fb, 0, 0, &im_plum_g2);
+	};
+
+	char s[64] = {0};
+	strlcat(s, PORT_BANNER, sizeof(s));
+	strlcat(s, " (", sizeof(s));
+	strlcat(s, PORT_NAME, sizeof(s));
+	strlcat(s, ")", sizeof(s));
+	fb_text(self->fb, s, 40, 0, NULL, 3, nokia_small_bold_data);
+
+	s[0] = '\0';
+	strlcat(s, UMESH_VERSION, sizeof(s));
+	fb_text(self->fb, s, 40, 10, NULL, 3, nokia_small_data);
+
+	s[0] = '\0';
+	strlcat(s, "App: ", sizeof(s));
+	strlcat(s, CONFIG_APP_NAME, sizeof(s));
+	fb_text(self->fb, s, 40, 22, NULL, 3, nokia_small_data);
+
+	fb_console_set_scroll(self, 40, self->fb_h);
+	self->fb->vmt->flush(self->fb);
+
+	return FB_RET_OK;
+}
+
+
+fb_console_ret_t fb_console_banner_bootloader_128_64(FbConsole *self) {
+	char s[64] = {0};
+	strlcat(s, PORT_BANNER, sizeof(s));
+	strlcat(s, " (", sizeof(s));
+	strlcat(s, PORT_NAME, sizeof(s));
+	strlcat(s, ")", sizeof(s));
+	fb_text(self->fb, s, 0, 0, NULL, 3, nokia_small_bold_data);
+
+	s[0] = '\0';
+	strlcat(s, UMESH_VERSION, sizeof(s));
+	fb_text(self->fb, s, 0, 10, NULL, 3, nokia_small_data);
+	fb_text(self->fb, "________________________________", 0, 12, NULL, 3, nokia_small_data);
+
+	if (self->fb_mode == FB_MODE_G1) {
+		fb_image(self->fb, self->fb_w / 2 - 16, 28, &im_plum_g1);
+	} else if (self->fb_mode == FB_MODE_G2) {
+		fb_image(self->fb, self->fb_w / 2 - 16, 28, &im_plum_g2);
+	};
+
+	fb_console_set_scroll(self, 24, self->fb_h);
+	self->posy = self->fb_h;
+	self->fb->vmt->flush(self->fb);
+
+	return FB_RET_OK;
+}
+
+

@@ -40,9 +40,16 @@ enum fb_console_text_state {
 
 typedef struct fb_console {
 	Fb *fb;
+	size_t fb_w;
+	size_t fb_h;
+	int fb_bpp;
+	enum fb_mode fb_mode;
+
 	Stream stream;
 	size_t posy;
 	size_t posx;
+	size_t scrolly_start;
+	size_t scrolly_end;
 	uint8_t color;
 	enum fb_console_text_state state;
 	const struct small_char *font;
@@ -54,8 +61,12 @@ typedef struct fb_console {
 
 fb_console_ret_t fb_console_init(FbConsole *self, Fb *fb);
 fb_console_ret_t fb_console_free(FbConsole *self);
+fb_console_ret_t fb_console_set_scroll(FbConsole *self, size_t start, size_t end);
 fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len);
 fb_console_ret_t fb_console_scroll(FbConsole *self, size_t r_start, size_t r_end, size_t step);
 
 fb_ret_t fb_text(Fb *self, const char *text, size_t posx, size_t posy, size_t *advance, uint8_t color, const struct small_char *font);
 fb_ret_t fb_image(Fb *self, size_t posx, size_t posy, const struct imdata *data);
+
+fb_console_ret_t fb_console_banner_bootloader(FbConsole *self);
+fb_console_ret_t fb_console_banner_bootloader_128_64(FbConsole *self);
