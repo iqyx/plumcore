@@ -1,8 +1,11 @@
 from PIL import Image
 
-im = Image.open('plum_32_g2.png')
+im = Image.open('plum_32_g1.png')
 
 ## @todo handle palette data and colors properly
+
+bpp = 1
+divbpp = 8 // bpp
 
 print(f'const struct imdata im = {{')
 print(f'\t{im.width},')
@@ -15,9 +18,9 @@ imdata2 = b'';
 for y in range(im.height):
 	linedata = 0;
 	for x in range(im.width):
-		linedata = linedata * 4 + imdata[y * im.width + x]
+		linedata = (linedata << bpp) + imdata[y * im.width + x]
 
-	linedata = linedata.to_bytes(int(im.width / 4))
+	linedata = linedata.to_bytes(int(im.width / divbpp))
 	imdata2 += linedata
 
 	print('\t\t' + ', '.join(['0x%02x' % b for b in linedata]) + ',')
