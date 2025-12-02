@@ -37,7 +37,10 @@ static lcd_ssd1306_ret_t lcd_send_cmd_args(LcdSsd1306 *self, uint8_t cmd, size_t
 	va_start(args, nargs);
 	while (nargs--) {
 		uint8_t arg = va_arg(args, uint32_t);
-		lcd_send_cmd(self, arg);
+		if (lcd_send_cmd(self, arg) != LCD_SSD1306_RET_OK) {
+			va_end(args);
+			return LCD_SSD1306_RET_FAILED;
+		}
 	}
 	va_end(args);
 
@@ -68,27 +71,26 @@ static lcd_ssd1306_ret_t lcd_send_data(LcdSsd1306 *self) {
 
 
 static lcd_ssd1306_ret_t lcd_init_controller(LcdSsd1306 *self) {
-	lcd_send_cmd_args(self, SSD1306_DISPLAY_OFF, 0);
-	lcd_send_cmd_args(self, SSD1306_SET_OSC_FREQ, 1, 0x80);
-	lcd_send_cmd_args(self, SSD1306_SET_MUX_RATIO, 1, 0x3f);
-	lcd_send_cmd_args(self, SSD1306_DISPLAY_OFFSET, 1, 0x00);
-	lcd_send_cmd_args(self, SSD1306_SET_START_LINE, 0);
-	lcd_send_cmd_args(self, SSD1306_DIS_NORMAL, 0);
-	lcd_send_cmd_args(self, SSD1306_DIS_ENT_DISP_ON, 0);
-	lcd_send_cmd_args(self, SSD1306_SEG_REMAP_OP, 0);
-	lcd_send_cmd_args(self, SSD1306_COM_SCAN_DIR_OP, 0);
-	lcd_send_cmd_args(self, SSD1306_COM_PIN_CONF, 1, 0x12);
-	lcd_send_cmd_args(self, SSD1306_SET_CONTRAST, 1, 0x7f);
-	lcd_send_cmd_args(self, SSD1306_SET_PRECHARGE, 1, 0xc2);
-	lcd_send_cmd_args(self, SSD1306_VCOM_DESELECT, 1, 0x40);
-
-	lcd_send_cmd_args(self, SSD1306_MEMORY_ADDR_MODE, 1, 0x01);
-	lcd_send_cmd_args(self, SSD1306_DEACT_SCROLL, 0);
-
-	lcd_send_cmd_args(self, SSD1306_SET_CHAR_REG, 1, 0x14);
-	lcd_send_cmd_args(self, SSD1306_DISPLAY_ON, 0);
-
-	return LCD_SSD1306_RET_OK;
+	if (lcd_send_cmd_args(self, SSD1306_DISPLAY_OFF, 0) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_SET_OSC_FREQ, 1, 0x80) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_SET_MUX_RATIO, 1, 0x3f) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_DISPLAY_OFFSET, 1, 0x00) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_SET_START_LINE, 0) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_DIS_NORMAL, 0) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_DIS_ENT_DISP_ON, 0) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_SEG_REMAP_OP, 0) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_COM_SCAN_DIR_OP, 0) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_COM_PIN_CONF, 1, 0x12) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_SET_CONTRAST, 1, 0x7f) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_SET_PRECHARGE, 1, 0xc2) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_VCOM_DESELECT, 1, 0x40) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_MEMORY_ADDR_MODE, 1, 0x01) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_DEACT_SCROLL, 0) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_SET_CHAR_REG, 1, 0x14) == LCD_SSD1306_RET_OK &&
+	    lcd_send_cmd_args(self, SSD1306_DISPLAY_ON, 0) == LCD_SSD1306_RET_OK) {
+		return LCD_SSD1306_RET_OK;
+	}
+	return LCD_SSD1306_RET_FAILED;
 }
 
 
@@ -173,7 +175,10 @@ lcd_ssd1306_ret_t lcd_ssd1306_init(LcdSsd1306 *self, I2cBus *i2c) {
 
 	self->i2c = i2c;
 
-	lcd_init_controller(self);
+	if (lcd_init_controller(self) != LCD_SSD1306_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("controller not responding"));
+		return LCD_SSD1306_RET_FAILED;
+	}
 
 	/** @todo make the framebuffer size configurable, there are 128x32 displays too */
 	self->dmem_size = 128 * 64 / 8;
