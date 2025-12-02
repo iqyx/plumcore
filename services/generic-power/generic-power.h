@@ -12,6 +12,7 @@
 #include <libopencm3/stm32/timer.h>
 #include <interfaces/power.h>
 #include <interfaces/dac.h>
+#include <interfaces/gpio.h>
 
 typedef enum  {
 	GENERIC_POWER_RET_OK = 0,
@@ -21,8 +22,7 @@ typedef enum  {
 
 typedef struct generic_power {
 	/* libopencm3 GPIO style enable */
-	uint32_t locm3_enable_port;
-	uint32_t locm3_enable_pin;
+	Gpio *enable;
 	bool enable_invert;
 
 	/* If timer is enabled (nonzero), use a timer to generate PWM
@@ -48,7 +48,7 @@ typedef struct generic_power {
 generic_power_ret_t generic_power_init(GenericPower *self);
 generic_power_ret_t generic_power_free(GenericPower *self);
 
-generic_power_ret_t generic_power_set_enable_gpio(GenericPower *self, uint32_t port, uint32_t pin, bool invert);
+generic_power_ret_t generic_power_set_enable_gpio(GenericPower *self, Gpio *enable, bool invert);
 generic_power_ret_t generic_power_set_pwm(GenericPower *self, uint32_t timer, enum tim_oc_id timer_oc);
 generic_power_ret_t generic_power_set_voltage_dac(GenericPower *self, Dac *dac_p, Dac *dac_m);
 generic_power_ret_t generic_power_set_vref(GenericPower *self, float vref_v);

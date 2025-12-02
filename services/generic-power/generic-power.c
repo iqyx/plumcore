@@ -14,9 +14,9 @@
 #include <main.h>
 #include <interfaces/power.h>
 #include <libopencm3/stm32/rcc.h>
-#include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/timer.h>
 #include <interfaces/dac.h>
+#include <interfaces/gpio.h>
 
 #include "generic-power.h"
 
@@ -35,13 +35,13 @@ static power_ret_t generic_power_enable(Power *self, bool enable) {
 		if (power->timer) {
 			timer_set_oc_value(power->timer, power->timer_oc, (uint32_t)((power->voltage_v / power->vref_v) * 255.0f));
 		} else {
-			gpio_set(power->locm3_enable_port, power->locm3_enable_pin);
+			power->enable->vmt->set(power->enable, true);
 		}
 	} else {
 		if (power->timer) {
 			timer_set_oc_value(power->timer, power->timer_oc, 255 - (uint32_t)((power->voltage_v / power->vref_v) * 255.0f));
 		} else {
-			gpio_clear(power->locm3_enable_port, power->locm3_enable_pin);
+			power->enable->vmt->set(power->enable, false);
 		}
 	}
 
@@ -108,9 +108,8 @@ generic_power_ret_t generic_power_free(GenericPower *self) {
 }
 
 
-generic_power_ret_t generic_power_set_enable_gpio(GenericPower *self, uint32_t port, uint32_t pin, bool invert) {
-	self->locm3_enable_port = port;
-	self->locm3_enable_pin = pin;
+generic_power_ret_t generic_power_set_enable_gpio(GenericPower *self, Gpio *enable, bool invert) {
+	self->enable = enable;
 	self->enable_invert = invert;
 	return GENERIC_POWER_RET_OK;
 }
