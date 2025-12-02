@@ -22,7 +22,7 @@
 
 static lcd_ssd1306_ret_t lcd_send_cmd(LcdSsd1306 *self, uint8_t cmd) {
 	uint8_t txdata[2] = {SSD1306_COMMAND, cmd};
-	if (self->i2c->transfer(self->i2c->parent, 0x3c, txdata, sizeof(txdata), NULL, 0) != I2C_BUS_RET_OK) {
+	if (self->i2c->vmt->transfer(self->i2c, 0x3c, txdata, sizeof(txdata), NULL, 0) != I2C_BUS_RET_OK) {
 		return LCD_SSD1306_RET_FAILED;
 	}
 
@@ -58,7 +58,7 @@ static lcd_ssd1306_ret_t lcd_send_data(LcdSsd1306 *self) {
 				buf[1 + y / 8] |= (0x01 << (y % 8));
 			}
 		}
-		if (self->i2c->transfer(self->i2c->parent, 0x3c, buf, 9, NULL, 0) != I2C_BUS_RET_OK) {
+		if (self->i2c->vmt->transfer(self->i2c, 0x3c, buf, 9, NULL, 0) != I2C_BUS_RET_OK) {
 			return LCD_SSD1306_RET_FAILED;
 		}
 	}

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * STM32 I2C driver service
  *
@@ -10,18 +10,13 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#include "config.h"
-#include "FreeRTOS.h"
-#include "semphr.h"
-#include "task.h"
-#include "u_log.h"
-#include "u_assert.h"
+#include <main.h>
 
 #include <libopencm3/stm32/i2c.h>
 #include <libopencm3/stm32/rcc.h>
+#include <i2c-bus.h>
 
 #include "stm32-i2c.h"
-#include <i2c-bus.h>
 
 #define MODULE_NAME "stm32-i2c"
 
@@ -31,7 +26,7 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 	//~ i2c_reset(self->locm3_i2c);
 	i2c_enable_analog_filter(self->locm3_i2c);
 	i2c_set_digital_filter(self->locm3_i2c, 0);
-	i2c_set_speed(self->locm3_i2c, i2c_speed_sm_100k, rcc_apb1_frequency / 1e6);
+	i2c_set_speed(self->locm3_i2c, i2c_speed_fm_400k, rcc_apb1_frequency / 1e6);
 	i2c_enable_stretching(self->locm3_i2c);
 	i2c_set_7bit_addr_mode(self->locm3_i2c);
 	i2c_peripheral_enable(self->locm3_i2c);
@@ -47,7 +42,9 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 	}\
 
 
-static i2c_bus_ret_t stm32_i2c_transfer(Stm32I2c *self, uint8_t addr, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen) {
+static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen) {
+	Stm32I2c *self = bus->parent;
+
 	if (xSemaphoreTake(self->bus_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
 		xSemaphoreTake(self->wait_lock, 0);
 		if (txdata != NULL) {
@@ -114,6 +111,11 @@ static i2c_bus_ret_t stm32_i2c_transfer(Stm32I2c *self, uint8_t addr, const uint
 }
 
 
+static const struct i2c_bus_vmt stm32_i2c_bus_vmt = {
+	.transfer = stm32_i2c_transfer,
+};
+
+
 stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, uint32_t locm3_i2c) {
 	memset(self, 0, sizeof(Stm32I2c));
 	self->locm3_i2c = locm3_i2c;
@@ -129,9 +131,8 @@ stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, uint32_t locm3_i2c) {
 		return STM32_I2C_RET_FAILED;
 	}
 
-	i2c_bus_init(&self->bus);
 	self->bus.parent = self;
-	self->bus.transfer = (typeof(self->bus.transfer))stm32_i2c_transfer;
+	self->bus.vmt = &stm32_i2c_bus_vmt;
 
 	stm32_i2c_bus_init(self);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("bus initialized"));

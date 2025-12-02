@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * STM32 I2C driver service
  *
@@ -10,11 +10,9 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <i2c-bus.h>
 
-#include "FreeRTOS.h"
-#include "semphr.h"
-#include "task.h"
+#include <main.h>
+#include <i2c-bus.h>
 
 
 typedef enum {
