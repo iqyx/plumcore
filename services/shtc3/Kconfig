@@ -1,0 +1,3 @@
+config SERVICE_SHTC3
+	bool "SHTC3 temperature and humidity sensor driver"
+	default n

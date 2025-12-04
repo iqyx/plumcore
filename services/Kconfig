@@ -235,6 +235,7 @@ menu "High level device drivers"
 
 	source "services/iis2iclx/Kconfig"
 	source "services/gpio-led/Kconfig"
+	source "services/shtc3/Kconfig"
 
 endmenu
 
