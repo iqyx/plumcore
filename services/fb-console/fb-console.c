@@ -61,13 +61,20 @@ static stream_ret_t stream_write(Stream *self, const void *buf, size_t size) {
 
 
 static stream_ret_t stream_read(Stream *self, void *buf, size_t size, size_t *read) {
+	(void)self;
+	(void)buf;
+	(void)size;
+
+	/* Always return immediately with no character available. */
 	*read = 0;
+
 	return STREAM_RET_OK;
 }
 
 
 static stream_ret_t stream_write_timeout(Stream *self, const void *buf, size_t size, size_t *written, uint32_t timeout_ms) {
-	/** @todo call stream write */
+	(void)timeout_ms;
+
 	stream_ret_t ret = stream_write(self, buf, size);
 	*written = size;
 	return ret;
@@ -75,11 +82,17 @@ static stream_ret_t stream_write_timeout(Stream *self, const void *buf, size_t s
 
 
 static stream_ret_t stream_read_timeout(Stream *self, void *buf, size_t size, size_t *read, uint32_t timeout_ms) {
+	(void)self;
+
+	/* Always return timeout after the specified time (simulating no characters on the input). */
 	vTaskDelay(timeout_ms);
 	*read = 0;
+
+	/** @todo why? */
 	if (size >= 1) {
 		*((char *)buf) = '\0';
 	}
+
 	return STREAM_RET_TIMEOUT;
 }
 
@@ -187,6 +200,21 @@ fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len
 			self->state = FB_CONSOLE_NORMAL;
 			continue;
 		}
+		if (self->state == FB_CONSOLE_ESC_PARAM && c == 'K') {
+			/* Line erase functions. */
+			switch (self->esc_param) {
+				default:
+				case 0:
+					fb_rect(self->fb, self->posx, self->posy, self->fb_w - 1, self->posy + 7, 0);
+					break;
+				case 1:
+					fb_rect(self->fb, 0, self->posy, self->posx - 1, self->posy + 7, 0);
+					break;
+			}
+			self->state = FB_CONSOLE_NORMAL;
+			continue;
+		}
+
 		if (self->state == FB_CONSOLE_ESC_PARAM && c < '0' && c > '9') {
 			/* Anything else than a number causes ignoring the ESC. */
 			self->state = FB_CONSOLE_NORMAL;
@@ -199,6 +227,10 @@ fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len
 		if (c >= 32) {
 			const char text[2] = {c, '\0'};
 			fb_text(self->fb, text, self->posx, self->posy, &self->posx, self->color, self->font);
+		}
+		if (c == '\r') {
+			self->posx = 0;
+			self->fb->vmt->flush(self->fb);
 		}
 		if (c == '\n' || (self->posx + 8) >= self->fb_w) {
 			self->posy += 8;
@@ -233,6 +265,29 @@ fb_console_ret_t fb_console_scroll(FbConsole *self, size_t r_start, size_t r_end
 /**********************************************************************************************************************
  * Basic drawing primitives (text and image)
  **********************************************************************************************************************/
+
+fb_ret_t fb_rect(Fb *self, size_t x1, size_t y1, size_t x2, size_t y2, uint8_t color) {
+	struct fb_stat stat = {0};
+	if (self->vmt->stat(self, &stat) != FB_RET_OK) {
+		return FB_RET_FAILED;
+	}
+
+	for (size_t y  = y1; y <= y2; y++) {
+		size_t lb = stat.w * stat.mode / 8;
+		uint8_t d[lb];
+
+		self->vmt->read(self, y * lb, d, lb, stat.mode);
+		for (size_t x  = x1; x <= x2; x++) {
+			/** @todo optimize a bit */
+			d[x * stat.mode / 8] &= ~(((0x01 << stat.mode) - 1) << (8 - stat.mode)) >> ((x % (8 / stat.mode)) * stat.mode);
+			d[x * stat.mode / 8] |= ((color & ((0x01 << stat.mode) - 1)) << (8 - stat.mode)) >> ((x % (8 / stat.mode)) * stat.mode);
+		}
+		self->vmt->write(self, y * lb, d, lb, stat.mode);
+	}
+
+	return FB_RET_OK;
+}
+
 
 /**
  * @brief Render simple text on a framebuffer device
@@ -330,7 +385,7 @@ fb_console_ret_t fb_console_banner_bootloader(FbConsole *self) {
 	fb_console_set_scroll(self, 40, self->fb_h);
 	self->fb->vmt->flush(self->fb);
 
-	return FB_RET_OK;
+	return FB_CONSOLE_RET_OK;
 }
 
 
@@ -357,7 +412,7 @@ fb_console_ret_t fb_console_banner_bootloader_128_64(FbConsole *self) {
 	self->posy = self->fb_h;
 	self->fb->vmt->flush(self->fb);
 
-	return FB_RET_OK;
+	return FB_CONSOLE_RET_OK;
 }
 
 

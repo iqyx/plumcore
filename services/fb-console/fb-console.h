@@ -65,6 +65,7 @@ fb_console_ret_t fb_console_set_scroll(FbConsole *self, size_t start, size_t end
 fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len);
 fb_console_ret_t fb_console_scroll(FbConsole *self, size_t r_start, size_t r_end, size_t step);
 
+fb_ret_t fb_rect(Fb *self, size_t x1, size_t y1, size_t x2, size_t y2, uint8_t color);
 fb_ret_t fb_text(Fb *self, const char *text, size_t posx, size_t posy, size_t *advance, uint8_t color, const struct small_char *font);
 fb_ret_t fb_image(Fb *self, size_t posx, size_t posy, const struct imdata *data);
 
