@@ -38,7 +38,6 @@ static led_ret_t led_set(Led *led, led_color_t color) {
 static led_ret_t led_sequence(Led *led, const led_seq_item_t *sequence) {
 	GpioLed *self = led->parent;
 	self->sequence = sequence;
-	self->seq_pos = 0;
 	create_task(self);
 
 	return LED_RET_OK;
@@ -57,24 +56,28 @@ static const struct led_vmt gpio_led_vmt = {
 
 static void task(void *p) {
 	GpioLed *self = p;
+	led_seq_item_t seq[16] = {0};
 
 	while (self->task_needed) {
 		if (self->sequence) {
-			if (!self->sequence[self->seq_pos]) {
-				self->seq_pos = 0;
-				continue;
+			size_t i = 0;
+			for (i = 0; i < sizeof(seq) && self->sequence[i]; i++) {
+				seq[i] = self->sequence[i];
 			}
-			if (self->sequence[self->seq_pos] & LED_SEQ_SET) {
-				gpio_led_set(self, (self->sequence[self->seq_pos] & 0xffffff00UL) >> 8);
+			seq[i + 1] = LED_SEQ_END;
+		}
+
+		for (size_t pos = 0; pos < sizeof(seq) && seq[pos]; pos++) {
+			if (seq[pos] & LED_SEQ_SET) {
+				gpio_led_set(self, (seq[pos] & 0xffffff00UL) >> 8);
 			}
-			if (self->sequence[self->seq_pos] & 0x000000fcUL) {
-				uint32_t time_ms = ((self->sequence[self->seq_pos] & 0x000000fcUL) >> 2) * 16;
+			if (seq[pos] & 0x000000fcUL) {
+				uint32_t time_ms = ((seq[pos] & 0x000000fcUL) >> 2) * 16;
 				vTaskDelay(pdMS_TO_TICKS(time_ms));
 			}
-			self->seq_pos++;
-		} else {
-			vTaskDelay(100);
 		}
+
+		vTaskDelay(10);
 
 	};
 	vTaskDelete(NULL);

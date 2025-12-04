@@ -34,4 +34,8 @@
 	LED_SEQ_END \
 } \
 
+#define LED_SEQ_STOP LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(1008), \
+	LED_SEQ_END \
+} \
 

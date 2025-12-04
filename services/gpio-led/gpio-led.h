@@ -32,7 +32,6 @@ typedef struct gpio_led {
 
 	volatile led_color_t last_color;
 	volatile const led_seq_item_t *sequence;
-	uint32_t seq_pos;
 } GpioLed;
 
 
