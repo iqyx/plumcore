@@ -31,8 +31,8 @@ typedef enum {
 #define STM32_GPIO_ODR(port) MMIO32((port) + 0x14)
 #define STM32_GPIO_BSRR(port) MMIO32((port) + 0x18)
 #define STM32_GPIO_LCKR(port) MMIO32((port) + 0x1c)
-#define STM32_GPIO_AFRH(port) MMIO32((port) + 0x20)
-#define STM32_GPIO_AFRL(port) MMIO32((port) + 0x24)
+#define STM32_GPIO_AFRL(port) MMIO32((port) + 0x20)
+#define STM32_GPIO_AFRH(port) MMIO32((port) + 0x24)
 
 /**
  * @brief STM32 GPIO peripheral (port) base addresses
