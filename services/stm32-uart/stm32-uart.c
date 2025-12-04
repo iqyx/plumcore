@@ -421,3 +421,12 @@ stm32_uart_ret_t stm32_uart_set_rto(Stm32Uart *self, bool rto) {
 
 	return STM32_UART_RET_OK;
 }
+
+
+stm32_uart_ret_t stm32_uart_set_swmode(Stm32Uart *self) {
+	usart_disable(self->port);
+	USART_CR3(self->port) |= USART_CR3_HDSEL;
+	usart_enable(self->port);
+
+	return STM32_UART_RET_OK;
+}

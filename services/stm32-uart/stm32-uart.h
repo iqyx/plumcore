@@ -39,3 +39,4 @@ stm32_uart_ret_t stm32_uart_free(Stm32Uart *self);
 stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self);
 stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, uint32_t de_port, uint32_t de_pin);
 stm32_uart_ret_t stm32_uart_set_rto(Stm32Uart *self, bool rto);
+stm32_uart_ret_t stm32_uart_set_swmode(Stm32Uart *self);
