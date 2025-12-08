@@ -27,6 +27,7 @@
 #define INCLUDE_vTaskSuspend			1
 #define INCLUDE_vTaskDelayUntil			1
 #define INCLUDE_vTaskDelay				1
+#define INCLUDE_xSemaphoreGetMutexHolder	1
 #define configUSE_MUTEXES defined(CONFIG_FREERTOS_USE_MUTEXES)
 #define configQUEUE_REGISTRY_SIZE CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE
 #if defined(CONFIG_FREERTOS_CHECK_FOR_STACK_OVERFLOW)
