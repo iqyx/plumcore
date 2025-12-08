@@ -113,6 +113,7 @@ fb_console_ret_t fb_console_init(FbConsole *self, Fb *fb) {
 	memset(self, 0, sizeof(FbConsole));
 
 	self->fb = fb;
+	self->auto_update = true;
 
 	struct fb_stat stat = {0};
 	if (fb->vmt->stat != NULL && self->fb->vmt->stat(self->fb, &stat) == FB_RET_OK) {
@@ -152,6 +153,13 @@ fb_console_ret_t fb_console_free(FbConsole *self) {
 }
 
 
+fb_console_ret_t fb_console_set_auto_update(FbConsole *self, bool auto_update) {
+	self->auto_update = auto_update;
+
+	return FB_CONSOLE_RET_OK;
+}
+
+
 fb_console_ret_t fb_console_set_scroll(FbConsole *self, size_t start, size_t end) {
 	self->posy = start;
 	self->scrolly_start = start;
@@ -171,6 +179,23 @@ fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len
 		}
 		if (self->state == FB_CONSOLE_NORMAL && c == 0x1b) {
 			self->state = FB_CONSOLE_ESC;
+			continue;
+		}
+		if (self->state == FB_CONSOLE_ESC && c == 'c') {
+			/* Clear screen and reset the cursor. */
+			self->state = FB_CONSOLE_NORMAL;
+			self->posx = 0;
+			self->posy = self->scrolly_start;
+			fb_rect(self->fb, 0, self->scrolly_start, self->fb_w - 1, self->scrolly_end - 1, 0);
+			if (self->auto_update) {
+				self->fb->vmt->flush(self->fb);
+			}
+			continue;
+		}
+		if (self->state == FB_CONSOLE_ESC && c == 'u') {
+			/* Update the screen if auto-update is off. */
+			self->state = FB_CONSOLE_NORMAL;
+			self->fb->vmt->flush(self->fb);
 			continue;
 		}
 		if (self->state == FB_CONSOLE_ESC && c == '[') {
@@ -230,12 +255,16 @@ fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len
 		}
 		if (c == '\r') {
 			self->posx = 0;
-			self->fb->vmt->flush(self->fb);
+			if (self->auto_update) {
+				self->fb->vmt->flush(self->fb);
+			}
 		}
 		if (c == '\n' || (self->posx + 8) >= self->fb_w) {
 			self->posy += 8;
 			self->posx = 0;
-			self->fb->vmt->flush(self->fb);
+			if (self->auto_update) {
+				self->fb->vmt->flush(self->fb);
+			}
 		}
 	}
 

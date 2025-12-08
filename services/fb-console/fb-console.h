@@ -44,6 +44,7 @@ typedef struct fb_console {
 	size_t fb_h;
 	int fb_bpp;
 	enum fb_mode fb_mode;
+	bool auto_update;
 
 	Stream stream;
 	size_t posy;
@@ -61,6 +62,7 @@ typedef struct fb_console {
 
 fb_console_ret_t fb_console_init(FbConsole *self, Fb *fb);
 fb_console_ret_t fb_console_free(FbConsole *self);
+fb_console_ret_t fb_console_set_auto_update(FbConsole *self, bool auto_update);
 fb_console_ret_t fb_console_set_scroll(FbConsole *self, size_t start, size_t end);
 fb_console_ret_t fb_console_process(FbConsole *self, const void *buf, size_t len);
 fb_console_ret_t fb_console_scroll(FbConsole *self, size_t r_start, size_t r_end, size_t step);
