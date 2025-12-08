@@ -34,7 +34,7 @@ static adc_ret_t stm32_adc_convert_single(Adc *adc, adc_channel_t input, adc_sam
 	}
 
 	/* And compute the resulting value in millivolts. */
-	*sample = adc_read_regular(ADC1);
+	*sample = adc_read_regular(self->adc);
 	return ADC_RET_OK;
 }
 
