@@ -30,6 +30,7 @@
 #include <string.h>
 
 #include "main.h"
+#include "banner.h"
 #include "app.h"
 #include "interfaces/servicelocator.h"
 #include "services/plocator/plocator.h"
