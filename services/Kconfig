@@ -233,6 +233,7 @@ menu "High level device drivers"
 	source "services/gpio-led/Kconfig"
 	source "services/shtc3/Kconfig"
 	source "services/pcal6408a-gpio/Kconfig"
+	source "services/gpio-keypad/Kconfig"
 
 endmenu
 

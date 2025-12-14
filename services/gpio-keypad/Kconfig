@@ -1,0 +1,3 @@
+config SERVICE_GPIO_KEYPAD
+	bool "Service implementing a keypad using GPIO inputs"
+	default n
