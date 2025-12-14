@@ -41,7 +41,7 @@ static gpio_ret_t gpio_get(Gpio *gpio, bool *state) {
 	int pin = gpio - &(self->pin[0]);
 
 	if (state != NULL) {
-		if (STM32_GPIO_ODR(self->port) & (1 << pin)) {
+		if (STM32_GPIO_IDR(self->port) & (1 << pin)) {
 			*state = true;
 		} else {
 			*state = false;
