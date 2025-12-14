@@ -1,0 +1,3 @@
+config SERVICE_PCAL6408A_GPIO
+	bool "Driver for GPIO over PCAL6408A expander"
+	default n
