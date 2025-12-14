@@ -48,12 +48,14 @@
 #include <services/stm32-watchdog/watchdog.h>
 #include <services/stm32-spi/stm32-spi.h>
 #include <services/stm32-dac/stm32-dac.h>
+#include <services/stm32-gpio/stm32-gpio.h>
+#include <services/stm32-clock/stm32-clock.h>
+#include <services/stm32-flash/stm32-flash.h>
 
 /* High level drivers */
-#include <services/stm32-flash/stm32-flash.h>
 #include <services/flash-vol-static/flash-vol-static.h>
 #include <services/i2c-eeprom/i2c-eeprom.h>
-#include <services/stm32-clock/stm32-clock.h>
+#include <services/gpio-led/gpio-led.h>
 
 #if !defined(CONFIG_APP_BL)
 	#include <services/nbus2-switch/nbus2-switch.h>
@@ -71,6 +73,14 @@ Stm32Clock cmgr;
 uint32_t SystemCoreClock;
 Watchdog watchdog;
 // Stm32Rtc rtc;
+Stm32Gpio gpioa;
+Stm32Gpio gpiob;
+Stm32Gpio gpioc;
+Stm32Gpio gpiod;
+Stm32Gpio gpioe;
+GpioLed led_stat;
+GpioLed led_error;
+
 
 #if !defined(CONFIG_APP_BL)
 	Nbus2Switch sw;
@@ -184,20 +194,22 @@ void vPortSetupTimerInterrupt(void) {
 }
 
 
+Gpio *led0_red = &(gpioe.pin[10]);
+Gpio *led0_wh = &(gpioe.pin[11]);
+Gpio *led1_red = &(gpioe.pin[12]);
+Gpio *led1_wh = &(gpioe.pin[13]);
+
 static void port_setup_default_gpio(void) {
 	/* LED1A, bootloader red LED */
-	gpio_mode_setup(GPIOE, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
-	gpio_set(GPIOE, GPIO10);
+	led0_red->vmt->set_mode(led0_red, MODE_OUTPUT);
+	led0_wh->vmt->set_mode(led0_wh, MODE_OUTPUT);
+	led1_red->vmt->set_mode(led1_red, MODE_OUTPUT);
+	led1_wh->vmt->set_mode(led1_wh, MODE_OUTPUT);
 
-	gpio_mode_setup(GPIOE, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
-	gpio_clear(GPIOE, GPIO11);
-
-	gpio_mode_setup(GPIOE, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12);
-	gpio_clear(GPIOE, GPIO12);
-
-	gpio_mode_setup(GPIOE, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO13);
-	gpio_clear(GPIOE, GPIO13);
-
+	led0_red->vmt->set(led0_red, true);
+	led0_wh->vmt->set(led0_wh, false);
+	led1_red->vmt->set(led1_red, false);
+	led1_wh->vmt->set(led1_wh, false);
 }
 
 
@@ -209,22 +221,25 @@ Stm32Dac dac1_1;
 GenericPower buck;
 GenericPower out_port[4];
 
+Gpio *port1_en = &(gpiob.pin[11]);
+Gpio *port2_en = &(gpioc.pin[6]);
+
 static void buck_dac_init(void) {
 	generic_power_init(&buck);
 	generic_power_set_vref(&buck, 3.3f);
 
-	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
+	gpioa.pin[4].vmt->set_mode(&(gpioa.pin[4]), MODE_ANALOG);
 	rcc_periph_clock_enable(RCC_DAC1);
 	stm32_dac_init(&dac1_1, DAC1, DAC_CHANNEL1);
 	generic_power_set_voltage_dac(&buck, &dac1_1.dac_iface, NULL);
 
 	/* Setup excitation enable GPIO output. Not inverted. */
-	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO5);
-	gpio_clear(GPIOC, GPIO5);
-	generic_power_set_enable_gpio(&buck, GPIOC, GPIO5, false);
+	gpioc.pin[5].vmt->set_mode(&(gpioc.pin[5]), MODE_OUTPUT);
+	gpioc.pin[5].vmt->set(&(gpioc.pin[5]), false);
+	generic_power_set_enable_gpio(&buck, &(gpioc.pin[5]), false);
 
 	/* Enable the power converter. */
-	buck.power.vmt->set_voltage(&buck.power, 0.70f);
+	buck.power.vmt->set_voltage(&buck.power, 0.8f);
 	vTaskDelay(10);
 	buck.power.vmt->enable(&buck.power, true);
 	vTaskDelay(10);
@@ -233,13 +248,16 @@ static void buck_dac_init(void) {
 		generic_power_init(&(out_port[i]));
 	}
 
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
-	gpio_clear(GPIOB, GPIO11);
-	generic_power_set_enable_gpio(&out_port[1], GPIOB, GPIO11, false);
+	port1_en->vmt->set_mode(port1_en, MODE_OUTPUT);
+	port1_en->vmt->set(port1_en, false);
+	generic_power_set_enable_gpio(&out_port[0], port1_en, false);
 
-	for (uint32_t i = 0; i < 4; i++) {
-		out_port[i].power.vmt->enable(&(out_port[i].power), true);
-	}
+	port2_en->vmt->set_mode(port2_en, MODE_OUTPUT);
+	port2_en->vmt->set(port2_en, false);
+	generic_power_set_enable_gpio(&out_port[1], port2_en, false);
+
+	out_port[0].power.vmt->enable(&(out_port[0].power), true);
+	out_port[1].power.vmt->enable(&(out_port[1].power), true);
 }
 #endif
 
@@ -276,24 +294,26 @@ static void port_flash_init(void) {
 
 
 int32_t port_init(void) {
+	stm32_gpio_init(&gpioa, STM32_PORTA);
+	stm32_gpio_init(&gpiob, STM32_PORTB);
+	stm32_gpio_init(&gpioc, STM32_PORTC);
+	stm32_gpio_init(&gpiod, STM32_PORTD);
+	stm32_gpio_init(&gpioe, STM32_PORTE);
+
 	port_setup_default_gpio();
 	stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_MEDIUM_PERF);
 	stm32_clock_wait_init_done(&cmgr);
 	port_flash_init();
 
 	#if !defined(CONFIG_APP_BL)
-		gpio_clear(GPIOE, GPIO10);
+		/* Turn off bootloader LED after the application is run. */
+		led0_red->vmt->set(led0_red, false);
 
 		buck_dac_init();
 
 		/** @todo initialize ports in a more sane way */
 		nbus_bp_port_init();
 		nbus_port0_init();
-
-		for (uint32_t i = 0; i < 10; i++) {
-			gpio_toggle(GPIOE, GPIO11);
-			vTaskDelay(100);
-		}
 
 		/** @todo move to the application controlling the board. Catch traffic
 		 *        destined to this device and make its API accessible. */
@@ -310,6 +330,14 @@ int32_t port_init(void) {
 		nbus2_switch_add_port(&sw, &bp_socket->datagram, 0, 0);
 		struct nbus_socket *port0_socket = nbus_socket_allocate(&(nbus[0]));
 		nbus2_switch_add_port(&sw, &port0_socket->datagram, GPIOE, GPIO11);
+
+		/* Blink all data LEDs a few times to know the init is done. */
+		for (uint32_t i = 0; i < 10; i++) {
+			led0_wh->vmt->toggle(led0_wh);
+			led1_wh->vmt->toggle(led1_wh);
+			vTaskDelay(100);
+		}
+
 	#endif
 
 	return PORT_INIT_OK;
