@@ -23,7 +23,7 @@
 
 static ldc1x1x_ret_t ldc1x1x_select(Ldc1x1x *self) {
 	if (self->preselect_cmd != NULL) {
-		self->i2c->transfer(self->i2c->parent, self->preselect_cmd_addr, self->preselect_cmd, self->preselect_cmd_len, NULL, 0);
+		self->i2c->vmt->transfer(self->i2c, self->preselect_cmd_addr, self->preselect_cmd, self->preselect_cmd_len, NULL, 0);
 		vTaskDelay(1);
 	}
 	return LDC1X1X_RET_OK;
@@ -36,7 +36,7 @@ static ldc1x1x_ret_t ldc_write(Ldc1x1x *self, uint8_t addr, uint16_t reg) {
 		reg >> 8,
 		reg & 0xff
 	};
-	self->i2c->transfer(self->i2c->parent, self->addr, tx, sizeof(tx), NULL, 0);
+	self->i2c->vmt->transfer(self->i2c, self->addr, tx, sizeof(tx), NULL, 0);
 
 	return LDC1X1X_RET_OK;
 }
@@ -44,7 +44,7 @@ static ldc1x1x_ret_t ldc_write(Ldc1x1x *self, uint8_t addr, uint16_t reg) {
 
 static ldc1x1x_ret_t ldc_read(Ldc1x1x *self, uint8_t addr, uint16_t *reg) {
 	uint8_t rx[2] = {0};
-	self->i2c->transfer(self->i2c->parent, self->addr, &addr, 1, rx, sizeof(rx));
+	self->i2c->vmt->transfer(self->i2c, self->addr, &addr, 1, rx, sizeof(rx));
 	if (reg != NULL) {
 		*reg = rx[0] << 8 | rx[1];
 		return LDC1X1X_RET_OK;

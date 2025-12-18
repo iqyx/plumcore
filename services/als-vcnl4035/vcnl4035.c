@@ -27,7 +27,7 @@ static vcnl4035_ret_t als_write(Vcnl4035 *self, uint8_t addr, uint16_t reg) {
 		reg & 0xff,
 		reg >> 8
 	};
-	self->i2c->transfer(self->i2c->parent, self->addr, tx, sizeof(tx), NULL, 0);
+	self->i2c->vmt->transfer(self->i2c, self->addr, tx, sizeof(tx), NULL, 0);
 
 	return VCNL4035_RET_OK;
 }
@@ -35,7 +35,7 @@ static vcnl4035_ret_t als_write(Vcnl4035 *self, uint8_t addr, uint16_t reg) {
 
 static vcnl4035_ret_t als_read(Vcnl4035 *self, uint8_t addr, uint16_t *reg) {
 	uint8_t rx[2] = {0};
-	self->i2c->transfer(self->i2c->parent, self->addr, &addr, 1, rx, sizeof(rx));
+	self->i2c->vmt->transfer(self->i2c, self->addr, &addr, 1, rx, sizeof(rx));
 	if (reg != NULL) {
 		*reg = rx[1] << 8 | rx[0];
 		return VCNL4035_RET_OK;
