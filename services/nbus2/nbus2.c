@@ -174,7 +174,6 @@ static nbus_ret_t nbus_pbuf_receive_header(struct nbus_pbuf *self, Nbus *nbus) {
 
 	/* Check the magic. It is right at the beginning of the fixed header. */
 	if (self->buf[8] != 'n' || self->buf[9] != '2') {
-		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("bac magic"));
 		return NBUS_RET_FAILED;
 	}
 
