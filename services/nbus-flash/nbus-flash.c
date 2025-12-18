@@ -354,6 +354,7 @@ static void nbus_task(void *p) {
 		if (self->d->vmt->read(self->d, &self->rx_buf, &len, &rxmsg) == DATAGRAM_RET_OK) {
 			self->src_port = rxmsg.src_port;
 			memcpy(&self->src_addr, &rxmsg.src_addr, 4);
+			vTaskDelay(1);
 			process_main_ep(self, self->rx_buf, len);
 		}
 	}
