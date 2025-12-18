@@ -75,8 +75,6 @@ stm32_sai_ret_t stm32_sai_free(Stm32Sai *self) {
 /* This is very PoC, much temporary. */
 stm32_sai_ret_t stm32_sai_irq_handler(Stm32Sai *self) {
 	if (SAI1_ASR & SAI_ASR_FREQ) {
-		gpio_toggle(GPIOA, GPIO15);
-
 		if (notification_pos < sizeof(notification)) {
 			SAI1_ADR16 = *(uint16_t *)&(notification[notification_pos]);
 			notification_pos += 2;
