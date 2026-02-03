@@ -184,10 +184,26 @@ static fb_ret_t lcd_st7586_fb_flush(Fb *self) {
 }
 
 
+static fb_ret_t lcd_st7586_fb_stat(Fb *self, struct fb_stat *stat) {
+	LcdSt7586 *lcd = self->parent;
+
+	if (stat == NULL) {
+		return FB_RET_FAILED;
+	}
+
+	stat->mode = FB_MODE_G2;
+	stat->w = 240;
+	stat->h = 160;
+
+	return FB_RET_OK;
+}
+
+
 static const struct fb_vmt lcd_st7586_fb_vmt = {
 	.write = lcd_st7586_fb_write,
 	.read = lcd_st7586_fb_read,
 	.flush = lcd_st7586_fb_flush,
+	.stat = lcd_st7586_fb_stat,
 };
 
 
