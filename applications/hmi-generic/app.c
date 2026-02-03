@@ -148,11 +148,36 @@ static void input_task(void *p) {
 static void reader_task(void *p) {
 	App *self = p;
 
+	self->reader_buf_len = 0;
 	while (true) {
-		uint8_t buf[8];
+		uint8_t buf;
 		size_t read = 0;
-		if (self->reader->vmt->read(self->reader, buf, sizeof(buf), &read) == STREAM_RET_OK) {
-			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("reader: read %u bytes"), read);
+		if (self->reader->vmt->read(self->reader, &buf, sizeof(buf), &read) == STREAM_RET_OK) {
+			if (buf == 0x0a || buf == 0x0d) {
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("reader: barcode received, len = %d"), self->reader_buf_len);
+
+				uint8_t response[128];
+				CborEncoder encoder;
+				CborEncoder encoder_map;
+				cbor_encoder_init(&encoder, response, sizeof(response), 0);
+				cbor_encoder_create_map(&encoder, &encoder_map, CborIndefiniteLength);
+
+				cbor_encode_text_stringz(&encoder_map, "c");
+				cbor_encode_text_stringz(&encoder_map, "barcode");
+
+				cbor_encode_text_stringz(&encoder_map, "d");
+				cbor_encode_byte_string(&encoder_map, self->reader_buf, self->reader_buf_len);
+
+				cbor_encoder_close_container(&encoder, &encoder_map);
+
+				size_t response_len = cbor_encoder_get_buffer_size(&encoder, response);
+				self->socket->datagram.vmt->write(&self->socket->datagram, response, response_len, NULL);
+
+				self->reader_buf_len = 0;
+			} else if (self->reader_buf_len < READER_BUFFER_SIZE) {
+				self->reader_buf[self->reader_buf_len] = buf;
+				self->reader_buf_len++;
+			}
 		}
 	}
 	vTaskDelete(NULL);

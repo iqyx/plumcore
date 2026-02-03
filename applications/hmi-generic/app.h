@@ -24,6 +24,7 @@ typedef enum {
 
 #define PACKET_BUFFER_SIZE 1024
 #define UPDATE_BUFFER_SIZE 1024
+#define READER_BUFFER_SIZE 64
 
 typedef struct {
 	TaskHandle_t com_task;
@@ -35,6 +36,9 @@ typedef struct {
 	I2cBus *i2c;
 	Event *input;
 	WaveformSink *speaker;
+
+	uint8_t reader_buf[READER_BUFFER_SIZE];
+	size_t reader_buf_len;
 
 	/* nbus2 API */
 	struct nbus_socket *socket;
