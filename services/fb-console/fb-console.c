@@ -332,7 +332,7 @@ fb_ret_t fb_text(Fb *self, const char *text, size_t posx, size_t posy, size_t *a
 	}
 
 	char c;
-	while (c = *text) {
+	while ((c = *text) != 0) {
 		for (size_t y = 0; y < 8; y++) {
 			size_t lb = stat.w * stat.mode / 8;
 			uint8_t d[lb];
@@ -374,7 +374,7 @@ fb_ret_t fb_image(Fb *self, size_t posx, size_t posy, const struct imdata *data)
 		self->vmt->read(self, (posy + y) * lb, d, lb, stat.mode);
 
 		for (size_t x = 0; x < data->w; x++) {
-			d[(x + posx) * stat.mode / 8] = ~(data->data[y * (data->w * stat.mode * stat.mode / 8) + (x * stat.mode / 8)]);
+			d[(x + posx) * stat.mode / 8] = ~(data->data[y * (data->w * stat.mode / 8) + (x * stat.mode / 8)]);
 		}
 
 		self->vmt->write(self, (posy + y) * lb, d, lb, stat.mode);
