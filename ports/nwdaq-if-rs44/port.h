@@ -49,7 +49,4 @@ int32_t port_init(void);
 #define PORT_INIT_OK 0
 #define PORT_INIT_FAILED -1
 
-void port_task_timer_init(void);
-uint32_t port_task_timer_get_value(void);
-
 
