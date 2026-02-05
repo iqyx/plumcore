@@ -23,10 +23,16 @@ image_elf = env.Program(
 	],
 )
 
+# Always relink the resulting ELF and print ELF statistics. The map file is also rebuilt.
 if conf["FW_IMAGE_ELF"] == "y":
 	Alias("firmware", image_elf)
+	AlwaysBuild(image_elf)
 	AddPostAction(image_elf, image_elf_size)
 
+
+###################################################################
+# Flatten the ELF to a binary if requested to do so
+###################################################################
 
 image_bin = env.Command(
 	target = env["PORTFILE"] + ".bin",
@@ -36,32 +42,30 @@ image_bin = env.Command(
 
 if conf["ELF_IMAGE_TO_BIN"] == "y":
 	Alias("firmware", image_bin)
+	AlwaysBuild(image_bin)
 
-image_strip = env.Command(
-	target = env["PORTFILE"] + ".elf.strip",
-	source = env["PORTFILE"] + ".elf",
-	action = Action("$STRIP $SOURCE -o $TARGET", env["STRIPELFCOMSTR"])
-)
 
-# Signing of the image
+###################################################################
+# Generate XIP ELF
+###################################################################
+
 sk = conf["ELF_SIGNING_KEY"]
-image_elf_sign = env.Command(
-	target = env["PORTFILE"] + ".elf.sign",
-	source = env["PORTFILE"] + ".elf.strip",
+image_xip = env.Command(
+	target = env["PORTFILE"] + ".elf.xip",
+	source = env["PORTFILE"] + ".elf",
 	action = [
-		Action(f'scripts/elfsign.py --sk {conf["ELF_SIGNING_KEY"]} --sign $SOURCE'),
+		Action('$STRIP $SOURCE -o ${SOURCE}.strip', env["CREATEXIPCOMSTR"]),
+		Action('cp ${SOURCE}.strip ${SOURCE}.xip'),
+		Action(f'scripts/elfsign.py --sk {conf["ELF_SIGNING_KEY"]} --sign ${{SOURCE}}.xip'),
+		Action(f'scripts/elfxz.py --xz ${{TARGET}}'),
 	]
 )
 
 if conf["ELF_IMAGE_XIP"] == "y":
-	Alias("firmware", image_strip)
-	AddPostAction(image_strip, image_elf_size)
-	AddPostAction(image_strip, image_elf_headers)
-	Alias("firmware-sign", image_elf_sign)
-	# AddPostAction(image_elf_sign, image_elf_sections)
-
-
-
+	Alias("firmware", image_xip)
+	AlwaysBuild(image_xip)
+	AddPostAction(image_xip, image_elf_size)
+	AddPostAction(image_xip, image_elf_headers)
 
 
 ###################################################################
@@ -72,7 +76,7 @@ program_source = None
 if conf["FW_IMAGE_ELF"] == "y":
 	program_source = image_bin
 if conf["ELF_IMAGE_XIP"] == "y":
-	program_source = image_strip
+	program_source = image_xip
 
 
 oocd = env.Command(
