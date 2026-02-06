@@ -8,7 +8,6 @@ if conf["LIB_TINYCBOR"] == "y":
 	env.Patch([
 		'add-create-byte-string-array.patch',
 		'add-default-case.patch',
-		'fix-redefined-unreachable.patch',
 		'fix-undefined-flt16.patch',
 	])
 
