@@ -1,0 +1,3 @@
+config SERVICE_PROTO_STREAM
+	bool "Reliable transport of stream data over datagrams"
+	default n
