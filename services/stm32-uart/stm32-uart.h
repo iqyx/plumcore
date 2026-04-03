@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * STM32 UART driver
  *
@@ -9,6 +9,7 @@
 #pragma once
 
 #include <main.h>
+#include <interfaces/gpio.h>
 #include <interfaces/uart.h>
 #include <interfaces/stream.h>
 
@@ -21,11 +22,10 @@ typedef enum stm32_uart_ret {
 typedef struct {
 	Uart uart;
 	Stream stream;
-	uint32_t port;
+	void *port;
 	bool enable_rto;
 
-	uint32_t de_port;
-	uint32_t de_pin;
+	Gpio *de_gpio;
 
 	StreamBufferHandle_t rxbuf;
 	StreamBufferHandle_t txbuf;
@@ -34,9 +34,11 @@ typedef struct {
 } Stm32Uart;
 
 
-stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, uint32_t port);
+stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, void *port_base);
 stm32_uart_ret_t stm32_uart_free(Stm32Uart *self);
 stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self);
-stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, uint32_t de_port, uint32_t de_pin);
+stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, Gpio *de_gpio);
 stm32_uart_ret_t stm32_uart_set_rto(Stm32Uart *self, bool rto);
 stm32_uart_ret_t stm32_uart_set_swmode(Stm32Uart *self);
+stm32_uart_ret_t stm32_uart_set_rxtx_swap(Stm32Uart *self, bool swap);
+stm32_uart_ret_t stm32_uart_enable(Stm32Uart *self, bool enable);
