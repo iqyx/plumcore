@@ -16,7 +16,12 @@
 
 #include <interfaces/flash.h>
 #include <interfaces/clock.h>
-#include <libopencm3/stm32/quadspi.h>
+
+#if defined(STM32H7)
+	#include <stm32h7xx.h>
+#else
+	#error "stm32-gpio service is not compatible with this MCU family"
+#endif
 
 #include "stm32-qspi-flash.h"
 
@@ -33,16 +38,16 @@
 #define ADSIZE_24BIT 2
 #define ADSIZE_32BIT 3
 
-#define DMODE(x) (x << QUADSPI_CCR_DMODE_SHIFT)
-#define ADMODE(x) (x << QUADSPI_CCR_ADMODE_SHIFT)
-#define ABMODE(x) (x << QUADSPI_CCR_ABMODE_SHIFT)
-#define IMODE(x) (x << QUADSPI_CCR_IMODE_SHIFT)
-#define DCYC(x) (x << QUADSPI_CCR_DCYC_SHIFT)
-#define INST(x) (x << QUADSPI_CCR_INST_SHIFT)
-#define ADSIZE(x) (x << QUADSPI_CCR_ADSIZE_SHIFT)
+#define DMODE(x) (x << QUADSPI_CCR_DMODE_Pos)
+#define ADMODE(x) (x << QUADSPI_CCR_ADMODE_Pos)
+#define ABMODE(x) (x << QUADSPI_CCR_ABMODE_Pos)
+#define IMODE(x) (x << QUADSPI_CCR_IMODE_Pos)
+#define DCYC(x) (x << QUADSPI_CCR_DCYC_Pos)
+#define INST(x) (x << QUADSPI_CCR_INSTRUCTION_Pos)
+#define ADSIZE(x) (x << QUADSPI_CCR_ADSIZE_Pos)
 
-#define READI (1 << QUADSPI_CCR_FMODE_SHIFT)
-#define WRITEI (0 << QUADSPI_CCR_FMODE_SHIFT)
+#define READI (1 << QUADSPI_CCR_FMODE_Pos)
+#define WRITEI (0 << QUADSPI_CCR_FMODE_Pos)
 
 
 /* Module configuration */
@@ -73,16 +78,17 @@ static const struct stm32_qspi_flash_info ids[] = {
 
 
 static stm32_qspi_flash_ret_t read(Stm32QspiFlash *self, uint8_t *buf, size_t size, size_t *len) {
-	(void)self;
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
 
 	uint32_t status;
 	size_t l = 0;
+	volatile uint8_t *pdr = (volatile uint8_t *)&base->DR;
 
 	TickType_t tm_st = xTaskGetTickCount();
 	do {
-		status = QUADSPI_SR;
+		status = base->SR;
 		if (status & (QUADSPI_SR_FTF | QUADSPI_SR_TCF)) {
-			*buf = QUADSPI_BYTE_DR;
+			*buf = *pdr;
 			buf++;
 			l++;
 			if (l >= size) {
@@ -96,33 +102,35 @@ static stm32_qspi_flash_ret_t read(Stm32QspiFlash *self, uint8_t *buf, size_t si
 	if (len != NULL) {
 		*len = l;
 	}
-	QUADSPI_FCR |= QUADSPI_FCR_CTCF;
+	base->FCR |= QUADSPI_FCR_CTCF;
 
 	return STM32_QSPI_FLASH_RET_OK;
 }
 
 
 static stm32_qspi_flash_ret_t wait_qspi_busy(Stm32QspiFlash *self) {
-	(void)self;
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
 
 	TickType_t tm_st = xTaskGetTickCount();
-	while (QUADSPI_SR & QUADSPI_SR_BUSY) {
+	while (base->SR & QUADSPI_SR_BUSY) {
 		if ((xTaskGetTickCount() - tm_st) > QSPI_BUSY_TIMEOUT) {
 			return STM32_QSPI_FLASH_RET_TIMEOUT;
 		}
 	}
-	QUADSPI_FCR |= QUADSPI_FCR_CTCF;
+	base->FCR |= QUADSPI_FCR_CTCF;
 
 	return STM32_QSPI_FLASH_RET_OK;
 }
 
 
 static enum stm32_qspi_flash_status read_mem_status(Stm32QspiFlash *self, bool status2) {
-	QUADSPI_DLR = 0;
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+
+	base->DLR = 0;
 	if (status2) {
-		QUADSPI_CCR = READI | IMODE(SINGLE) | DMODE(SINGLE) | INST(0x35);
+		base->CCR = READI | IMODE(SINGLE) | DMODE(SINGLE) | INST(0x35);
 	} else {
-		QUADSPI_CCR = READI | IMODE(SINGLE) | DMODE(SINGLE) | INST(0x05);
+		base->CCR = READI | IMODE(SINGLE) | DMODE(SINGLE) | INST(0x05);
 	}
 	uint8_t status = 0;
 	size_t len = 0;
@@ -150,16 +158,18 @@ static stm32_qspi_flash_ret_t wait_mem_busy(Stm32QspiFlash *self) {
 
 
 static void reset(Stm32QspiFlash *self) {
-	QUADSPI_CCR = IMODE(SINGLE) | INST(0x66);
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+	base->CCR = IMODE(SINGLE) | INST(0x66);
 	wait_qspi_busy(self);
-	QUADSPI_CCR = IMODE(SINGLE) | INST(0x99);
+	base->CCR = IMODE(SINGLE) | INST(0x99);
 	wait_qspi_busy(self);
 }
 
 
 stm32_qspi_flash_ret_t stm32_qspi_flash_read_id(Stm32QspiFlash *self, uint32_t *id) {
-	QUADSPI_DLR = 3 - 1;
-	QUADSPI_CCR = READI | DMODE(SINGLE) | IMODE(SINGLE) | INST(0x9f);
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+	base->DLR = 3 - 1;
+	base->CCR = READI | DMODE(SINGLE) | IMODE(SINGLE) | INST(0x9f);
 	size_t len = 0;
 	uint8_t buf[3] = {0};
 	if (read(self, (void *)buf, sizeof(buf), &len) != STM32_QSPI_FLASH_RET_OK || len != 3) {
@@ -173,10 +183,11 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_read_id(Stm32QspiFlash *self, uint32_t *
 
 
 stm32_qspi_flash_ret_t stm32_qspi_flash_read_winbond_uniq(Stm32QspiFlash *self, uint8_t *uniq) {
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
 	/* Cannot generate 32 dummy cycles. Use empty 32bit address instead. */
-	QUADSPI_DLR = 8 - 1;
-	QUADSPI_CCR = READI | DMODE(SINGLE) | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_32BIT) | INST(0x4b);
-	QUADSPI_AR = 0;
+	base->DLR = 8 - 1;
+	base->CCR = READI | DMODE(SINGLE) | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_32BIT) | INST(0x4b);
+	base->AR = 0;
 	size_t len = 0;
 	if (read(self, (void *)uniq, 8, &len) != STM32_QSPI_FLASH_RET_OK || len != 8) {
 		return STM32_QSPI_FLASH_RET_FAILED;
@@ -186,10 +197,11 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_read_winbond_uniq(Stm32QspiFlash *self, 
 
 
 stm32_qspi_flash_ret_t stm32_qspi_flash_write_enable(Stm32QspiFlash *self, bool e) {
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
 	if (e) {
-		QUADSPI_CCR = WRITEI | IMODE(SINGLE) | INST(0x06);
+		base->CCR = WRITEI | IMODE(SINGLE) | INST(0x06);
 	} else {
-		QUADSPI_CCR = WRITEI | IMODE(SINGLE) | INST(0x04);
+		base->CCR = WRITEI | IMODE(SINGLE) | INST(0x04);
 	}
 	if (wait_qspi_busy(self) != STM32_QSPI_FLASH_RET_OK) {
 		return STM32_QSPI_FLASH_RET_FAILED;
@@ -199,9 +211,11 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_write_enable(Stm32QspiFlash *self, bool 
 
 
 static stm32_qspi_flash_ret_t write(Stm32QspiFlash *self, const uint8_t *buf, size_t len) {
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+	volatile uint8_t *pdr = (volatile uint8_t *)&base->DR;
 	while (len > 0) {
-		if (QUADSPI_SR & QUADSPI_SR_FTF) {
-			QUADSPI_BYTE_DR = *buf;
+		if (base->SR & QUADSPI_SR_FTF) {
+			*pdr = *buf;
 			buf++;
 			len--;
 		}
@@ -224,9 +238,11 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_read_page(Stm32QspiFlash *self, size_t a
 	    u_assert(size <= (1UL << self->info->page_size))) {
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
-	QUADSPI_DLR = size - 1;
-	QUADSPI_CCR = READI | DMODE(SINGLE) | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_24BIT) | DCYC(8) | INST(0x0b);
-	QUADSPI_AR = addr;
+
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+	base->DLR = size - 1;
+	base->CCR = READI | DMODE(SINGLE) | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_24BIT) | DCYC(8) | INST(0x0b);
+	base->AR = addr;
 	size_t len = 0;
 	if (read(self, buf, size, &len) != STM32_QSPI_FLASH_RET_OK || len != size) {
 		return STM32_QSPI_FLASH_RET_FAILED;
@@ -241,9 +257,10 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_read_page_fast_q(Stm32QspiFlash *self, s
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
 
-	QUADSPI_DLR = size - 1;
-	QUADSPI_CCR = READI | DMODE(QUAD) | IMODE(SINGLE) | ADMODE(QUAD) | ADSIZE(ADSIZE_24BIT) | DCYC(6) | INST(0xeb);
-	QUADSPI_AR = addr;
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+	base->DLR = size - 1;
+	base->CCR = READI | DMODE(QUAD) | IMODE(SINGLE) | ADMODE(QUAD) | ADSIZE(ADSIZE_24BIT) | DCYC(6) | INST(0xeb);
+	base->AR = addr;
 	size_t len = 0;
 	if (read(self, buf, size, &len) != STM32_QSPI_FLASH_RET_OK || len != size) {
 		return STM32_QSPI_FLASH_RET_FAILED;
@@ -259,9 +276,10 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_write_page(Stm32QspiFlash *self, size_t 
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
 
-	QUADSPI_DLR = size - 1;
-	QUADSPI_CCR = WRITEI | DMODE(SINGLE) | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_24BIT) | INST(0x02);
-	QUADSPI_AR = addr;
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+	base->DLR = size - 1;
+	base->CCR = WRITEI | DMODE(SINGLE) | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_24BIT) | INST(0x02);
+	base->AR = addr;
 	if (write(self, buf, size) != STM32_QSPI_FLASH_RET_OK) {
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
@@ -282,8 +300,9 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_erase_sector(Stm32QspiFlash *self, size_
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
 
-	QUADSPI_CCR = WRITEI | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_24BIT) | INST(0x20);
-	QUADSPI_AR = addr;
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+	base->CCR = WRITEI | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_24BIT) | INST(0x20);
+	base->AR = addr;
 	if (wait_qspi_busy(self) != STM32_QSPI_FLASH_RET_OK) {
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
@@ -300,8 +319,9 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_erase_block(Stm32QspiFlash *self, size_t
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
 
-	QUADSPI_CCR = WRITEI | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_24BIT) | INST(0xd8);
-	QUADSPI_AR = addr;
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+	base->CCR = WRITEI | IMODE(SINGLE) | ADMODE(SINGLE) | ADSIZE(ADSIZE_24BIT) | INST(0xd8);
+	base->AR = addr;
 	if (wait_qspi_busy(self) != STM32_QSPI_FLASH_RET_OK) {
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
@@ -317,7 +337,8 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_erase_chip(Stm32QspiFlash *self) {
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
 
-	QUADSPI_CCR = WRITEI | IMODE(SINGLE) | INST(0xc7);
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+	base->CCR = WRITEI | IMODE(SINGLE) | INST(0xc7);
 	if (wait_qspi_busy(self) != STM32_QSPI_FLASH_RET_OK) {
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
@@ -437,12 +458,27 @@ static const struct flash_vmt iface_vmt = {
 };
 
 
-stm32_qspi_flash_ret_t stm32_qspi_flash_init(Stm32QspiFlash *self) {
+stm32_qspi_flash_ret_t stm32_qspi_flash_init(Stm32QspiFlash *self, void *mmio_base, uint32_t bank) {
 	if (u_assert(self != NULL)) {
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
 	memset(self, 0, sizeof(Stm32QspiFlash));
-	quadspi_enable();
+	self->mmio_base = mmio_base;
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
+
+	/* Enable the peripheral at a super low speed. Can be changed later. */
+	base->CR = QUADSPI_CR_EN | (31ul << QUADSPI_CR_PRESCALER_Pos);
+	switch (bank) {
+		default:
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("wrong QSPI flash bank = %u"), bank);
+			goto err;
+			break;
+		case 1:
+			break;
+		case 2:
+			base->CR |= QUADSPI_CR_FSEL;
+	}
+
 	reset(self);
 
 	self->lock = xSemaphoreCreateMutex();
@@ -451,23 +487,26 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_init(Stm32QspiFlash *self) {
 	}
 
 	/* The size is unknown until we read ID */
-	QUADSPI_DCR = (10 << QUADSPI_DCR_FSIZE_SHIFT);
+	base->DCR = (10 << QUADSPI_DCR_FSIZE_Pos);
 	uint32_t id = 0;
-	stm32_qspi_flash_read_id(self, &id);
+	if (stm32_qspi_flash_read_id(self, &id) != STM32_QSPI_FLASH_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("error while reading QSPI flash id"), id);
+		goto err;
+	}
 
 	/* Try to match the ID with a record from the table of known IDs */
 	size_t i = 0;
 	while (ids[i].id != 0 && ids[i].id != id) {
 		i++;
 	}
-	if (ids[i].id != id) {
+	if (id == 0 || ids[i].id != id) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("couldn't detect QSPI flash (id = 0x%06x)"), id);
 		goto err;
 	}
 	self->info = &ids[i];
 
 	/* Now the flash parameters are known, set the correct flash size */
-	QUADSPI_DCR = ((self->info->size - 1) << QUADSPI_DCR_FSIZE_SHIFT);
+	base->DCR = ((self->info->size - 1) << QUADSPI_DCR_FSIZE_Pos);
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("detected '%s %s' (id = 0x%06x)"),
 		self->info->manufacturer,
@@ -520,8 +559,9 @@ stm32_qspi_flash_ret_t stm32_qspi_flash_set_prescaler(Stm32QspiFlash *self, uint
 		return STM32_QSPI_FLASH_RET_FAILED;
 	}
 
+	QUADSPI_TypeDef *base = (QUADSPI_TypeDef *)self->mmio_base;
 	wait_qspi_busy(self);
-	QUADSPI_CR |= ((prescaler & 0xff) << QUADSPI_CR_PRESCALE_SHIFT);
+	base->CR |= ((prescaler & 0xff) << QUADSPI_CR_PRESCALER_Pos);
 
 	return STM32_QSPI_FLASH_RET_OK;
 }

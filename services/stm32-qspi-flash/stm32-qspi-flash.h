@@ -48,12 +48,13 @@ enum stm32_qspi_flash_status {
 
 typedef struct {
 	Flash iface;
+	void *mmio_base;
 	SemaphoreHandle_t lock;
 	const struct stm32_qspi_flash_info *info;
 } Stm32QspiFlash;
 
 
-stm32_qspi_flash_ret_t stm32_qspi_flash_init(Stm32QspiFlash *self);
+stm32_qspi_flash_ret_t stm32_qspi_flash_init(Stm32QspiFlash *self, void *mmio_base, uint32_t bank);
 stm32_qspi_flash_ret_t stm32_qspi_flash_free(Stm32QspiFlash *self);
 stm32_qspi_flash_ret_t stm32_qspi_flash_set_prescaler(Stm32QspiFlash *self, uint32_t prescaler);
 
