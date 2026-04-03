@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * u-blox GPS driver service
  *
- * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2021-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -34,9 +34,88 @@ gps_ublox_ret_t gps_ublox_set_i2c_transport(GpsUblox *self, I2cBus *i2c, uint8_t
 }
 
 
+gps_ublox_ret_t gps_ublox_set_uart_transport(GpsUblox *self, Stream *stream, Uart *uart) {
+	if (uart == NULL) {
+		return GPS_UBLOX_RET_FAILED;
+	}
+	self->uart = uart;
+	self->stream = stream;
+	return GPS_UBLOX_RET_OK;
+}
+
+
+gps_ublox_ret_t gps_ublox_set_uart_rtcm_transport(GpsUblox *self, Stream *stream, Uart *uart) {
+	if (uart == NULL) {
+		return GPS_UBLOX_RET_FAILED;
+	}
+	self->rtcm_uart = uart;
+	self->rtcm_stream = stream;
+	return GPS_UBLOX_RET_OK;
+}
+
+
+gps_ublox_ret_t gps_ublox_set_ubx_out_stream(GpsUblox *self, Stream *stream) {
+	if (stream == NULL) {
+		return GPS_UBLOX_RET_FAILED;
+	}
+	self->ubx_out_stream = stream;
+	return GPS_UBLOX_RET_OK;
+}
+
+
+gps_ublox_ret_t gps_ublox_set_nmea_out_stream(GpsUblox *self, Stream *stream) {
+	if (stream == NULL) {
+		return GPS_UBLOX_RET_FAILED;
+	}
+	self->nmea_out_stream = stream;
+	return GPS_UBLOX_RET_OK;
+}
+
+
+static void gps_ublox_rtcm_in_task(void *p) {
+	GpsUblox *self = (GpsUblox *)p;
+
+	while (true) {
+		uint8_t buf[16];
+		size_t len = 0;
+		if (self->rtcm_in_stream->vmt->read_timeout(self->rtcm_in_stream, buf, sizeof(buf), &len, 1000) == STREAM_RET_OK) {
+			/* Write RTCM directly to the main GNSS module UART stream.
+			 * Do not check return values. We have to continue anyway. */
+			/** @todo the data should be validated first */
+			if (self->i2c) {
+				self->i2c->vmt->transfer(self->i2c, self->i2c_addr, buf, len, NULL, 0);
+			}
+			if (self->stream) {
+				self->stream->vmt->write(self->stream, buf, len);
+			}
+		}
+	}
+
+	vTaskDelete(NULL);
+}
+
+
+gps_ublox_ret_t gps_ublox_set_rtcm_in_stream(GpsUblox *self, Stream *stream) {
+	if (stream == NULL) {
+		return GPS_UBLOX_RET_FAILED;
+	}
+	self->rtcm_in_stream = stream;
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("starting RTCM inptut processing"));
+	xTaskCreate(gps_ublox_rtcm_in_task, "gps-ublox-rtcm", configMINIMAL_STACK_SIZE + 128, (void *)self, 3, &(self->rtcm_task));
+
+	return GPS_UBLOX_RET_OK;
+}
+
+
 static gps_ublox_ret_t write_data(GpsUblox *self, const uint8_t *buf, size_t len) {
 	if (self->i2c) {
-		if (self->i2c->transfer(self->i2c->parent, self->i2c_addr, buf, len, NULL, 0) == I2C_BUS_RET_OK) {
+		if (self->i2c->vmt->transfer(self->i2c, self->i2c_addr, buf, len, NULL, 0) == I2C_BUS_RET_OK) {
+			return GPS_UBLOX_RET_OK;
+		}
+	}
+	if (self->stream) {
+		if (self->stream->vmt->write(self->stream, buf, len) == STREAM_RET_OK) {
 			return GPS_UBLOX_RET_OK;
 		}
 	}
@@ -51,7 +130,7 @@ static gps_ublox_ret_t read_data(GpsUblox *self, uint8_t *buf, size_t len) {
 			/* Read number of bytes first. */
 			uint8_t reg = 0xfd;
 			uint16_t bytes = 0;
-			self->i2c->transfer(self->i2c->parent, self->i2c_addr, &reg, sizeof(reg), (uint8_t *)&bytes, sizeof(bytes));
+			self->i2c->vmt->transfer(self->i2c, self->i2c_addr, &reg, sizeof(reg), (uint8_t *)&bytes, sizeof(bytes));
 			bytes = (bytes >> 8) | (bytes << 8);
 			// if (bytes == 0) {
 				// return GPS_UBLOX_RET_FAILED;
@@ -68,11 +147,24 @@ static gps_ublox_ret_t read_data(GpsUblox *self, uint8_t *buf, size_t len) {
 			}
 			if (len > 0) {
 				reg = 0xff;
-				if (self->i2c->transfer(self->i2c->parent, self->i2c_addr, &reg, sizeof(reg), buf, len) == I2C_BUS_RET_OK) {
+				if (self->i2c->vmt->transfer(self->i2c, self->i2c_addr, &reg, sizeof(reg), buf, len) == I2C_BUS_RET_OK) {
 					return GPS_UBLOX_RET_OK;
 				}
 			}
 		}
+	}
+	if (self->stream) {
+		size_t read = 0;
+		while (len > 0) {
+			/* Accept OK or TIMEOUT. */
+			if (self->stream->vmt->read_timeout(self->stream, buf, len, &read, 2000) == STREAM_RET_OK) {
+				len -= read;
+				buf += read;
+			} else {
+				return GPS_UBLOX_RET_FAILED;
+			}
+		}
+		return GPS_UBLOX_RET_OK;
 	}
 	return GPS_UBLOX_RET_FAILED;
 }
@@ -84,7 +176,7 @@ static gps_ublox_ret_t send_ubx(GpsUblox *self, uint8_t class, uint8_t id, const
 	}
 
 	const uint8_t header[6] = {0xb5, 0x62, class, id, len & 0xff, (len << 8) & 0xff};
-	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("send_ubx cl = 0x%02x, id = 0x%02x, len = %u"), class, id, len);
+	//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("send_ubx cl = 0x%02x, id = 0x%02x, len = %u"), class, id, len);
 
 	uint8_t cka = 0;
 	uint8_t ckb = 0;
@@ -109,7 +201,7 @@ static gps_ublox_ret_t send_ubx(GpsUblox *self, uint8_t class, uint8_t id, const
 
 static gps_ublox_ret_t eat_garbage_header(GpsUblox *self) {
 	uint8_t byte = 0;
-	uint32_t bytes_left = 100;
+	uint32_t bytes_left = 200;
 	while (byte != 0xb5) {
 		if (read_data(self, &byte, sizeof(byte)) != GPS_UBLOX_RET_OK) {
 			return GPS_UBLOX_RET_FAILED;
@@ -171,7 +263,7 @@ static gps_ublox_ret_t receive_ubx(GpsUblox *self, uint8_t *class, uint8_t *id, 
 	/* Read checksum but do not check. */
 	uint16_t checksum = 0;
 	read_data(self, (uint8_t *)&checksum, sizeof(checksum));
-	// u_log(system_log, LOG_TYPE_DEBUG, "ubx rx cl = 0x%02x, id = 0x%02x, len = %u", header[0], header[1], 6 + plen + 2);
+	//u_log(system_log, LOG_TYPE_DEBUG, "ubx rx cl = 0x%02x, id = 0x%02x, len = %u", header[0], header[1], 6 + plen + 2);
 
 	return GPS_UBLOX_RET_OK;
 }
@@ -267,7 +359,7 @@ static gps_ublox_ret_t gps_ublox_set_nav5(GpsUblox *self) {
 		0x00, 0x00, /* Static hold distance */
 		0x00, /* UTC standard */
 		0x00, 0x00, 0x00, 0x00, 0x00, /* Reserved */
-		
+
 	};
 	return send_ubx_ack(self, 0x06, 0x24, buf, sizeof(buf));
 }
@@ -305,35 +397,228 @@ static void gps_ublox_nav_timeutc_to_timespec(struct timespec *timepulse, uint8_
 }
 
 
+gps_ublox_ret_t gps_ublox_cfg_valset(GpsUblox *self, uint32_t key, uint8_t *buf) {
+	size_t value_sizes[8] = {0, 1, 1, 2, 4, 8, 0, 0};
+	size_t value_size = value_sizes[(key & 0x70000000ull) >> 28];
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("valset %p = %d"), key, buf);
+
+	uint8_t msg[8 + value_size] = {};
+
+	msg[0] = 0x00; /* version */
+	msg[1] = 0x01; /* update RAM layer only */
+	msg[2] = 0x00;
+	msg[3] = 0x00;
+	msg[4] = key & 0xff;
+	msg[5] = (key >> 8) & 0xff;
+	msg[6] = (key >> 16) & 0xff;
+	msg[7] = (key >> 24) & 0xff;
+	memcpy(msg + 8, buf, value_size);
+
+	return send_ubx_ack(self, 0x06, 0x8a, msg, 8 + value_size);
+	vTaskDelay(10);
+}
+
+
+static gps_ublox_ret_t gps_ublox_rx_process(GpsUblox *self, uint8_t *buf, size_t len) {
+	for (size_t i = 0; i < len; i++) {
+		uint8_t b = buf[i];
+
+		switch (self->rx_proto_state) {
+			case GPS_UBLOX_PROTO_STATE_UBX_SYNC1:
+				if (b == 0x62) {
+					self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UBX_SYNC2;
+				} else {
+					self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UNKNOWN;
+				}
+				break;
+
+			case GPS_UBLOX_PROTO_STATE_UBX_SYNC2:
+				/* We definitely have a UBX message. Switch the state accordingly
+				 * to start parsing it. Also, if configured, output the sync sequence
+				 * to the UBX protocol output stream and enable outputting the whole message. */
+				self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UBX_CLASS;
+
+				if (self->ubx_out_stream) {
+					self->ubx_out_stream->vmt->write(self->ubx_out_stream, (uint8_t []){0xb5, 0x62}, 2);
+					self->ubx_out_state = true;
+				}
+				break;
+
+			case GPS_UBLOX_PROTO_STATE_UBX_CLASS:
+				self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UBX_ID;
+				break;
+
+			case GPS_UBLOX_PROTO_STATE_UBX_ID:
+				self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UBX_LEN_LSB;
+				self->ubx_out_plen = b;
+				break;
+
+			case GPS_UBLOX_PROTO_STATE_UBX_LEN_LSB:
+				self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UBX_LEN_MSB;
+				self->ubx_out_plen += b * 256;
+				break;
+
+			case GPS_UBLOX_PROTO_STATE_UBX_LEN_MSB:
+				self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UBX_DATA;
+				/* fallthrough */
+
+			case GPS_UBLOX_PROTO_STATE_UBX_DATA:
+				if (self->ubx_out_plen == 0) {
+					self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UBX_CKA;
+				} else {
+					self->ubx_out_plen--;
+				}
+				break;
+
+			case GPS_UBLOX_PROTO_STATE_UBX_CKA:
+				/* The last state is CKA received, now we have CKB in the buffer. */
+				self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UNKNOWN;
+				if (self->ubx_out_stream) {
+					self->ubx_out_stream->vmt->write(self->ubx_out_stream, &b, 1);
+					self->ubx_out_state = false;
+				}
+				break;
+
+			case GPS_UBLOX_PROTO_STATE_NMEA_START:
+				if (b == 'G') {
+					self->rx_proto_state = GPS_UBLOX_PROTO_STATE_NMEA_G;
+					if (self->nmea_out_stream) {
+						self->nmea_out_stream->vmt->write(self->nmea_out_stream, (uint8_t []){'$'}, 1);
+					}
+					self->nmea_out_state = true;
+				}
+				break;
+
+			case GPS_UBLOX_PROTO_STATE_NMEA_G:
+				if (b == '\r' || b == '\n') {
+					self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UNKNOWN;
+					self->nmea_out_state = false;
+					if (self->nmea_out_stream) {
+						self->nmea_out_stream->vmt->write(self->nmea_out_stream, (uint8_t []){'\r', '\n'}, 2);
+					}
+				}
+				break;
+
+			case GPS_UBLOX_PROTO_STATE_UNKNOWN:
+			default:
+				if (b == 0xb5) {
+					self->rx_proto_state = GPS_UBLOX_PROTO_STATE_UBX_SYNC1;
+				}
+				if (b == '$') {
+					self->rx_proto_state = GPS_UBLOX_PROTO_STATE_NMEA_START;
+				}
+		}
+
+		/* Output raw data to per-protocol streams, if configured. */
+		if (self->ubx_out_stream && self->ubx_out_state) {
+			self->ubx_out_stream->vmt->write(self->ubx_out_stream, &b, 1);
+		}
+		if (self->nmea_out_stream && self->nmea_out_state) {
+			self->nmea_out_stream->vmt->write(self->nmea_out_stream, &b, 1);
+		}
+	}
+
+	return GPS_UBLOX_RET_OK;
+}
+
+
 static void gps_ublox_rx_task(void *p) {
 	GpsUblox *self = (GpsUblox *)p;
 
-	self->rx_running = true;
-
-	gps_ublox_set_ddc(self, 0x42, GPS_UBLOX_PROTO_UBX, GPS_UBLOX_PROTO_UBX);
+	/* Configuration interface was changed considerably. This needs to be done
+	 * after starting the service but prior to using it. */
+	//gps_ublox_set_ddc(self, 0x42, GPS_UBLOX_PROTO_UBX, GPS_UBLOX_PROTO_UBX);
 	/* Send message rate for UBX-NAV-TIMEUTC */
-	gps_ublox_set_periodic_msg(self, 0x01, 0x21, 1);
-	gps_ublox_set_timepulse(self);
-	gps_ublox_set_ant(self);
-	gps_ublox_set_nav5(self);
+	//gps_ublox_set_periodic_msg(self, 0x01, 0x21, 1);
+	//gps_ublox_set_timepulse(self);
+	//gps_ublox_set_ant(self);
+	//gps_ublox_set_nav5(self);
 
+	/* Disable NMEA on UART1. */
+	gps_ublox_cfg_valset(self, 0x10740002, (uint8_t[]){0x00});
+	/* Enable NMEA GGA message. */
+	//gps_ublox_cfg_valset(self, 0x209100bb, (uint8_t[]){0x01});
+
+	/* Enable UBX SAT message output. */
+	gps_ublox_cfg_valset(self, 0x20910016, (uint8_t[]){0x01});
+	/* nav-sig */
+	gps_ublox_cfg_valset(self, 0x20910346, (uint8_t[]){0x01});
+
+	/* enable additional signals */
+	gps_ublox_cfg_valset(self, 0x1031000a, (uint8_t[]){0x01});
+	gps_ublox_cfg_valset(self, 0x1031000e, (uint8_t[]){0x01});
+	gps_ublox_cfg_valset(self, 0x10310024, (uint8_t[]){0x01});
+	gps_ublox_cfg_valset(self, 0x10310026, (uint8_t[]){0x01});
+
+	/* enable RXM_COR */
+	//gps_ublox_cfg_valset(self, 0x209106b7, (uint8_t[]){0x01});
+
+	/* enable NAV_PVT */
+	gps_ublox_cfg_valset(self, 0x20910007, (uint8_t[]){0x01});
+
+	/* enable NAV_RELPOSNED */
+	//gps_ublox_cfg_valset(self, 0x2091008e, (uint8_t[]){0x01});
+
+
+	gps_ublox_cfg_valset(self, 0x20910034, (uint8_t[]){0x01});
+
+
+	self->rx_running = true;
 	while (self->rx_can_run) {
-		// gps_ublox_set_ddc(self, 0x42, GPS_UBLOX_PROTO_UBX, GPS_UBLOX_PROTO_UBX);
+		/* Process a chunk of data at once. */
+		uint8_t buf[16];
+		size_t len = sizeof(buf);
 
-		uint8_t class = 0;
-		uint8_t id = 0;
-		uint8_t data[32] = {0};
-		size_t len = 0;
-		receive_ubx(self, &class, &id, data, sizeof(data), &len);
+		if (self->i2c) {
+			/* Read number of bytes first. */
+			uint16_t bytes = 0;
+			self->i2c->vmt->transfer(self->i2c, self->i2c_addr, (uint8_t[]){0xfd}, 1, (uint8_t *)&bytes, sizeof(bytes));
+			bytes = (bytes >> 8) | (bytes << 8);
+			if (bytes == 0) {
+				/* Nothing in the I2C output buffer. Wait a bit and poll again. */
+				vTaskDelay(100);
+				continue;
+			}
+			if (bytes > sizeof(buf)) {
+				/* Limit the length to the available buffer space. */
+				bytes = sizeof(buf);
+			}
+			if (self->i2c->vmt->transfer(self->i2c, self->i2c_addr, (uint8_t[]){0xff}, 1, buf, len) != I2C_BUS_RET_OK) {
+				/* Something went wrong, do it again. */
+				vTaskDelay(100);
+				continue;
+			}
+			gps_ublox_rx_process(self, buf, len);
+		}
+		if (self->stream) {
+			size_t read = 0;
+			if (self->stream->vmt->read_timeout(self->stream, buf, sizeof(buf), &read, 100) == STREAM_RET_OK) {
+				gps_ublox_rx_process(self, buf, read);
+			}
+		}
+
+
+
+		//uint8_t class = 0;
+		//uint8_t id = 0;
+		//uint8_t data[32] = {0};
+		//size_t len = 0;
+		//receive_ubx(self, &class, &id, data, sizeof(data), &len);
 
 		/* NAV_TIMEUTC message has arrived. 1PPS signal is already sampled now.
 		 * Process the message and act accordingly. */
-		if (class == 0x01 && id == 0x21) {
-			UBaseType_t cs = taskENTER_CRITICAL_FROM_ISR();
-			gps_ublox_nav_timeutc_to_timespec(&self->timepulse_time, data, len, &self->timepulse_accuracy);
-			taskEXIT_CRITICAL_FROM_ISR(cs);
-		}
-		vTaskDelay(10);
+		//if (class == 0x01 && id == 0x21) {
+			//UBaseType_t cs = taskENTER_CRITICAL_FROM_ISR();
+			//gps_ublox_nav_timeutc_to_timespec(&self->timepulse_time, data, len, &self->timepulse_accuracy);
+			//taskEXIT_CRITICAL_FROM_ISR(cs);
+		//}
+		//if (class == 0x01 && id == 0x14) {
+			//struct ubx_nav_hpposllh hppos;
+			//memcpy(&hppos, data, len);
+			//u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("lat = %ld, lon = %ld, hacc = %lu, vacc = %lu"), hppos.lat, hppos.lon, hppos.hacc, hppos.vacc);
+		//}
+		//vTaskDelay(10);
 	}
 	self->rx_running = false;
 	vTaskDelete(NULL);
@@ -381,7 +666,7 @@ gps_ublox_ret_t gps_ublox_timepulse_handler(GpsUblox *self) {
 	 * If we waited for NAV_TIMEUTC, the time would be invalid until then. */
 	UBaseType_t cs = taskENTER_CRITICAL_FROM_ISR();
 	self->timepulse_time.tv_sec++;
-	
+
 	if (self->measure_clock && self->measure_clock->get) {
 		self->measure_clock->get(self->measure_clock->parent, &self->measure_time);
 	}
