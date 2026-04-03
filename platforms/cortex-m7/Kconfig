@@ -1,0 +1,8 @@
+config PORT_PLATFORM_ARM_CM7
+	bool
+
+menu "ARM Cortex M7 platform configuration"
+	depends on PORT_PLATFORM_ARM_CM7
+
+	# Placeholder
+endmenu
