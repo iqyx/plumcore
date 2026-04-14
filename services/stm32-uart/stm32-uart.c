@@ -410,7 +410,7 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 	uint8_t bbuf[32];
 	size_t bbuf_len = 0;
 	while ((port->ISR & USART_ISR_RXNE_RXFNE) && (bbuf_len < sizeof(bbuf))) {
-		bbuf[bbuf_len] = (uint8_t)(USART_RDR_RDR & USART_RDR_RDR_Msk);
+		bbuf[bbuf_len] = (uint8_t)(port->RDR & USART_RDR_RDR_Msk);
 		bbuf_len++;
 	}
 	if (bbuf_len > 0) {
