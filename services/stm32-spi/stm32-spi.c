@@ -12,10 +12,19 @@
 
 #include <main.h>
 
-#include <libopencm3/stm32/spi.h>
-#include <libopencm3/stm32/gpio.h>
-
 #include <interfaces/spi.h>
+#include <interfaces/gpio.h>
+
+#if defined(STM32G4)
+	#include <libopencm3/stm32/spi.h>
+	/* Not ready yet. */
+	/* #include <stm32g4xx.h> */
+#elif defined(STM32H7)
+	#include <stm32h7xx.h>
+#else
+	#error "stm32-gpio service is not compatible with this MCU family"
+#endif
+
 #include "stm32-spi.h"
 
 #define MODULE_NAME "stm32-spi"
@@ -28,13 +37,23 @@
 
 static spi_ret_t stm32_spibus_send(SpiBus *spibus, const uint8_t *txbuf, size_t txlen) {
 	Stm32SpiBus *self = (Stm32SpiBus *)spibus->parent;
+	SPI_TypeDef *base = (SPI_TypeDef *)self->base;
 
 	for (size_t i = 0; i < txlen; i++) {
-		#if defined(STM32L4) || defined(STM32G4)
+		#if defined(STM32G4)
 			spi_send8(self->locm3_spi, txbuf[i]);
 			spi_read8(self->locm3_spi);
-		#else
-			spi_xfer(self->locm3_spi, txbuf[i]);
+		#elif defined(STM32H7)
+			while (!(base->SR & SPI_SR_TXC)) {
+				continue;
+			}
+			base->TXDR = txbuf[i];
+			base->CR1 |= SPI_CR1_CSTART;
+			while (!(base->SR & SPI_SR_RXP)) {
+				continue;
+			}
+			uint8_t read = base->RXDR;
+			(void)read;
 		#endif
 	}
 
@@ -44,13 +63,22 @@ static spi_ret_t stm32_spibus_send(SpiBus *spibus, const uint8_t *txbuf, size_t 
 
 static spi_ret_t stm32_spibus_receive(SpiBus *spibus, uint8_t *rxbuf, size_t rxlen) {
 	Stm32SpiBus *self = (Stm32SpiBus *)spibus->parent;
+	SPI_TypeDef *base = (SPI_TypeDef *)self->base;
 
 	for (size_t i = 0; i < rxlen; i++) {
-		#if defined(STM32L4) || defined(STM32G4)
+		#if defined(STM32G4)
 			spi_send8(self->locm3_spi, 0x00);
 			rxbuf[i] = spi_read8(self->locm3_spi);
-		#else
-			rxbuf[i] = spi_xfer(self->locm3_spi, 0x00);
+		#elif defined(STM32H7)
+			while (!(base->SR & SPI_SR_TXC)) {
+				continue;
+			}
+			base->TXDR = 0x00;
+			base->CR1 |= SPI_CR1_CSTART;
+			while (!(base->SR & SPI_SR_RXP)) {
+				continue;
+			}
+			rxbuf[i] = base->RXDR;
 		#endif
 	}
 
@@ -61,12 +89,56 @@ static spi_ret_t stm32_spibus_receive(SpiBus *spibus, uint8_t *rxbuf, size_t rxl
 static spi_ret_t stm32_spibus_exchange(SpiBus *spibus, const uint8_t *txbuf, uint8_t *rxbuf, size_t len) {
 	Stm32SpiBus *self = (Stm32SpiBus *)spibus->parent;
 
-	for (size_t i = 0; i < len; i++) {
-		#if defined(STM32L4) || defined(STM32G4)
-			spi_send8(self->locm3_spi, txbuf[i]);
-			rxbuf[i] = spi_read8(self->locm3_spi);
+	if (self->per_type == STM32_SPI_PER_TYPE_UART) {
+		USART_TypeDef *base = (USART_TypeDef *)self->base;
+		#if defined(STM32H7)
+			for (size_t i = 0; i < len; i++) {
+				while (!(base->ISR & USART_ISR_TXE_TXFNF)) {
+					continue;
+				}
+				volatile uint8_t *txdr = (volatile uint8_t *)&base->TDR;
+				*txdr = txbuf[i];
+
+				while (!(base->ISR & USART_ISR_RXNE_RXFNE)) {
+					continue;
+				}
+				volatile uint8_t *rxdr = (volatile uint8_t *)&base->RDR;
+				rxbuf[i] = *rxdr;
+			}
 		#else
-			rxbuf[i] = spi_xfer(self->locm3_spi, txbuf[i]);
+			return SPI_RET_FAILED;
+		#endif
+
+	} else {
+		SPI_TypeDef *base = (SPI_TypeDef *)self->base;
+		#if defined(STM32G4)
+			for (size_t i = 0; i < len; i++) {
+				spi_send8(self->locm3_spi, txbuf[i]);
+				rxbuf[i] = spi_read8(self->locm3_spi);
+			}
+
+		#elif defined(STM32H7)
+			while (!(base->SR & SPI_SR_TXC)) {
+				continue;
+			}
+
+			base->CR1 &= ~SPI_CR1_SPE;
+			base->CR1 |= SPI_CR1_SPE;
+			base->CR1 |= SPI_CR1_CSTART;
+
+			for (size_t i = 0; i < len; i++) {
+				volatile uint8_t *txdr = (volatile uint8_t *)&base->TXDR;
+				*txdr = txbuf[i];
+			}
+
+			while (!(base->SR & SPI_SR_TXC)) {
+				continue;
+			}
+
+			for (size_t i = 0; i < len; i++) {
+				volatile uint8_t *rxdr = (volatile uint8_t *)&base->RXDR;
+				rxbuf[i] = *rxdr;
+			}
 		#endif
 	}
 
@@ -90,33 +162,31 @@ static spi_ret_t stm32_spibus_unlock(SpiBus *spibus) {
 }
 
 
-static const uint8_t baudrate_prescalers[] = {
-	SPI_CR1_BR_FPCLK_DIV_2,
-	SPI_CR1_BR_FPCLK_DIV_4,
-	SPI_CR1_BR_FPCLK_DIV_8,
-	SPI_CR1_BR_FPCLK_DIV_16,
-	SPI_CR1_BR_FPCLK_DIV_32,
-	SPI_CR1_BR_FPCLK_DIV_64,
-	SPI_CR1_BR_FPCLK_DIV_128,
-	SPI_CR1_BR_FPCLK_DIV_256,
-};
-
 static spi_ret_t stm32_spibus_set_sck_freq(SpiBus *spibus, uint32_t freq_hz) {
 	Stm32SpiBus *self = (Stm32SpiBus *)spibus->parent;
+	SPI_TypeDef *base = (SPI_TypeDef *)self->base;
 
 	/** @todo get the correct APB frequency properly */
-	extern uint32_t rcc_apb1_frequency;
+	uint32_t spi_freq = SystemCoreClock;
 
-	spi_disable(self->locm3_spi);
+	base->CR1 &= ~SPI_CR1_SPE;
 	uint32_t i = 0;
 	uint8_t prescaler = 2;
-	while (rcc_apb1_frequency / prescaler > freq_hz && i < sizeof(baudrate_prescalers) - 1) {
+	while (spi_freq / prescaler > freq_hz && i < 7) {
 		i++;
 		prescaler *= 2;
 	}
-	spi_set_baudrate_prescaler(self->locm3_spi, baudrate_prescalers[i]);
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("SCK freq requested = %lu kHz, prescaler = %u, real = %lu kHz"), freq_hz / 1000, prescaler, rcc_apb1_frequency / prescaler / 1000);
-	spi_enable(self->locm3_spi);
+	/* Last prescaler is /256, value = 8 */
+
+	#if defined(STM32G4)
+		spi_set_baudrate_prescaler((uint32_t)self->base, baudrate_prescalers[i]);
+	#elif defined(STM32H7)
+		base->CFG1 = (base->CFG1 & ~SPI_CFG1_MBR_Msk) | (prescaler << SPI_CFG1_MBR_Pos);
+
+	#endif
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("SCK freq requested = %lu kHz, prescaler = %u, real = %lu kHz"), freq_hz / 1000, prescaler, spi_freq / prescaler / 1000);
+	base->CR1 |= SPI_CR1_SPE;
 
 	return SPI_RET_OK;
 }
@@ -124,22 +194,14 @@ static spi_ret_t stm32_spibus_set_sck_freq(SpiBus *spibus, uint32_t freq_hz) {
 
 static spi_ret_t stm32_spibus_set_mode(SpiBus *spibus, uint8_t cpol, uint8_t cpha) {
 	Stm32SpiBus *self = (Stm32SpiBus *)spibus->parent;
+	SPI_TypeDef *base = (SPI_TypeDef *)self->base;
 
-	spi_disable(self->locm3_spi);
-	if (cpol == 0) {
-		spi_set_clock_polarity_0(self->locm3_spi);
-	} else {
-		spi_set_clock_polarity_1(self->locm3_spi);
-	}
-	if (cpha == 0) {
-		spi_set_clock_phase_0(self->locm3_spi);
-	} else {
-		spi_set_clock_phase_1(self->locm3_spi);
-	}
-	spi_enable(self->locm3_spi);
+	base->CR1 &= ~SPI_CR1_SPE;
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("not implemented"));
+	base->CR1 |= SPI_CR1_SPE;
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("mode set to CPOL=%u,CPHA=%u"), cpol, cpha);
 
-	return SPI_RET_OK;
+	return SPI_RET_FAILED;
 }
 
 
@@ -154,37 +216,79 @@ static const struct spibus_vmt stm32_spibus_vmt = {
 };
 
 
-stm32_spi_ret_t stm32_spibus_init(Stm32SpiBus *self, uint32_t locm3_spi) {
+static stm32_spi_ret_t stm32_spibus_port_init(Stm32SpiBus *self) {
+	if (self->per_type == STM32_SPI_PER_TYPE_UART) {
+		USART_TypeDef *base = (USART_TypeDef *)self->base;
+
+		/* Initialize UART/USART peripheral in a synchronous mode, acting as a SPI master. */
+		base->CR1 &= ~USART_CR1_UE;
+		#if defined(STM32H7)
+			/* set baudrate here */
+			base->CR1 = USART_CR1_RE | USART_CR1_TE;
+			base->CR2 = USART_CR2_CLKEN | USART_CR2_MSBFIRST | USART_CR2_LBCL;
+			base->CR3 = USART_CR3_OVRDIS;
+			base->BRR = 32 - 1;
+		#else
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("driver does not support SPI master mode using UART peripheral"));
+			return STM32_SPI_RET_FAILED;
+		#endif
+		base->CR1 |= USART_CR1_UE;
+
+	} else {
+		SPI_TypeDef *base = (SPI_TypeDef *)self->base;
+
+		/* Use the standard SPI peripheral. */
+		base->CR1 &= ~SPI_CR1_SPE;
+		#if defined(STM32G4)
+
+			spi_set_master_mode((uint32_t)self->base);
+			spi_set_baudrate_prescaler((uint32_t)self->base, SPI_CR1_BR_FPCLK_DIV_32);
+			spi_set_clock_polarity_0((uint32_t)self->base);
+			spi_set_clock_phase_0((uint32_t)self->base);
+			spi_set_full_duplex_mode((uint32_t)self->base);
+			spi_set_unidirectional_mode((uint32_t)self->base);
+			spi_enable_software_slave_management((uint32_t)self->base);
+			spi_send_msb_first((uint32_t)self->base);
+			spi_set_nss_high((uint32_t)self->base);
+
+			base->CR2 |= SPI_CR2_FRXTH;
+			base->CR2 = (base->CR2 & ~SPI_CR2_DS_Msk) | ((8 - 1) & SPI_CR2_DS_Msk);
+		#elif defined(STM32H7)
+			base->CFG1 = (4 << SPI_CFG1_MBR_Pos) | ((8 - 1) << SPI_CFG1_DSIZE_Pos) | ((8 - 1) << SPI_CFG1_CRCSIZE_Pos);
+			base->CR2 = 0;
+			base->CR1 = SPI_CR1_SSI;
+			base->CFG2 = SPI_CFG2_SSM;
+			base->CFG2 |= SPI_CFG2_MASTER;
+		#endif
+		base->CR1 |= SPI_CR1_SPE;
+	}
+
+	return STM32_SPI_RET_OK;
+}
+
+stm32_spi_ret_t stm32_spibus_init(Stm32SpiBus *self, void *base, enum stm32_spi_per_type per_type) {
 	memset(self, 0, sizeof(Stm32SpiBus));
-	self->locm3_spi = locm3_spi;
+	self->base = base;
+	self->per_type = per_type;
+
+	if (stm32_spibus_port_init(self) != STM32_SPI_RET_OK) {
+		goto err;
+	}
 
 	self->bus_lock = xSemaphoreCreateMutex();
 	if (self->bus_lock == NULL) {
-		return STM32_SPI_RET_FAILED;
+		goto err;
 	}
 
 	self->bus.parent = self;
 	self->bus.vmt = &stm32_spibus_vmt;
 
-	spi_disable(self->locm3_spi);
-	spi_set_master_mode(self->locm3_spi);
-	spi_set_baudrate_prescaler(self->locm3_spi, SPI_CR1_BR_FPCLK_DIV_32);
-	spi_set_clock_polarity_0(self->locm3_spi);
-	spi_set_clock_phase_0(self->locm3_spi);
-	spi_set_full_duplex_mode(self->locm3_spi);
-	spi_set_unidirectional_mode(self->locm3_spi);
-	spi_enable_software_slave_management(self->locm3_spi);
-	spi_send_msb_first(self->locm3_spi);
-	spi_set_nss_high(self->locm3_spi);
-	#if defined(STM32L4) || defined(STM32G4)
-		spi_fifo_reception_threshold_8bit(self->locm3_spi);
-		spi_set_data_size(self->locm3_spi, SPI_CR2_DS_8BIT);
-	#endif
-	spi_enable(self->locm3_spi);
-
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("SPI bus %p initialised"), self->locm3_spi);
-
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("SPI bus %p initialized"), self->base);
 	return STM32_SPI_RET_OK;
+
+err:
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("SPI bus %p init failed"), self->base);
+	return STM32_SPI_RET_FAILED;
 }
 
 
@@ -233,7 +337,7 @@ static spi_ret_t stm32_spidev_select(SpiDev *spidev) {
 	if (self->bus->vmt->lock(self->bus) != SPI_RET_OK) {
 		return SPI_RET_FAILED;
 	}
-	gpio_clear(self->locm3_cs_port, self->locm3_cs_pin);
+	self->cs->vmt->set(self->cs, false);
 	self->selected = true;
 
 	return SPI_RET_OK;
@@ -246,7 +350,7 @@ static spi_ret_t stm32_spidev_deselect(SpiDev *spidev) {
 	if (!self->selected) {
 		return SPI_RET_FAILED;
 	}
-	gpio_set(self->locm3_cs_port, self->locm3_cs_pin);
+	self->cs->vmt->set(self->cs, true);
 	self->selected = false;
 	self->bus->vmt->unlock(self->bus);
 
@@ -264,17 +368,17 @@ static const struct spidev_vmt stm32_spidev_vmt = {
 
 
 
-stm32_spi_ret_t stm32_spidev_init(Stm32SpiDev *self, SpiBus *bus, uint32_t cs_port, uint32_t cs_pin) {
+stm32_spi_ret_t stm32_spidev_init(Stm32SpiDev *self, SpiBus *bus, Gpio *cs) {
 	memset(self, 0, sizeof(Stm32SpiDev));
 	self->bus = bus;
-	self->locm3_cs_port = cs_port;
-	self->locm3_cs_pin = cs_pin;
-	gpio_set(self->locm3_cs_port, self->locm3_cs_pin);
+	self->cs = cs;
+	self->cs->vmt->set_mode(self->cs, MODE_OUTPUT);
+	self->cs->vmt->set(self->cs, true);
 
 	self->dev.parent = self;
 	self->dev.vmt = &stm32_spidev_vmt;
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("SPI device initialised"));
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("SPI device initialized"));
 
 	return STM32_SPI_RET_OK;
 }
