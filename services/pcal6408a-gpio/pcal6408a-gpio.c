@@ -163,6 +163,13 @@ pcal6408a_gpio_ret_t pcal6408a_gpio_init(Pcal6408A *self, I2cBus *i2c) {
 	self->reg_opr = 0xff;
 	self->reg_cr = 0xff;
 
+	uint8_t val1;
+	uint8_t val2;
+	if (pcal6408a_gpio_read8(self, 0x42, &val1) != PCAL6408A_GPIO_RET_OK ||
+	    pcal6408a_gpio_read8(self, 0x43, &val2) != PCAL6408A_GPIO_RET_OK) {
+		goto err;
+	}
+
 	for (int i = 0; i < 8; i++) {
 		self->pin[i].parent = self;
 		self->pin[i].vmt = &pcal6408a_gpio_vmt;
@@ -170,6 +177,10 @@ pcal6408a_gpio_ret_t pcal6408a_gpio_init(Pcal6408A *self, I2cBus *i2c) {
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 	return PCAL6408A_GPIO_RET_OK;
+err:
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("init/probe failed"));
+	return PCAL6408A_GPIO_RET_OK;
+
 }
 
 
