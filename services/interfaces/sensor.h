@@ -9,7 +9,7 @@
 #pragma once
 
 #include <stdint.h>
-
+#include <time.h>
 
 typedef enum {
 	SENSOR_RET_OK = 0,
@@ -25,6 +25,7 @@ typedef struct sensor Sensor;
 struct sensor_vmt {
 	sensor_ret_t (*value_f)(Sensor *self, float *value);
 	sensor_ret_t (*value_i32)(Sensor *self, int32_t *value);
+	sensor_ret_t (*get_timestamp)(Sensor *self, struct timespec *ts);
 };
 
 typedef struct sensor {
