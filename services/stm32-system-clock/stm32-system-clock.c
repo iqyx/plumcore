@@ -55,22 +55,21 @@ static clock_ret_t stm32_system_clock_set(Clock *clock, const struct timespec *t
 		return CLOCK_RET_FAILED;
 	}
 	Stm32SystemClock *self = (Stm32SystemClock *)clock->parent;
+	TIM_TypeDef *base = (TIM_TypeDef *)self->timer_base;
 
-	//uint64_t c = (uint64_t)time->tv_sec * 1000000ULL + (uint64_t)(time->tv_nsec / 1000UL);
-
-	//timer_disable_counter(self->timer);
-	//self->overflows = c / (uint64_t)(self->period + 1ULL);
-	//timer_set_counter(self->timer, (uint32_t)(c % (uint64_t)(self->period + 1ULL)));
-	//timer_enable_counter(self->timer);
+	base->CR1 &= ~TIM_CR1_CEN;
+	self->overflows = time->tv_sec;
+	base->CNT = (uint32_t)(time->tv_nsec * self->freq_hz / 1e9);
+	base->CR1 |= TIM_CR1_CEN;
 
 	return CLOCK_RET_OK;;
 }
+
 
 static const struct clock_vmt stm32_system_clock_vmt = {
 	.get = stm32_system_clock_get,
 	.set = stm32_system_clock_set,
 };
-
 
 
 /***************************************************************************************************
