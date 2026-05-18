@@ -1,0 +1,22 @@
+config PORT_NWDAQ_M_GNSS2
+	bool "nwdaq-m-gnss2 GNSS, L-band and UHF receiver"
+
+	menu "Configuraton"
+		depends on PORT_NWDAQ_M_GNSS2
+
+		config PORT_NAME
+			string
+			default "nwdaq-m-gnss2"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m4f"
+
+		config MCU_FAMILY
+			string
+			default "stm32g4"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+	endmenu
