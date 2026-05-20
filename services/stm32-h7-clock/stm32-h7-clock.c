@@ -22,12 +22,40 @@ stm32_clock_ret_t stm32_h7_clock_init(Stm32Clock *self) {
 	u_log(system_log, LOG_TYPE_INFO, "flash latency %u cycles", FLASH->ACR & 0xf);
 
 	/***************************************************************************************************************
-	 * 16 MHz default HSE, no bypass mode, prepare by default.
+	 * 16 MHz HSE external oscillator.
 	 **************************************************************************************************************/
-	if (stm32_clock_hse_init(&self->hse_ck, 16000000ul, false) != STM32_CLOCK_RET_OK) {
+	if (stm32_clock_osc_init(&self->hse_ck, &(const struct stm32_clock_osc_config){
+		.name = "hse_ck",
+		.fixed_rate_hz = 16000000ul,
+		.reg_enable = {.reg = &((RCC_TypeDef *)RCC)->CR, .mask = RCC_CR_HSEON},
+		.reg_ready  = {.reg = &((RCC_TypeDef *)RCC)->CR, .mask = RCC_CR_HSERDY},
+	}) != STM32_CLOCK_RET_OK) {
 		goto err;
 	}
-	self->hse_ck.clock.vmt->prepare(&self->hse_ck.clock);
+
+	/***************************************************************************************************************
+	 * 64 MHz HSI internal RC oscillator.
+	 **************************************************************************************************************/
+	if (stm32_clock_osc_init(&self->hsi_ck, &(const struct stm32_clock_osc_config){
+		.name = "hsi_ck",
+		.fixed_rate_hz = 64000000ul,
+		.reg_enable = {.reg = &((RCC_TypeDef *)RCC)->CR, .mask = RCC_CR_HSION},
+		.reg_ready  = {.reg = &((RCC_TypeDef *)RCC)->CR, .mask = RCC_CR_HSIRDY},
+	}) != STM32_CLOCK_RET_OK) {
+		goto err;
+	}
+
+	/***************************************************************************************************************
+	 * 4 MHz CSI internal RC oscillator.
+	 **************************************************************************************************************/
+	if (stm32_clock_osc_init(&self->csi_ck, &(const struct stm32_clock_osc_config){
+		.name = "csi_ck",
+		.fixed_rate_hz = 4000000ul,
+		.reg_enable = {.reg = &((RCC_TypeDef *)RCC)->CR, .mask = RCC_CR_CSION},
+		.reg_ready  = {.reg = &((RCC_TypeDef *)RCC)->CR, .mask = RCC_CR_CSIRDY},
+	}) != STM32_CLOCK_RET_OK) {
+		goto err;
+	}
 
 	/***************************************************************************************************************
 	 * PLL-SRC mux, select HSE as the source.
@@ -35,9 +63,9 @@ stm32_clock_ret_t stm32_h7_clock_init(Stm32Clock *self) {
 	stm32_clock_mux_init(&self->pll_src_mux, &(const struct stm32_clock_mux_config){
 		.name = "pll-src",
 		.inputs = {
-			NULL,
-			NULL,
-			&self->hse_ck.clock
+			&self->hsi_ck.clock,
+			&self->csi_ck.clock,
+			&self->hse_ck.clock,
 		},
 		.input_count = 3,
 		.reg = &((RCC_TypeDef *)RCC)->PLLCKSELR,
@@ -107,8 +135,8 @@ stm32_clock_ret_t stm32_h7_clock_init(Stm32Clock *self) {
 	stm32_clock_mux_init(&self->sys_ck_mux, &(const struct stm32_clock_mux_config){
 		.name = "sys-ck",
 		.inputs = {
-			NULL,
-			NULL,
+			&self->hsi_ck.clock,
+			&self->csi_ck.clock,
 			&self->hse_ck.clock,
 			&self->pll1p_gate.clock,
 		},

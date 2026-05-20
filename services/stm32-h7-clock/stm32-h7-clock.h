@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "stm32-clock-hse.h"
+#include "stm32-clock-osc.h"
 #include "stm32-clock-mux.h"
 #include "stm32-clock-div.h"
 #include "stm32-clock-mul.h"
@@ -16,7 +16,9 @@
 
 
 typedef struct {
-	Stm32ClockHse hse_ck;
+	Stm32ClockOsc hse_ck;
+	Stm32ClockOsc hsi_ck;
+	Stm32ClockOsc csi_ck;
 	Stm32ClockMux pll_src_mux;
 	Stm32ClockMux sys_ck_mux;
 	Stm32ClockDiv pll1m_div;
