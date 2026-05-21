@@ -78,7 +78,7 @@ static uart_ret_t uart_set_databits(Uart *self, uint32_t b) {
 			port->CR1 &= ~USART_CR1_M;
 			break;
 		case 9:
-			port->CR1 |= USART_CR1_M;
+			port->CR1 = (port->CR1 & ~USART_CR1_M) | USART_CR1_M0;
 			break;
 		default:
 			stm32_uart_enable(stm32_uart, true);
@@ -101,13 +101,13 @@ static uart_ret_t uart_set_stopbits(Uart *self, enum uart_stopbits b) {
 	switch (b) {
 		case UART_STOPBITS_1:
 		default:
-			port->CR2 = (port->CR2 & USART_CR2_STOP_Msk);
+			port->CR2 = (port->CR2 & ~USART_CR2_STOP_Msk);
 			break;
 		case UART_STOPBITS_1_5:
-			port->CR2 = (port->CR2 & USART_CR2_STOP_Msk) | USART_CR2_STOP_0 | USART_CR2_STOP_1;
+			port->CR2 = (port->CR2 & ~USART_CR2_STOP_Msk) | USART_CR2_STOP_0 | USART_CR2_STOP_1;
 			break;
 		case UART_STOPBITS_2:
-			port->CR2 = (port->CR2 & USART_CR2_STOP_Msk) | USART_CR2_STOP_1;
+			port->CR2 = (port->CR2 & ~USART_CR2_STOP_Msk) | USART_CR2_STOP_1;
 			break;
 	}
 	stm32_uart_enable(stm32_uart, true);
@@ -322,7 +322,7 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, void *port_base) {
 	self->uart.vmt = &uart_vmt;
 
 	/* Set default UART parameters. */
-	stm32_uart_enable(self->port, false);
+	stm32_uart_enable(self, false);
 	uart_set_bitrate(&self->uart, 115200);
 	port->CR1 |= USART_CR1_RE | USART_CR1_TE;
 	uart_set_databits(&self->uart, 8);
@@ -333,7 +333,7 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, void *port_base) {
 	/* Enable FIFO mode */
 	port->CR1 |= USART_CR1_FIFOEN;
 
-	stm32_uart_enable(self->port, true);
+	stm32_uart_enable(self, true);
 
 	/* Allocate IPC primitives. */
 	self->rxbuf = xStreamBufferCreate(CONFIG_SERVICE_STM32_UART_RXBUF_SIZE, 1);
