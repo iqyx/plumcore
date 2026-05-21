@@ -9,6 +9,7 @@
 #pragma once
 
 #include <main.h>
+#include <interfaces/gpio.h>
 #include <interfaces/spi.h>
 #include <interfaces/fb.h>
 
@@ -19,10 +20,8 @@ typedef enum  {
 
 
 typedef struct lcs_st7586 {
-	uint32_t reset_port;
-	uint32_t reset_pin;
-	uint32_t cd_port;
-	uint32_t cd_pin;
+	Gpio *reset;
+	Gpio *cd;
 
 	SpiDev *spi;
 	Fb fb;
@@ -33,6 +32,6 @@ typedef struct lcs_st7586 {
 } LcdSt7586;
 
 
-lcd_st7586_ret_t lcd_st7586_init(LcdSt7586 *self, SpiDev *spi, uint32_t reset_port, uint32_t reset_pin, uint32_t cd_port, uint32_t cd_pin);
+lcd_st7586_ret_t lcd_st7586_init(LcdSt7586 *self, SpiDev *spi, Gpio *reset, Gpio *cd);
 lcd_st7586_ret_t lcd_st7586_free(LcdSt7586 *self);
 
