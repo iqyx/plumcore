@@ -100,11 +100,11 @@ hradio_mac_ret_t hradio_mac_put_received_packet(HRadioMac *self, const struct ir
 		if (client->context == context) {
 			/* Do not block the MAC! */
 			if (xQueueSend(client->rxqueue, msg, 0) != pdTRUE) {
-				return RADIO_MAC_RET_FAILED;
+				return HRADIO_MAC_RET_FAILED;
 			}
 		}
 		client = client->next;
 	}
-	return RADIO_MAC_RET_OK;
+	return HRADIO_MAC_RET_OK;
 }
 

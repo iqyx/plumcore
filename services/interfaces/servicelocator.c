@@ -98,7 +98,7 @@ iservicelocator_ret_t iservicelocator_query_type_next(IServiceLocator *self, enu
 }
 
 
-iservicelocator_ret_t iservicelocator_query_name_type(IServiceLocator *self, char * name, enum iservicelocator_type type, Interface ** result) {
+iservicelocator_ret_t iservicelocator_query_name_type(IServiceLocator *self, const char * name, enum iservicelocator_type type, Interface ** result) {
 	if (self->vmt.query_name_type != NULL) {
 		return self->vmt.query_name_type(self->vmt.context, name, type, result);
 	}

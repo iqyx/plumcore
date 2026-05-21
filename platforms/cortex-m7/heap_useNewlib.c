@@ -68,21 +68,30 @@
 // External routines required by newlib's malloc (sbrk/_sbrk, __malloc_lock/unlock)
 // ================================================================================================
 
+/* Forward declarations: these symbols are referenced by newlib and the linker --wrap option,
+ * but there is no header that exposes them in this bare-metal newlib configuration. */
+char *sbrk(int incr);
+char *_sbrk(int incr);
+void __env_lock(void);
+void __env_unlock(void);
+void *__wrap_malloc(size_t nbytes);
+void *__wrap__malloc_r(void *reent, size_t nbytes);
+
 #ifndef NDEBUG
     static int totalBytesProvidedBySBRK = 0;
 #endif
-extern char _ebss;  // Defined in the linker script
+extern char _ebss[];  // Defined in the linker script
 static int heapBytesRemaining = -1; // configTOTAL_HEAP_SIZE is not constant will be init later
 
 //! sbrk/_sbrk version supporting reentrant newlib (depends upon above symbols defined by linker control file).
 char * sbrk(int incr) {
-    static char *currentHeapEnd = &_ebss;
+    static char *currentHeapEnd = _ebss;
     vTaskSuspendAll(); // Note: safe to use before FreeRTOS scheduler started
     if (heapBytesRemaining == -1) {
       heapBytesRemaining = configTOTAL_HEAP_SIZE;
     }
     char *previousHeapEnd = currentHeapEnd;
-    if (currentHeapEnd + incr > &_ebss + configTOTAL_HEAP_SIZE) {
+    if (currentHeapEnd + incr > _ebss + configTOTAL_HEAP_SIZE) {
         #if( configUSE_MALLOC_FAILED_HOOK == 1 )
         {
             extern void vApplicationMallocFailedHook( void );
@@ -107,22 +116,22 @@ char * sbrk(int incr) {
     return (char *) previousHeapEnd;
 }
 //! Synonym for sbrk.
-char * _sbrk(int incr) { return sbrk(incr); };
+char * _sbrk(int incr) { return sbrk(incr); }
 
 #if (__NEWLIB__ >= 3)
-void __malloc_lock(struct _reent *ptr __attribute__((__unused__)))     {       vTaskSuspendAll(); };
-void __malloc_unlock(struct _reent *ptr __attribute__((__unused__)))   { (void)xTaskResumeAll();  };
+void __malloc_lock(struct _reent *ptr __attribute__((__unused__)))     {       vTaskSuspendAll(); }
+void __malloc_unlock(struct _reent *ptr __attribute__((__unused__)))   { (void)xTaskResumeAll();  }
 #else
-void __malloc_lock()     {       vTaskSuspendAll(); };
-void __malloc_unlock()   { (void)xTaskResumeAll();  };
+void __malloc_lock()     {       vTaskSuspendAll(); }
+void __malloc_unlock()   { (void)xTaskResumeAll();  }
 #endif
 
 // newlib also requires implementing locks for the application's environment memory space,
 // accessed by newlib's setenv() and getenv() functions.
 // As these are trivial functions, momentarily suspend task switching (rather than semaphore).
 // ToDo: Move __env_lock/unlock to a separate newlib helper file.
-void __env_lock()    {       vTaskSuspendAll(); };
-void __env_unlock()  { (void)xTaskResumeAll();  };
+void __env_lock()    {       vTaskSuspendAll(); }
+void __env_unlock()  { (void)xTaskResumeAll();  }
 
 /// /brief  Wrap malloc/malloc_r to help debug who requests memory and why.
 /// Add to the linker command line: -Xlinker --wrap=malloc -Xlinker --wrap=_malloc_r
@@ -131,12 +140,12 @@ void *__wrap_malloc(size_t nbytes) {
     extern void * __real_malloc(size_t nbytes);
     void *p = __real_malloc(nbytes); // Solely for debug breakpoint...
     return p;
-};
+}
 void *__wrap__malloc_r(void *reent __attribute__((__unused__)), size_t nbytes) {
     extern void * __real__malloc_r(size_t nbytes);
     void *p = __real__malloc_r(nbytes); // Solely for debug breakpoint...
     return p;
-};
+}
 
 
 // ================================================================================================
@@ -149,7 +158,7 @@ void *pvPortMalloc( size_t xSize ) PRIVILEGED_FUNCTION {
 }
 void vPortFree( void *pv ) PRIVILEGED_FUNCTION {
     free(pv);
-};
+}
 
 size_t xPortGetFreeHeapSize( void ) PRIVILEGED_FUNCTION {
     struct mallinfo mi = mallinfo();
@@ -163,4 +172,4 @@ size_t xPortGetFreeHeapSize( void ) PRIVILEGED_FUNCTION {
 // So, no implementation provided: size_t xPortGetMinimumEverFreeHeapSize( void ) PRIVILEGED_FUNCTION;
 
 //! No implementation needed, but stub provided in case application already calls vPortInitialiseBlocks
-void vPortInitialiseBlocks( void ) PRIVILEGED_FUNCTION {};
+void vPortInitialiseBlocks( void ) PRIVILEGED_FUNCTION {}

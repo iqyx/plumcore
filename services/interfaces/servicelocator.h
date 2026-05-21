@@ -80,7 +80,7 @@ struct iservicelocator_vmt {
 	iservicelocator_ret_t (*query_name)(void *context, char * name, Interface ** result);
 	iservicelocator_ret_t (*query_type_id)(void *context, enum iservicelocator_type type, size_t index, Interface ** result);
 	iservicelocator_ret_t (*query_type_next)(void *context, enum iservicelocator_type type, Interface * start, Interface ** result);
-	iservicelocator_ret_t (*query_name_type)(void *context, char * name, enum iservicelocator_type type, Interface ** result);
+	iservicelocator_ret_t (*query_name_type)(void *context, const char * name, enum iservicelocator_type type, Interface ** result);
 	iservicelocator_ret_t (*get_name)(void *context, Interface * interface, const char ** result);
 	void *context;
 };
@@ -98,5 +98,5 @@ iservicelocator_ret_t iservicelocator_free(IServiceLocator *self);
 iservicelocator_ret_t iservicelocator_query_type_id(IServiceLocator *self, enum iservicelocator_type type, size_t index, Interface ** result);
 iservicelocator_ret_t iservicelocator_query_type_next(IServiceLocator *self, enum iservicelocator_type type, Interface * start, Interface ** result);
 iservicelocator_ret_t iservicelocator_init(IServiceLocator *self);
-iservicelocator_ret_t iservicelocator_query_name_type(IServiceLocator *self, char * name, enum iservicelocator_type type, Interface ** result);
+iservicelocator_ret_t iservicelocator_query_name_type(IServiceLocator *self, const char * name, enum iservicelocator_type type, Interface ** result);
 iservicelocator_ret_t iservicelocator_get_name(IServiceLocator *self, Interface * interface, const char ** result);

@@ -189,7 +189,7 @@ stm32_gpio_ret_t stm32_gpio_init(Stm32Gpio *self, void *port_base) {
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("16 pins initialized on port %p (GPIO%c)"),
 		port_base,
-		(uint32_t)(port_base - GPIOA_BASE) / 0x400u + 'A'
+		((uint32_t)port_base - GPIOA_BASE) / 0x400u + 'A'
 	);
 
 	return STM32_GPIO_RET_OK;

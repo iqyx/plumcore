@@ -103,7 +103,7 @@ tcpip_ret_t tcpip_socket_free(ITcpIpSocket *self) {
 
 tcpip_ret_t tcpip_socket_connect(ITcpIpSocket *self, const char *address, uint16_t port) {
 	if (u_assert(self != NULL) ||
-	    u_assert(port != NULL)) {
+	    u_assert(port != 0)) {
 		return TCPIP_RET_FAILED;
 	}
 

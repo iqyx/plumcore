@@ -64,6 +64,7 @@ typedef struct wake_lock_group {
 
 typedef struct pm Pm;
 struct pm_vmt {
+	char _reserved;
 };
 
 typedef struct pm {

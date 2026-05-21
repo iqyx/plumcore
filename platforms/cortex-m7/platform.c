@@ -8,9 +8,6 @@
 
 #include "main.h"
 
-#include <libopencm3/cm3/scb.h>
-#include <libopencm3/cm3/vector.h>
-
 #ifdef MODULE_NAME
 #undef MODULE_NAME
 #endif

@@ -32,6 +32,8 @@
 
 
 static interface_log_ret_t message(void *context, struct interface_log_time time, const char *module, enum interface_log_level level, const char *message) {
+	(void)context;
+	(void)time;
 	const char *t = "?";
 	const char *c = "";
 

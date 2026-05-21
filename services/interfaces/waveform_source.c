@@ -40,5 +40,6 @@ waveform_source_ret_t waveform_source_init(WaveformSource *self) {
 
 
 waveform_source_ret_t waveform_source_free(WaveformSource *self) {
+	(void)self;
 	return WAVEFORM_SOURCE_RET_OK;
 }

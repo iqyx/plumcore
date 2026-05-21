@@ -107,33 +107,29 @@ static gpio_ret_t gpio_set_mode(Gpio *gpio, enum gpio_mode mode) {
 
 
 static gpio_ret_t gpio_set_pinmux(Gpio *gpio, uint32_t mux) {
-	Pcal6408A *self = gpio->parent;
-	int pin = gpio - &(self->pin[0]);
-
+	(void)gpio;
+	(void)mux;
 	return GPIO_RET_FAILED;
 }
 
 
 static gpio_ret_t gpio_set_pull(Gpio *gpio, enum gpio_pull pull) {
-	Pcal6408A *self = gpio->parent;
-	int pin = gpio - &(self->pin[0]);
-
+	(void)gpio;
+	(void)pull;
 	return GPIO_RET_FAILED;
 }
 
 
 static gpio_ret_t gpio_set_otype(Gpio *gpio, enum gpio_otype otype) {
-	Pcal6408A *self = gpio->parent;
-	int pin = gpio - &(self->pin[0]);
-
+	(void)gpio;
+	(void)otype;
 	return GPIO_RET_FAILED;
 }
 
 
 static gpio_ret_t gpio_set_ospeed(Gpio *gpio, enum gpio_ospeed ospeed) {
-	Pcal6408A *self = gpio->parent;
-	int pin = gpio - &(self->pin[0]);
-
+	(void)gpio;
+	(void)ospeed;
 	return GPIO_RET_FAILED;
 }
 

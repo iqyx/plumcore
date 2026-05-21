@@ -7,7 +7,22 @@ if conf["LIB_CMSIS"] == "y":
 	env.Git('https://github.com/ARM-software/CMSIS_5', branch='NN/2.0.0')
 
 	env.Append(CFLAGS = ['-D__ARM_FEATURE_MVE=0'])
-	objs.append(env.Object([
+
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Include'),
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/Core/Include'),
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/PrivateInclude'),
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/Core/Include'),
+	])
+
+	# CMSIS DSP is an external dependency; suppress its warning flavours only for these objects.
+	cmsis_env = env.Clone()
+	cmsis_env.Append(CFLAGS = [
+		'-Wno-cast-qual',
+		'-Wno-missing-prototypes',
+		'-Wno-switch-default',
+	])
+	objs.append(cmsis_env.Object([
 		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/SupportFunctions/SupportFunctions.c'),
 		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/CommonTables/arm_const_structs.c'),
 		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/TransformFunctions/arm_cfft_radix8_f32.c'),
@@ -27,10 +42,3 @@ if conf["LIB_CMSIS"] == "y":
 		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/StatisticsFunctions/arm_mean_q31.c'),
 		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/FastMathFunctions/arm_sqrt_q15.c'),
 	]))
-
-	env.Append(CPPPATH = [
-		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Include'),
-		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/Core/Include'),
-		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/PrivateInclude'),
-		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/Core/Include'),
-	])

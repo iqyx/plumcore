@@ -87,7 +87,7 @@ static iservicelocator_ret_t plocator_query_name(
 
 static iservicelocator_ret_t plocator_query_name_type(
 	void *context,
-	char * name,
+	const char * name,
 	enum iservicelocator_type type,
 	Interface ** result
 ) {
