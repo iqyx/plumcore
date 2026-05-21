@@ -33,6 +33,7 @@ typedef struct stm32_spi_bus {
 	enum stm32_spi_per_type per_type;
 
 	SemaphoreHandle_t bus_lock;
+	SemaphoreHandle_t eot_wait;
 } Stm32SpiBus;
 
 typedef struct stm32_spi_dev {
@@ -47,6 +48,7 @@ typedef struct stm32_spi_dev {
 
 stm32_spi_ret_t stm32_spibus_init(Stm32SpiBus *self, void *base, enum stm32_spi_per_type per_type);
 stm32_spi_ret_t stm32_spibus_free(Stm32SpiBus *self);
+stm32_spi_ret_t stm32_spibus_irq_handler(Stm32SpiBus *self);
 
 stm32_spi_ret_t stm32_spidev_init(Stm32SpiDev *self, SpiBus *bus, Gpio *cs);
 stm32_spi_ret_t stm32_spidev_free(Stm32SpiDev *self);
