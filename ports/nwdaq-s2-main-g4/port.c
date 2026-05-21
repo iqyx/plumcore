@@ -70,6 +70,7 @@
  */
 
 Watchdog watchdog;
+uint32_t SystemCoreClock;
 
 #if !defined(CONFIG_APP_BL)
 	Stm32Clock cmgr;
@@ -82,6 +83,8 @@ Watchdog watchdog;
 
 
 int32_t port_early_init(void) {
+	SystemCoreClock = 16e6;
+
 	rcc_periph_clock_enable(RCC_GPIOA);
 	rcc_periph_clock_enable(RCC_GPIOB);
 	rcc_periph_clock_enable(RCC_GPIOC);
@@ -110,7 +113,7 @@ static void console_init(void) {
 	gpio_set_af(GPIOA, GPIO_AF7, GPIO9 | GPIO10);
 
 	/* Initialise and configure the UART */
-	stm32_uart_init(&uart1, USART1);
+	stm32_uart_init(&uart1, (void *)0x40013800);
 	uart1.uart.vmt->set_bitrate(&uart1.uart, 115200);
 
 	nvic_enable_irq(NVIC_USART1_IRQ);
@@ -142,7 +145,7 @@ static void nbus2_init(void) {
 	USART_CR3(USART3) |= USART_CR3_HDSEL;
 	USART_CR3(USART3) |= USART_CR3_OVRDIS;
 
-	stm32_uart_init(&nbus2_uart, USART3);
+	stm32_uart_init(&nbus2_uart, (void *)0x40004800);
 	stm32_uart_set_rto(&nbus2_uart, true);
 	nbus2_uart.uart.vmt->set_bitrate(&nbus2_uart.uart, 250000);
 
@@ -202,12 +205,13 @@ struct nbus_socket *socket;
 
 int32_t port_init(void) {
 	watchdog_init(&watchdog, 8000, 1);
+
+	stm32_gpio_init(&gpioa, (void *)0x48000000);
+	stm32_gpio_init(&gpiob, (void *)0x48000400);
+	stm32_gpio_init(&gpioc, (void *)0x48000800);
+
 	console_init();
 	port_flash_init();
-
-	stm32_gpio_init(&gpioa, STM32_PORTA);
-	stm32_gpio_init(&gpiob, STM32_PORTB);
-	stm32_gpio_init(&gpioc, STM32_PORTC);
 
 	/* LED1 */
 	gpioc.pin[4].vmt->set_mode(&(gpioc.pin[4]), MODE_OUTPUT);

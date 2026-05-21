@@ -1,0 +1,3 @@
+config SERVICE_INERTIAL_TDK_ACCEL
+	bool "Generic driver for TDK accelerometers and gyroscopes"
+	default n

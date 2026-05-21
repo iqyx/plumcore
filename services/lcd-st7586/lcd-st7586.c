@@ -11,10 +11,8 @@
 #include <string.h>
 #include <stdio.h>
 
-/** @todo remove libopencm3 dependency */
-#include <libopencm3/stm32/gpio.h>
-
 #include <main.h>
+#include <interfaces/gpio.h>
 #include <interfaces/spi.h>
 
 #include "lcd-st7586.h"
@@ -23,11 +21,11 @@
 
 
 static lcd_st7586_ret_t lcd_reset(LcdSt7586 *self) {
-	gpio_set(self->reset_port, self->reset_pin);
+	self->reset->vmt->set(self->reset, true);
 	vTaskDelay(10);
-	gpio_clear(self->reset_port, self->reset_pin);
+	self->reset->vmt->set(self->reset, false);
 	vTaskDelay(10);
-	gpio_set(self->reset_port, self->reset_pin);
+	self->reset->vmt->set(self->reset, true);
 	vTaskDelay(10);
 
 	return LCD_ST7586_RET_OK;
@@ -35,7 +33,7 @@ static lcd_st7586_ret_t lcd_reset(LcdSt7586 *self) {
 
 
 static lcd_st7586_ret_t lcd_send_command(LcdSt7586 *self, uint8_t reg) {
-	gpio_clear(self->cd_port, self->cd_pin);
+	self->cd->vmt->set(self->cd, false);
 
 	self->spi->vmt->select(self->spi);
 	self->spi->vmt->send(self->spi, &reg, sizeof(reg));
@@ -46,7 +44,7 @@ static lcd_st7586_ret_t lcd_send_command(LcdSt7586 *self, uint8_t reg) {
 
 
 static lcd_st7586_ret_t lcd_send_data(LcdSt7586 *self, uint8_t reg) {
-	gpio_set(self->cd_port, self->cd_pin);
+	self->cd->vmt->set(self->cd, true);
 
 	self->spi->vmt->select(self->spi);
 	self->spi->vmt->send(self->spi, &reg, sizeof(reg));
@@ -57,7 +55,7 @@ static lcd_st7586_ret_t lcd_send_data(LcdSt7586 *self, uint8_t reg) {
 
 
 static lcd_st7586_ret_t lcd_send_data_buf(LcdSt7586 *self, const uint8_t *buf, size_t len) {
-	gpio_set(self->cd_port, self->cd_pin);
+	self->cd->vmt->set(self->cd, true);
 
 	self->spi->vmt->select(self->spi);
 	self->spi->vmt->send(self->spi, buf, len);
@@ -207,14 +205,15 @@ static const struct fb_vmt lcd_st7586_fb_vmt = {
 };
 
 
-lcd_st7586_ret_t lcd_st7586_init(LcdSt7586 *self, SpiDev *spi, uint32_t reset_port, uint32_t reset_pin, uint32_t cd_port, uint32_t cd_pin) {
+lcd_st7586_ret_t lcd_st7586_init(LcdSt7586 *self, SpiDev *spi, Gpio *reset, Gpio *cd) {
 	memset(self, 0, sizeof(LcdSt7586));
 
 	self->spi = spi;
-	self->reset_port = reset_port;
-	self->reset_pin = reset_pin;
-	self->cd_port = cd_port;
-	self->cd_pin = cd_pin;
+	self->reset = reset;
+	self->cd = cd;
+
+	reset->vmt->set_mode(reset, MODE_OUTPUT);
+	cd->vmt->set_mode(cd, MODE_OUTPUT);
 
 	lcd_init_controller(self);
 	lcd_clear(self);

@@ -15,6 +15,14 @@
 
 #include "stm32-gpio.h"
 
+#if defined(STM32G4)
+	#include <stm32g4xx.h>
+#elif defined(STM32H7)
+	#include <stm32h7xx.h>
+#else
+	#error "stm32-gpio service is not compatible with this MCU family"
+#endif
+
 #define MODULE_NAME "stm32-gpio"
 
 
@@ -24,12 +32,13 @@
 
 static gpio_ret_t gpio_set(Gpio *gpio, bool state) {
 	Stm32Gpio *self = gpio->parent;
+	GPIO_TypeDef *port = self->port;
 	int pin = gpio - &(self->pin[0]);
 
 	if (state) {
-		STM32_GPIO_BSRR(self->port) |= (1 << pin);
+		port->BSRR |= (1 << pin);
 	} else {
-		STM32_GPIO_BSRR(self->port) |= (1 << (pin + 16));
+		port->BSRR |= (1 << (pin + 16));
 	}
 
 	return GPIO_RET_OK;
@@ -38,10 +47,11 @@ static gpio_ret_t gpio_set(Gpio *gpio, bool state) {
 
 static gpio_ret_t gpio_get(Gpio *gpio, bool *state) {
 	Stm32Gpio *self = gpio->parent;
+	GPIO_TypeDef *port = self->port;
 	int pin = gpio - &(self->pin[0]);
 
 	if (state != NULL) {
-		if (STM32_GPIO_IDR(self->port) & (1 << pin)) {
+		if (port->IDR & (1 << pin)) {
 			*state = true;
 		} else {
 			*state = false;
@@ -55,10 +65,11 @@ static gpio_ret_t gpio_get(Gpio *gpio, bool *state) {
 
 static gpio_ret_t gpio_toggle(Gpio *gpio) {
 	Stm32Gpio *self = gpio->parent;
+	GPIO_TypeDef *port = self->port;
 	int pin = gpio - &(self->pin[0]);
 
-	uint32_t state = STM32_GPIO_ODR(self->port);
-	STM32_GPIO_BSRR(self->port) = ((state & (1 << pin)) << 16) | (~state & (1 << pin));
+	uint32_t state = port->ODR;
+	port->BSRR = ((state & (1 << pin)) << 16) | (~state & (1 << pin));
 
 	return GPIO_RET_OK;
 }
@@ -66,6 +77,7 @@ static gpio_ret_t gpio_toggle(Gpio *gpio) {
 
 static gpio_ret_t gpio_set_mode(Gpio *gpio, enum gpio_mode mode) {
 	Stm32Gpio *self = gpio->parent;
+	GPIO_TypeDef *port = self->port;
 	int pin = gpio - &(self->pin[0]);
 
 	uint32_t pinmoder = 0;
@@ -75,7 +87,7 @@ static gpio_ret_t gpio_set_mode(Gpio *gpio, enum gpio_mode mode) {
 		case MODE_ANALOG: pinmoder = 3; break;
 		default: break;
 	}
-	STM32_GPIO_MODER(self->port) = (STM32_GPIO_MODER(self->port) & ~(3 << (pin * 2))) | (pinmoder << (pin * 2));
+	port->MODER = (port->MODER & ~(3 << (pin * 2))) | (pinmoder << (pin * 2));
 
 	return GPIO_RET_OK;
 }
@@ -83,13 +95,14 @@ static gpio_ret_t gpio_set_mode(Gpio *gpio, enum gpio_mode mode) {
 
 static gpio_ret_t gpio_set_pinmux(Gpio *gpio, uint32_t mux) {
 	Stm32Gpio *self = gpio->parent;
+	GPIO_TypeDef *port = self->port;
 	int pin = gpio - &(self->pin[0]);
 
 	if (pin < 8) {
-		STM32_GPIO_AFRL(self->port) = (STM32_GPIO_AFRL(self->port) & ~(0xf << (pin * 4))) | (mux << (pin * 4));
+		port->AFR[0] = (port->AFR[0] & ~(0xf << (pin * 4))) | (mux << (pin * 4));
 	} else {
 		pin -= 8;
-		STM32_GPIO_AFRH(self->port) = (STM32_GPIO_AFRH(self->port) & ~(0xf << (pin * 4))) | (mux << (pin * 4));
+		port->AFR[1] = (port->AFR[1] & ~(0xf << (pin * 4))) | (mux << (pin * 4));
 	}
 
 	return GPIO_RET_OK;
@@ -98,6 +111,7 @@ static gpio_ret_t gpio_set_pinmux(Gpio *gpio, uint32_t mux) {
 
 static gpio_ret_t gpio_set_pull(Gpio *gpio, enum gpio_pull pull) {
 	Stm32Gpio *self = gpio->parent;
+	GPIO_TypeDef *port = self->port;
 	int pin = gpio - &(self->pin[0]);
 
 	uint32_t pupd = 0;
@@ -106,7 +120,7 @@ static gpio_ret_t gpio_set_pull(Gpio *gpio, enum gpio_pull pull) {
 		case PULL_DOWN: pupd = 2; break;
 		default: break;
 	}
-	STM32_GPIO_PUPDR(self->port) = (STM32_GPIO_PUPDR(self->port) & ~(3 << (pin * 2))) | (pupd << (pin * 2));
+	port->PUPDR = (port->PUPDR & ~(3 << (pin * 2))) | (pupd << (pin * 2));
 
 	return GPIO_RET_OK;
 }
@@ -114,12 +128,13 @@ static gpio_ret_t gpio_set_pull(Gpio *gpio, enum gpio_pull pull) {
 
 static gpio_ret_t gpio_set_otype(Gpio *gpio, enum gpio_otype otype) {
 	Stm32Gpio *self = gpio->parent;
+	GPIO_TypeDef *port = self->port;
 	int pin = gpio - &(self->pin[0]);
 
 	if (otype == OTYPE_OD) {
-		STM32_GPIO_OTYPER(self->port) |= (1 << pin);
+		port->OTYPER |= (1 << pin);
 	} else {
-		STM32_GPIO_OTYPER(self->port) &= ~(1 << pin);
+		port->OTYPER &= ~(1 << pin);
 	}
 
 	return GPIO_RET_OK;
@@ -128,6 +143,7 @@ static gpio_ret_t gpio_set_otype(Gpio *gpio, enum gpio_otype otype) {
 
 static gpio_ret_t gpio_set_ospeed(Gpio *gpio, enum gpio_ospeed ospeed) {
 	Stm32Gpio *self = gpio->parent;
+	GPIO_TypeDef *port = self->port;
 	int pin = gpio - &(self->pin[0]);
 
 	uint32_t s = 0;
@@ -138,7 +154,7 @@ static gpio_ret_t gpio_set_ospeed(Gpio *gpio, enum gpio_ospeed ospeed) {
 		case OSPEED_VERYHIGH: s = 3; break;
 		default: break;
 	}
-	STM32_GPIO_OSPEEDR(self->port) = (STM32_GPIO_OSPEEDR(self->port) & ~(3 << (pin * 2))) | (s << (pin * 2));
+	port->OSPEEDR = (port->OSPEEDR & ~(3 << (pin * 2))) | (s << (pin * 2));
 
 	return GPIO_RET_OK;
 }
@@ -160,9 +176,9 @@ static const struct gpio_vmt stm32_gpio_vmt = {
  * Service implementation
  **********************************************************************************************************************/
 
-stm32_gpio_ret_t stm32_gpio_init(Stm32Gpio *self, enum stm32_port port) {
+stm32_gpio_ret_t stm32_gpio_init(Stm32Gpio *self, void *port_base) {
 	memset(self, 0, sizeof(Stm32Gpio));
-	self->port = port;
+	self->port = port_base;
 
 	/* Initialize Gpio pin interfaces. They are effectively the same
 	 * but they need to have distinctive addresses. */
@@ -172,8 +188,8 @@ stm32_gpio_ret_t stm32_gpio_init(Stm32Gpio *self, enum stm32_port port) {
 	}
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("16 pins initialized on port %p (GPIO%c)"),
-		port,
-		(port - STM32_GPIO_BASE) / 0x400u + 'A'
+		port_base,
+		(uint32_t)(port_base - GPIOA_BASE) / 0x400u + 'A'
 	);
 
 	return STM32_GPIO_RET_OK;

@@ -27,9 +27,10 @@ if conf["LIB_CMSIS"] == "y":
 		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/StatisticsFunctions/arm_mean_q31.c'),
 		File(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Source/FastMathFunctions/arm_sqrt_q15.c'),
 	]))
-	
+
 	env.Append(CPPPATH = [
 		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/Include'),
 		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/Core/Include'),
 		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/DSP/PrivateInclude'),
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/CMSIS/Core/Include'),
 	])

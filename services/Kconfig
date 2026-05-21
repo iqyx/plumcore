@@ -79,6 +79,10 @@ menu "Low-level platform drivers"
 			bool "STM32 clock manager"
 			default y
 
+		config SERVICE_STM32_H7_CLOCK
+			bool "STM32H7 clock manager"
+			default n
+
 		config SERVICE_STM32_SAI
 			bool "STM32 SAI driver"
 			default n
@@ -233,6 +237,7 @@ menu "High level device drivers"
 	source "services/shtc3/Kconfig"
 	source "services/pcal6408a-gpio/Kconfig"
 	source "services/gpio-keypad/Kconfig"
+	source "services/tdk-accel/Kconfig"
 
 endmenu
 

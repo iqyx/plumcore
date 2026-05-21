@@ -1,9 +1,12 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * STM32 UART driver
  *
  * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
  * All rights reserved.
+ *
+ * Some code and computations borowwed from the libopencm3 project.
+ * Copyright (C) 2009 Uwe Hermann <uwe@hermann-uwe.de>
  */
 
 #include <stdint.h>
@@ -13,9 +16,15 @@
 #include <main.h>
 #include <interfaces/stream.h>
 #include <interfaces/uart.h>
-#include <libopencm3/stm32/gpio.h>
-#include <libopencm3/stm32/usart.h>
-#include <libopencm3/cm3/nvic.h>
+
+#if defined(STM32G4)
+	#include <stm32g4xx.h>
+#elif defined(STM32H7)
+	#include <stm32h7xx.h>
+#else
+	#error "stm32-gpio service is not compatible with this MCU family"
+#endif
+
 
 #include "stm32-uart.h"
 
@@ -37,10 +46,20 @@ static uart_ret_t uart_set_bitrate(Uart *self, uint32_t bitrate_baud) {
 		return UART_RET_FAILED;
 	}
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
+	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
 
-	usart_disable(stm32_uart->port);
-	usart_set_baudrate(stm32_uart->port, bitrate_baud);
-	usart_enable(stm32_uart->port);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("port %p set baud rate to %u"), self, bitrate_baud);
+
+	stm32_uart_enable(stm32_uart, false);
+	/** @todo clock selection */
+	uint32_t clock = SystemCoreClock;
+	#if defined(USART_BRR_DIV_FRACTION)
+		const uint32_t divider = ((2 * clock) + (bitrate_baud / 2)) / bitrate_baud;
+		port->BRR = (divider & USART_BRR_DIV_MANTISSA_Msk) | ((divider & USART_BRR_DIV_FRACTION_Msk) >> 1U);
+	#else
+		port->BRR = (clock + bitrate_baud / 2) / bitrate_baud;
+	#endif
+	stm32_uart_enable(stm32_uart, true);
 
 	return UART_RET_OK;
 }
@@ -51,10 +70,21 @@ static uart_ret_t uart_set_databits(Uart *self, uint32_t b) {
 		return UART_RET_FAILED;
 	}
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
+	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
 
-	usart_disable(stm32_uart->port);
-	usart_set_databits(stm32_uart->port, b);
-	usart_enable(stm32_uart->port);
+	stm32_uart_enable(stm32_uart, false);
+	switch (b) {
+		case 8:
+			port->CR1 &= ~USART_CR1_M;
+			break;
+		case 9:
+			port->CR1 = (port->CR1 & ~USART_CR1_M) | USART_CR1_M0;
+			break;
+		default:
+			stm32_uart_enable(stm32_uart, true);
+			return UART_RET_FAILED;
+	}
+	stm32_uart_enable(stm32_uart, true);
 
 	return UART_RET_OK;
 }
@@ -65,22 +95,22 @@ static uart_ret_t uart_set_stopbits(Uart *self, enum uart_stopbits b) {
 		return UART_RET_FAILED;
 	}
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
+	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
 
-	usart_disable(stm32_uart->port);
+	stm32_uart_enable(stm32_uart, false);
 	switch (b) {
 		case UART_STOPBITS_1:
-			usart_set_stopbits(stm32_uart->port, USART_STOPBITS_1);
+		default:
+			port->CR2 = (port->CR2 & ~USART_CR2_STOP_Msk);
 			break;
 		case UART_STOPBITS_1_5:
-			usart_set_stopbits(stm32_uart->port, USART_STOPBITS_1_5);
+			port->CR2 = (port->CR2 & ~USART_CR2_STOP_Msk) | USART_CR2_STOP_0 | USART_CR2_STOP_1;
 			break;
 		case UART_STOPBITS_2:
-			usart_set_stopbits(stm32_uart->port, USART_STOPBITS_2);
+			port->CR2 = (port->CR2 & ~USART_CR2_STOP_Msk) | USART_CR2_STOP_1;
 			break;
-		default:
-			usart_set_stopbits(stm32_uart->port, USART_STOPBITS_1);
 	}
-	usart_enable(stm32_uart->port);
+	stm32_uart_enable(stm32_uart, true);
 
 	return UART_RET_OK;
 }
@@ -91,23 +121,23 @@ static uart_ret_t uart_set_parity(Uart *self, enum uart_parity p) {
 		return UART_RET_FAILED;
 	}
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
+	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
 
-	usart_disable(stm32_uart->port);
+	stm32_uart_enable(stm32_uart, false);
 	switch (p) {
 		case UART_PARITY_NONE:
-			usart_set_parity(stm32_uart->port, USART_PARITY_NONE);
+		default:
+			port->CR1 &= ~USART_CR1_PS;
+			port->CR1 &= ~USART_CR1_PCE;
 			break;
 		case UART_PARITY_ODD:
-			usart_set_parity(stm32_uart->port, USART_PARITY_ODD);
+			port->CR1 |= USART_CR1_PS | USART_CR1_PCE;
 			break;
 		case UART_PARITY_EVEN:
-			usart_set_parity(stm32_uart->port, USART_PARITY_EVEN);
-			break;
-		default:
-			usart_set_parity(stm32_uart->port, USART_PARITY_NONE);
+			port->CR1 |= USART_CR1_PCE;
 			break;
 	}
-	usart_enable(stm32_uart->port);
+	stm32_uart_enable(stm32_uart, true);
 
 	return UART_RET_OK;
 }
@@ -140,6 +170,7 @@ static stream_ret_t stream_write(Stream *self, const void *buf, size_t size) {
 		return STREAM_RET_FAILED;
 	}
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
+	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
 
 	/* FreeRTOS stream buffers allow only a single writer. This is not a problem here since
 	 * we can wait forever. */
@@ -148,15 +179,15 @@ static stream_ret_t stream_write(Stream *self, const void *buf, size_t size) {
 	while (size > 0) {
 		size_t to_write = min_size(CONFIG_SERVICE_STM32_UART_TXBUF_SIZE / 2, size);
 
-		size_t written = xStreamBufferSend(stm32_uart->txbuf, buf, to_write, 0);
+		size_t written = xStreamBufferSend(stm32_uart->txbuf, buf, to_write, portMAX_DELAY);
 
 		/* Assert driver enable if set. */
-		if (stm32_uart->de_port != 0) {
-			gpio_set(stm32_uart->de_port, stm32_uart->de_pin);
+		if (stm32_uart->de_gpio) {
+			stm32_uart->de_gpio->vmt->set(stm32_uart->de_gpio, true);
 		}
 
 		/* And send the data. It is important TXEIE remains set. */
-		USART_CR1(stm32_uart->port) |= USART_CR1_TXEIE;
+		port->CR1 |= USART_CR1_TXEIE;
 
 		buf = (const uint8_t *)buf + written;
 		size -= written;
@@ -173,6 +204,7 @@ static stream_ret_t stream_write_timeout(Stream *self, const void *buf, size_t s
 		return STREAM_RET_FAILED;
 	}
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
+	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
 
 	/* We are allowed to write less bytes than requested. Crop the buffer. */
 	size = min_size(CONFIG_SERVICE_STM32_UART_TXBUF_SIZE / 2, size);
@@ -189,12 +221,12 @@ static stream_ret_t stream_write_timeout(Stream *self, const void *buf, size_t s
 	}
 
 	/* Assert driver enable if set. */
-	if (stm32_uart->de_port != 0) {
-		gpio_set(stm32_uart->de_port, stm32_uart->de_pin);
+	if (stm32_uart->de_gpio) {
+		stm32_uart->de_gpio->vmt->set(stm32_uart->de_gpio, true);
 	}
 
 	/* Enable TX empty interrupt to send the data. */
-	USART_CR1(stm32_uart->port) |= USART_CR1_TXEIE;
+	port->CR1 |= USART_CR1_TXEIE;
 
 	if (written != NULL) {
 		*written = w;
@@ -275,12 +307,13 @@ static const struct stream_vmt stream_vmt = {
 /*********************************************************************************************************************/
 
 
-stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, uint32_t port) {
+stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, void *port_base) {
 	if (u_assert(self != NULL)) {
 		return STM32_UART_RET_FAILED;
 	}
 
-	self->port = port;
+	self->port = port_base;
+	USART_TypeDef *port = (USART_TypeDef *)self->port;
 
 	/* Setup interfaces */
 	self->stream.parent = self;
@@ -289,18 +322,18 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, uint32_t port) {
 	self->uart.vmt = &uart_vmt;
 
 	/* Set default UART parameters. */
-	usart_disable(self->port);
-	usart_set_baudrate(self->port, 115200);
-	usart_set_mode(self->port, USART_MODE_TX_RX);
-	usart_set_databits(self->port, 8);
-	usart_set_stopbits(self->port, USART_STOPBITS_1);
-	usart_set_parity(self->port, USART_PARITY_NONE);
-	usart_set_flow_control(self->port, USART_FLOWCONTROL_NONE);
+	stm32_uart_enable(self, false);
+	uart_set_bitrate(&self->uart, 115200);
+	port->CR1 |= USART_CR1_RE | USART_CR1_TE;
+	uart_set_databits(&self->uart, 8);
+	uart_set_stopbits(&self->uart, UART_STOPBITS_1);
+	uart_set_parity(&self->uart, UART_PARITY_NONE);
+	//usart_set_flow_control(self->port, USART_FLOWCONTROL_NONE);
 
 	/* Enable FIFO mode */
-	USART_CR1(self->port) |= USART_CR1_FIFOEN;
+	port->CR1 |= USART_CR1_FIFOEN;
 
-	usart_enable(self->port);
+	stm32_uart_enable(self, true);
 
 	/* Allocate IPC primitives. */
 	self->rxbuf = xStreamBufferCreate(CONFIG_SERVICE_STM32_UART_RXBUF_SIZE, 1);
@@ -315,9 +348,9 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, uint32_t port) {
 
 
 	/* Enable RX not empty interrupt to receive data. */
-	USART_CR3(self->port) |= USART_CR3_OVRDIS;
-	USART_CR1(self->port) |= USART_CR1_RXNEIE;
-	USART_CR1(self->port) |= USART_CR1_TCIE;
+	port->CR3 |= USART_CR3_OVRDIS;
+	port->CR1 |= USART_CR1_RXNEIE;
+	port->CR1 |= USART_CR1_TCIE;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("port %p initialized"), port);
 	return STM32_UART_RET_OK;
@@ -347,49 +380,50 @@ stm32_uart_ret_t stm32_uart_free(Stm32Uart *self) {
 
 
 stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
+	USART_TypeDef *port = (USART_TypeDef *)self->port;
 	BaseType_t woken = pdFALSE;
 
-	while ((USART_ISR(self->port) & USART_ISR_TXE)) {
+	while ((port->ISR & USART_ISR_TXE_TXFNF)) {
 		uint8_t b = 0;
 		/** @todo 1 us! */
 		size_t r = xStreamBufferReceiveFromISR(self->txbuf, &b, sizeof(b), 0);
 		if (r > 0) {
-			usart_send(self->port, b);
+			port->TDR = (b & USART_TDR_TDR_Msk);
 		}
 		if (r == 0) {
 			/* No more bytes to send. Disable the interrupt. */
-			USART_CR1(self->port) &= ~USART_CR1_TXEIE;
+			port->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;
 			break;
 		}
 	}
 
-	if ((USART_ISR(self->port) & USART_ISR_TC)) {
+	if (port->ISR & USART_ISR_TC) {
 		/* De-assert driver enable if set. */
-		if (self->de_port != 0) {
-			gpio_clear(self->de_port, self->de_pin);
+		if (self->de_gpio) {
+			self->de_gpio->vmt->set(self->de_gpio, false);
 		}
 
-		USART_ICR(self->port) |= USART_ICR_TCCF;
+		port->ICR |= USART_ICR_TCCF;
 	}
 
 	/* Aggregate multiple receptions until the FIFO is empty or bbuf full. */
 	uint8_t bbuf[32];
 	size_t bbuf_len = 0;
-	while ((USART_ISR(self->port) & USART_ISR_RXNE) && (bbuf_len < sizeof(bbuf))) {
-		bbuf[bbuf_len] = usart_recv(self->port);
+	while ((port->ISR & USART_ISR_RXNE_RXFNE) && (bbuf_len < sizeof(bbuf))) {
+		bbuf[bbuf_len] = (uint8_t)(port->RDR & USART_RDR_RDR_Msk);
 		bbuf_len++;
 	}
 	if (bbuf_len > 0) {
 		xStreamBufferSendFromISR(self->rxbuf, bbuf, bbuf_len, &woken);
 	}
 
-	if (USART_ISR(self->port) & USART_ISR_RTOF) {
-		USART_ICR(self->port) |= USART_ICR_RTOCF;
+	if (port->ISR & USART_ISR_RTOF) {
+		port->ICR |= USART_ICR_RTOCF;
 	}
 
 	/* Enabling the RXNE interrupt also enables ORE. We must handle it properly. */
-	if ((USART_ISR(self->port) & USART_ISR_ORE)) {
-		USART_ICR(self->port) |= USART_ICR_ORECF;
+	if ((port->ISR & USART_ISR_ORE)) {
+		port->ICR |= USART_ICR_ORECF;
 	}
 
 	portYIELD_FROM_ISR(woken);
@@ -397,36 +431,69 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 }
 
 
-stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, uint32_t de_port, uint32_t de_pin) {
-	self->de_port = de_port;
-	self->de_pin = de_pin;
+stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, Gpio *de_gpio) {
+	self->de_gpio = de_gpio;
 
 	return STM32_UART_RET_OK;
 }
 
 
 stm32_uart_ret_t stm32_uart_set_rto(Stm32Uart *self, bool rto) {
+	USART_TypeDef *port = (USART_TypeDef *)self->port;
+
+	stm32_uart_enable(self, false);
 	self->enable_rto = rto;
 	if (rto) {
 		/* Set receiver timeout enable. 3 character time. */
-		USART_CR2(self->port) |= USART_CR2_RTOEN;
-		USART_RTOR(self->port) = 200L;
+		port->CR2 |= USART_CR2_RTOEN;
+		port->RTOR = 200L;
 
 		/* Enable timeout interrupt. */
-		USART_CR1(self->port) |= USART_CR1_RTOIE;
+		port->CR1 |= USART_CR1_RTOIE;
 	} else {
-		USART_CR2(self->port) &= ~USART_CR2_RTOEN;
-		USART_CR1(self->port) &= ~USART_CR1_RTOIE;
+		port->CR2 &= ~USART_CR2_RTOEN;
+		port->CR1 &= ~USART_CR1_RTOIE;
 	}
+	stm32_uart_enable(self, true);
 
 	return STM32_UART_RET_OK;
 }
 
 
 stm32_uart_ret_t stm32_uart_set_swmode(Stm32Uart *self) {
-	usart_disable(self->port);
-	USART_CR3(self->port) |= USART_CR3_HDSEL;
-	usart_enable(self->port);
+	USART_TypeDef *port = (USART_TypeDef *)self->port;
+
+	stm32_uart_enable(self, false);
+	port->CR3 |= USART_CR3_HDSEL;
+	stm32_uart_enable(self, true);
 
 	return STM32_UART_RET_OK;
 }
+
+
+stm32_uart_ret_t stm32_uart_set_rxtx_swap(Stm32Uart *self, bool swap) {
+	USART_TypeDef *port = (USART_TypeDef *)self->port;
+
+	stm32_uart_enable(self, false);
+	if (swap) {
+		port->CR2 |= USART_CR2_SWAP;
+	} else {
+		port->CR2 &= ~USART_CR2_SWAP;
+	}
+	stm32_uart_enable(self, true);
+
+	return STM32_UART_RET_OK;
+}
+
+stm32_uart_ret_t stm32_uart_enable(Stm32Uart *self, bool enable) {
+	USART_TypeDef *port = (USART_TypeDef *)self->port;
+
+	if (enable) {
+		port->CR1 |= USART_CR1_UE;
+	} else {
+		port->CR1 &= ~USART_CR1_UE;
+	}
+
+	return STM32_UART_RET_OK;
+}
+

@@ -11,10 +11,16 @@
 #include <stdbool.h>
 
 #include <main.h>
-
-#include <libopencm3/stm32/i2c.h>
-#include <libopencm3/stm32/rcc.h>
 #include <i2c-bus.h>
+
+#if defined(STM32G4)
+	#include <stm32g4xx.h>
+#elif defined(STM32H7)
+	#include <stm32h7xx.h>
+#else
+	#error "stm32-gpio service is not compatible with this MCU family"
+#endif
+
 
 #include "stm32-i2c.h"
 
@@ -22,21 +28,29 @@
 
 
 stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
-	i2c_peripheral_disable(self->locm3_i2c);
-	//~ i2c_reset(self->locm3_i2c);
-	i2c_enable_analog_filter(self->locm3_i2c);
-	i2c_set_digital_filter(self->locm3_i2c, 0);
-	i2c_set_speed(self->locm3_i2c, i2c_speed_fm_400k, rcc_apb1_frequency / 1e6);
-	i2c_enable_stretching(self->locm3_i2c);
-	i2c_set_7bit_addr_mode(self->locm3_i2c);
-	i2c_peripheral_enable(self->locm3_i2c);
+	I2C_TypeDef *base = (I2C_TypeDef *)self->base;
+	base->CR1 &= ~I2C_CR1_PE;
+
+	base->CR1 &= ~I2C_CR1_ANFOFF;
+	base->CR1 = (base->CR1 & ~(I2C_CR1_DNF_Msk << I2C_CR1_DNF_Pos)) | (0 << I2C_CR1_DNF_Pos);
+
+	int presc = (SystemCoreClock / 4e6) - 1;
+	base->TIMINGR =
+		(presc << I2C_TIMINGR_PRESC_Pos) |
+		(9 << I2C_TIMINGR_SCLL_Pos) |
+		(3 << I2C_TIMINGR_SCLH_Pos) |
+		(3 << I2C_TIMINGR_SDADEL_Pos) |
+		(3 << I2C_TIMINGR_SCLDEL_Pos);
+	base->CR1 &= ~I2C_CR1_NOSTRETCH;
+	base->CR2 &= ~I2C_CR2_ADD10;
+	base->CR1 |= I2C_CR1_PE;
 
 	return STM32_I2C_RET_OK;
 }
 
 
 #define WAIT_FOR_INT(f) \
-	I2C_CR1(self->locm3_i2c) |= (f);\
+	base->CR1 |= (f);\
 	if (xSemaphoreTake(self->wait_lock, pdMS_TO_TICKS(self->timeout_ms)) != pdTRUE) { \
 		return I2C_BUS_RET_FAILED;\
 	}\
@@ -44,17 +58,18 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 
 static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen) {
 	Stm32I2c *self = bus->parent;
+	I2C_TypeDef *base = (I2C_TypeDef *)self->base;
 
 	if (xSemaphoreTake(self->bus_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
 		xSemaphoreTake(self->wait_lock, 0);
 		if (txdata != NULL) {
 			/* Implemented according to Master communication initialization (address phase) in RM0440. */
-			I2C_CR2(self->locm3_i2c) = (I2C_CR2(self->locm3_i2c) & ~I2C_CR2_SADD_7BIT_MASK) | ((addr & 0x7F) << I2C_CR2_SADD_7BIT_SHIFT);
-			I2C_CR2(self->locm3_i2c) &= ~I2C_CR2_RD_WRN;
-			I2C_CR2(self->locm3_i2c) = (I2C_CR2(self->locm3_i2c) & ~I2C_CR2_NBYTES_MASK) | (txlen << I2C_CR2_NBYTES_SHIFT);
-			I2C_CR2(self->locm3_i2c) &= ~I2C_CR2_AUTOEND;
+			base->CR2 = (base->CR2 & ~I2C_CR2_SADD_Msk) | ((addr & 0x7F) << 1);
+			base->CR2 &= ~I2C_CR2_RD_WRN;
+			base->CR2 = (base->CR2 & ~I2C_CR2_NBYTES_Msk) | (txlen << I2C_CR2_NBYTES_Pos);
+			base->CR2 &= ~I2C_CR2_AUTOEND;
 
-			I2C_CR2(self->locm3_i2c) |= I2C_CR2_START;
+			base->CR2 |= I2C_CR2_START;
 
 			while (txlen > 0) {
 				/* For every byte to be sent, TXIS or NACKF is set, depending on the result
@@ -62,13 +77,13 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 				WAIT_FOR_INT(I2C_CR1_TXIE | I2C_CR1_NACKIE);
 
 				/* Handle NACKF in a specific way, it needs clearing. */
-				if (I2C_ISR(self->locm3_i2c) & I2C_ISR_NACKF) {
-					I2C_ICR(self->locm3_i2c) |= I2C_ICR_NACKCF;
+				if (base->ISR & I2C_ISR_NACKF) {
+					base->ICR |= I2C_ICR_NACKCF;
 					xSemaphoreGive(self->bus_lock);
 					return I2C_BUS_RET_NACK;
 				}
 
-				I2C_TXDR(self->locm3_i2c) = *txdata;
+				base->TXDR = *txdata;
 
 				txlen--;
 				txdata++;
@@ -76,27 +91,27 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 			WAIT_FOR_INT(I2C_CR1_TCIE);
 			if (rxdata == NULL) {
 				/* Only if not repeated start. */
-				I2C_CR2(self->locm3_i2c) |= I2C_CR2_STOP;
+				base->CR2 |= I2C_CR2_STOP;
 			}
 		}
 		if (rxdata != NULL) {
-			I2C_CR2(self->locm3_i2c) = (I2C_CR2(self->locm3_i2c) & ~I2C_CR2_SADD_7BIT_MASK) | ((addr & 0x7F) << I2C_CR2_SADD_7BIT_SHIFT);
-			I2C_CR2(self->locm3_i2c) |= I2C_CR2_RD_WRN;
-			I2C_CR2(self->locm3_i2c) = (I2C_CR2(self->locm3_i2c) & ~I2C_CR2_NBYTES_MASK) | (rxlen << I2C_CR2_NBYTES_SHIFT);
-			I2C_CR2(self->locm3_i2c) |= I2C_CR2_START;
-			I2C_CR2(self->locm3_i2c) &= ~I2C_CR2_AUTOEND;
+			base->CR2 = (base->CR2 & ~I2C_CR2_SADD_Msk) | ((addr & 0x7F) << 1);
+			base->CR2 |= I2C_CR2_RD_WRN;
+			base->CR2 = (base->CR2 & ~I2C_CR2_NBYTES_Msk) | (rxlen << I2C_CR2_NBYTES_Pos);
+			base->CR2 |= I2C_CR2_START;
+			base->CR2 &= ~I2C_CR2_AUTOEND;
 
 			while (rxlen > 0) {
 				/* For every byte to be sent, read for RXNE. */
 				WAIT_FOR_INT(I2C_CR1_RXIE);
-				*rxdata = I2C_RXDR(self->locm3_i2c);
+				*rxdata = base->RXDR;
 
 				rxlen--;
 				rxdata++;
 			}
 
 			WAIT_FOR_INT(I2C_CR1_TCIE);
-			I2C_CR2(self->locm3_i2c) |= I2C_CR2_STOP;
+			base->CR2 |= I2C_CR2_STOP;
 		}
 	} else {
 		/* Try to restart I2C peripheral here. */
@@ -118,9 +133,9 @@ static const struct i2c_bus_vmt stm32_i2c_bus_vmt = {
 };
 
 
-stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, uint32_t locm3_i2c) {
+stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, void *base) {
 	memset(self, 0, sizeof(Stm32I2c));
-	self->locm3_i2c = locm3_i2c;
+	self->base = base;
 	self->timeout_ms = 100;
 
 	self->bus_lock = xSemaphoreCreateMutex();
@@ -151,21 +166,23 @@ stm32_i2c_ret_t stm32_i2c_free(Stm32I2c *self) {
 
 
 stm32_i2c_ret_t stm32_i2c_irq_handler(Stm32I2c *self) {
+	I2C_TypeDef *base = (I2C_TypeDef *)self->base;
+
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-	if (I2C_ISR(self->locm3_i2c) & I2C_ISR_NACKF) {
-		I2C_CR1(self->locm3_i2c) &= ~I2C_CR1_NACKIE;
+	if (base->ISR & I2C_ISR_NACKF) {
+		base->CR1 &= ~I2C_CR1_NACKIE;
 		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
 	}
-	if (I2C_ISR(self->locm3_i2c) & I2C_ISR_TXIS) {
-		I2C_CR1(self->locm3_i2c) &= ~I2C_CR1_TXIE;
+	if (base->ISR & I2C_ISR_TXIS) {
+		base->CR1 &= ~I2C_CR1_TXIE;
 		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
 	}
-	if (I2C_ISR(self->locm3_i2c) & I2C_ISR_TC) {
-		I2C_CR1(self->locm3_i2c) &= ~I2C_CR1_TCIE;
+	if (base->ISR & I2C_ISR_TC) {
+		base->CR1 &= ~I2C_CR1_TCIE;
 		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
 	}
-	if (I2C_ISR(self->locm3_i2c) & I2C_ISR_RXNE) {
-		I2C_CR1(self->locm3_i2c) &= ~I2C_CR1_RXIE;
+	if (base->ISR & I2C_ISR_RXNE) {
+		base->CR1 &= ~I2C_CR1_RXIE;
 		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
 	}
 	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);

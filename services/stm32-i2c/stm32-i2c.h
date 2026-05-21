@@ -22,7 +22,7 @@ typedef enum {
 
 typedef struct {
 	I2cBus bus;
-	uint32_t locm3_i2c;
+	void *base;
 	uint32_t timeout_ms;
 	SemaphoreHandle_t bus_lock;
 	SemaphoreHandle_t wait_lock;
@@ -31,7 +31,7 @@ typedef struct {
 
 
 stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self);
-stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, uint32_t locm3_i2c);
+stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, void *base);
 stm32_i2c_ret_t stm32_i2c_free(Stm32I2c *self);
 stm32_i2c_ret_t stm32_i2c_irq_handler(Stm32I2c *self);
 

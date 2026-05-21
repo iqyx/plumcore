@@ -1,0 +1,11 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["LIB_CMSIS_STM32H7"] == "y":
+
+	env.Git('https://github.com/STMicroelectronics/cmsis-device-h7.git', branch='master')
+
+	env.Append(CPPPATH = [
+		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/Include'),
+	])
