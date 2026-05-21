@@ -81,10 +81,11 @@ stm32_clock_ret_t stm32_h7_clock_init(Stm32Clock *self) {
 	stm32_clock_div_init(&self->pll1m_div, &(const struct stm32_clock_div_config){
 		.name = "pll1m-div",
 		.parent = &self->pll_src_mux.clock,
-		.reg_pllp = {.reg = &((RCC_TypeDef *)RCC)->PLLCKSELR, .mask = 0x000003f0ul, .shift = 4},
-		.offset_pllp = 0,
+		.reg_div = {.reg = &((RCC_TypeDef *)RCC)->PLLCKSELR, .mask = 0x000003f0ul, .shift = 4},
+		.offset_div = 0,
 		.min_rate_hz = 1000000ul,
 		.max_rate_hz = 16000000ul,
+		.min_prescaler = 1,
 		.max_prescaler = 63,
 	});
 	self->pll1m_div.clock.vmt->set_rate(&self->pll1m_div.clock, 1000000ul);
@@ -112,13 +113,14 @@ stm32_clock_ret_t stm32_h7_clock_init(Stm32Clock *self) {
 	stm32_clock_div_init(&self->pll1p_div, &(const struct stm32_clock_div_config){
 		.name = "pll1p-div",
 		.parent = &self->pll1n_mul.clock,
-		.reg_pllp = {.reg = &((RCC_TypeDef *)RCC)->PLL1DIVR, .mask = RCC_PLL1DIVR_P1, .shift = RCC_PLL1DIVR_P1_Pos},
-		.offset_pllp = 1,
+		.reg_div = {.reg = &((RCC_TypeDef *)RCC)->PLL1DIVR, .mask = RCC_PLL1DIVR_P1, .shift = RCC_PLL1DIVR_P1_Pos},
+		.offset_div = 1,
 		.min_rate_hz = 1000000ul,
 		.max_rate_hz = 400000000ul,
+		.min_prescaler = 2,
 		.max_prescaler = 128,
 	});
-	self->pll1p_div.clock.vmt->set_rate(&self->pll1p_div.clock, 64000000ul);
+	self->pll1p_div.clock.vmt->set_rate(&self->pll1p_div.clock, 128000000ul);
 
 	/***************************************************************************************************************
 	 * PLL1P gate: controls DIVP1EN in RCC_PLLCFGR

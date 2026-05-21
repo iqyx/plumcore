@@ -14,11 +14,15 @@
 struct stm32_clock_div_config {
 	const char *name;
 	Clock *parent;
-	struct stm32_clock_reg reg_pllp;
-	int32_t offset_pllp;
+	struct stm32_clock_reg reg_div;
+	int32_t offset_div;
 	uint32_t min_rate_hz;
 	uint32_t max_rate_hz;
+	uint32_t min_prescaler;
 	uint32_t max_prescaler;
+	/* Optional enable/disable register bit. When reg is NULL, enable and disable
+	 * only manage the parent reference count without touching any hardware register. */
+	struct stm32_clock_reg reg_enable;
 };
 
 typedef struct stm32_clock_div {
