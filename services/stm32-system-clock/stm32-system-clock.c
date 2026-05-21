@@ -17,10 +17,12 @@
 
 #include "stm32-system-clock.h"
 
-#if defined(STM32H7)
+#if defined(STM32G4)
+	#include <stm32g4xx.h>
+#elif defined(STM32H7)
 	#include <stm32h7xx.h>
 #else
-	#error "stm32-gpio service is not compatible with this MCU family"
+	#error "stm32-system-clock service is not compatible with this MCU family"
 #endif
 
 #ifdef MODULE_NAME
@@ -89,13 +91,19 @@ stm32_system_clock_ret_t stm32_system_clock_init(Stm32SystemClock *self, void *t
 	/* Disable the timer before configuring. */
 	base->CR1 = 0;
 
-	/** @todo Determine tim_ck properly. */
-	if (freq_hz > (SystemCoreClock * 2)) {
+	/* On G4 the timer input clock equals HCLK (APBx prescaler = 1 is the standard configuration).
+	 * On H7 the timer input clock is 2x PCLK due to the timer doubling mechanism. */
+	#if defined(STM32G4)
+		uint32_t tim_ck = SystemCoreClock;
+	#elif defined(STM32H7)
+		uint32_t tim_ck = SystemCoreClock * 2;
+	#endif
+	if (freq_hz > tim_ck) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("timer frequency too high"));
 		goto err;
 	}
-	uint32_t prescaler = (SystemCoreClock * 2) / freq_hz;
-	self->freq_hz = (SystemCoreClock * 2) / prescaler;
+	uint32_t prescaler = tim_ck / freq_hz;
+	self->freq_hz = tim_ck / prescaler;
 	base->PSC = prescaler - 1ul;
 
 	base->ARR = self->freq_hz - 1ul;
