@@ -39,6 +39,15 @@ typedef struct configlib_value {
 	enum conf_type type;
 	enum conf_flag flags;
 
+	bool has_default;
+	union conf_val default_val;
+
+	bool has_constraints;
+	union conf_constraint constraint;
+
+	const char *brief;
+	const char *detail;
+
 } ConfiglibValue;
 
 
@@ -46,7 +55,9 @@ configlib_ret_t configlib_init(ConfiglibValue *self, const char *name);
 configlib_ret_t configlib_map(ConfiglibValue *self, void *var, enum conf_type type);
 configlib_ret_t configlib_map_string(ConfiglibValue *self, char *str, size_t size);
 configlib_ret_t configlib_append(ConfiglibValue *self, ConfiglibValue *parent, enum conf_dir dir);
-
+configlib_ret_t configlib_set_default(ConfiglibValue *self, union conf_val val);
+configlib_ret_t configlib_set_description(ConfiglibValue *self, const char *brief, const char *detail);
+configlib_ret_t configlib_set_constraint(ConfiglibValue *self, union conf_constraint c);
 
 configlib_ret_t configlib_init_map(ConfiglibValue *self, const char *name, void *var, enum conf_type type);
 configlib_ret_t configlib_init_map_append(ConfiglibValue *self, const char *name, void *var, enum conf_type type, ConfiglibValue *parent, enum conf_dir dir);

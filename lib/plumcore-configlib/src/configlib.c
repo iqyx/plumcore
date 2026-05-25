@@ -13,22 +13,41 @@
 
 #define MODULE_NAME "configlib"
 
-/**
- * @todo
- *
- * - read and write helpers with a string path
- * - read/write methods for all value types
- */
+/** @todo read/write helpers with a string path */
 
 
-static const char *configlib_type_str[] = {"none", "subtree", "float", "u32", "s32", "u16", "s16", "u8", "s8", "bool", "bstr", "str"};
+static const char *configlib_type_str[] = {"none", "subtree", "float", "u32", "s32", "u16", "s16", "u8", "s8", "bool", "bstr", "str", "enum"};
 
 static conf_ret_t configlib_write(Conf *self, const union conf_val val) {
 	ConfiglibValue *value = self->parent;
-	(void)value;
-	(void)val;
 
-	/** @todo write the value to self->var pointer depending on the value type or call a write callback */
+	switch (value->type) {
+		case CONF_F:    *(float *)value->var    = val.f;   break;
+		case CONF_U32:  *(uint32_t *)value->var = val.u32; break;
+		case CONF_S32:  *(int32_t *)value->var  = val.i32; break;
+		case CONF_U16:  *(uint16_t *)value->var = val.u16; break;
+		case CONF_S16:  *(int16_t *)value->var  = val.i16; break;
+		case CONF_U8:   *(uint8_t *)value->var  = val.u8;  break;
+		case CONF_S8:   *(int8_t *)value->var   = val.i8;  break;
+		case CONF_B:    *(bool *)value->var      = val.b;  break;
+		case CONF_ENUM: *(uint32_t *)value->var  = val.u32; break;
+		case CONF_STR: {
+			size_t copy_len = val.str.len < value->size - 1 ? val.str.len : value->size - 1;
+			memcpy(value->var, val.str.buf, copy_len);
+			((char *)value->var)[copy_len] = '\0';
+			break;
+		}
+		case CONF_BSTR: {
+			size_t copy_len = val.bstr.len < value->size ? val.bstr.len : value->size;
+			memcpy(value->var, val.bstr.buf, copy_len);
+			if (value->len != NULL) {
+				*value->len = copy_len;
+			}
+			break;
+		}
+		default:
+			return CONF_RET_FAILED;
+	}
 
 	return CONF_RET_OK;
 }
@@ -37,12 +56,26 @@ static conf_ret_t configlib_write(Conf *self, const union conf_val val) {
 static conf_ret_t configlib_read(Conf *self, union conf_val *val) {
 	ConfiglibValue *value = self->parent;
 
-	/** @todo read value from self->var pointer */
-
-	if (value->type == CONF_F) {
-		val->f = *(float *)value->var;
-	} else {
-		return CONF_RET_FAILED;
+	switch (value->type) {
+		case CONF_F:    val->f   = *(float *)value->var;    break;
+		case CONF_U32:  val->u32 = *(uint32_t *)value->var; break;
+		case CONF_S32:  val->i32 = *(int32_t *)value->var;  break;
+		case CONF_U16:  val->u16 = *(uint16_t *)value->var; break;
+		case CONF_S16:  val->i16 = *(int16_t *)value->var;  break;
+		case CONF_U8:   val->u8  = *(uint8_t *)value->var;  break;
+		case CONF_S8:   val->i8  = *(int8_t *)value->var;   break;
+		case CONF_B:    val->b   = *(bool *)value->var;     break;
+		case CONF_ENUM: val->u32 = *(uint32_t *)value->var; break;
+		case CONF_STR:
+			val->str.buf = (char *)value->var;
+			val->str.len = strlen((char *)value->var);
+			break;
+		case CONF_BSTR:
+			val->bstr.buf = (uint8_t *)value->var;
+			val->bstr.len = (value->len != NULL) ? *value->len : 0;
+			break;
+		default:
+			return CONF_RET_FAILED;
 	}
 
 	return CONF_RET_OK;
@@ -72,6 +105,43 @@ static conf_ret_t configlib_walk(Conf *self, enum conf_dir direction, Conf **nex
 }
 
 
+static conf_ret_t configlib_get_default(Conf *self, union conf_val *val) {
+	ConfiglibValue *value = self->parent;
+
+	if (!value->has_default) {
+		return CONF_RET_FAILED;
+	}
+
+	*val = value->default_val;
+	return CONF_RET_OK;
+}
+
+
+static conf_ret_t configlib_get_description(Conf *self, const char **brief, const char **detail) {
+	ConfiglibValue *value = self->parent;
+
+	if (value->brief == NULL && value->detail == NULL) {
+		return CONF_RET_FAILED;
+	}
+
+	*brief = value->brief;
+	*detail = value->detail;
+	return CONF_RET_OK;
+}
+
+
+static conf_ret_t configlib_get_constraints(Conf *self, union conf_constraint *c) {
+	ConfiglibValue *value = self->parent;
+
+	if (!value->has_constraints) {
+		return CONF_RET_FAILED;
+	}
+
+	*c = value->constraint;
+	return CONF_RET_OK;
+}
+
+
 static conf_ret_t configlib_stat(Conf *self, const char **name, enum conf_type *type, enum conf_flag *flags) {
 	ConfiglibValue *value = self->parent;
 
@@ -84,13 +154,16 @@ static conf_ret_t configlib_stat(Conf *self, const char **name, enum conf_type *
 
 
 static const struct conf_vmt configlib_conf_vmt = {
-	/* COnfigure the tree */
+	/* Configure the tree */
 	.write = configlib_write,
 	.read = configlib_read,
 
 	/* Search/traverse the tree */
 	.walk = configlib_walk,
 	.stat = configlib_stat,
+	.get_default = configlib_get_default,
+	.get_description = configlib_get_description,
+	.get_constraints = configlib_get_constraints,
 
 	/* Manipulate the tree */
 	.create = NULL,
@@ -147,6 +220,27 @@ configlib_ret_t configlib_append(ConfiglibValue *self, ConfiglibValue *parent, e
 		return CONFIGLIB_RET_FAILED;
 	}
 
+	return CONFIGLIB_RET_OK;
+}
+
+
+configlib_ret_t configlib_set_default(ConfiglibValue *self, union conf_val val) {
+	self->default_val = val;
+	self->has_default = true;
+	return CONFIGLIB_RET_OK;
+}
+
+
+configlib_ret_t configlib_set_description(ConfiglibValue *self, const char *brief, const char *detail) {
+	self->brief = brief;
+	self->detail = detail;
+	return CONFIGLIB_RET_OK;
+}
+
+
+configlib_ret_t configlib_set_constraint(ConfiglibValue *self, union conf_constraint c) {
+	self->constraint = c;
+	self->has_constraints = true;
 	return CONFIGLIB_RET_OK;
 }
 
