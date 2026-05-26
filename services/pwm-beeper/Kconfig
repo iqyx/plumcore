@@ -1,0 +1,3 @@
+config SERVICE_PWM_BEEPER
+	bool "Beeper on a PWM output service"
+	default y
