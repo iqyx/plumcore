@@ -34,6 +34,11 @@ config LIB_CMSIS
 	bool "ARM CMSIS library"
 	default y
 
+config LIB_CMSIS_DSP
+	depends on LIB_CMSIS
+	bool "ARM CMSIS DSP library"
+	default n
+
 config LIB_CMSIS_STM32H7
 	bool "ARM CMSIS library for STM32H7 MCU family"
 	default n
