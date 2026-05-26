@@ -115,7 +115,7 @@ generic_power_ret_t generic_power_set_enable_gpio(GenericPower *self, Gpio *enab
 }
 
 
-generic_power_ret_t generic_power_set_pwm(GenericPower *self, uint32_t timer, enum tim_oc_id timer_oc) {
+generic_power_ret_t generic_power_set_pwm(GenericPower *self, uint32_t timer, int timer_oc) {
 	if (!(TIM_CR1(timer) & TIM_CR1_CEN)) {
 		/* Timer counter is not enbaled. */
 		timer_set_mode(timer, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
