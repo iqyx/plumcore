@@ -1,0 +1,3 @@
+config SERVICE_STM32_TIMER
+	bool "STM32 timer driver service"
+	default y
