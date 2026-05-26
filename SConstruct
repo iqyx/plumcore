@@ -55,6 +55,42 @@ env.Command(
 )
 
 
+env.Append(CFLAGS = [
+	"-Os",
+	"-g3",
+	"-gdwarf-4",
+	"-fno-common",
+	"-fdiagnostics-color=always",
+	"-ffunction-sections",
+	"-fdata-sections",
+	"-fdiagnostics-color=always",
+	"--std=gnu2x",
+	"-Wall",
+	"-Wextra",
+	"-pedantic",
+	#~ "-Werror",
+	"-Winit-self",
+	"-Wreturn-local-addr",
+	"-Wswitch-default",
+	"-Wuninitialized",
+	"-Wundef",
+	#~ "-Wstack-usage=256",
+	"-Wshadow",
+	"-Wimplicit-function-declaration",
+	"-Wcast-qual",
+	# "-Wwrite-strings",
+	# "-Wconversion",
+	"-Wlogical-op",
+	"-Wmissing-declarations",
+	"-Wno-missing-field-initializers",
+	"-Wstack-protector",
+	"-Wredundant-decls",
+	"-Wmissing-prototypes",
+	"-Wstrict-prototypes",
+	"-Wno-expansion-to-defined",
+	"-Wno-unused-function",
+])
+
 # Examine the Git repository and build the version string
 SConscript("version.SConscript")
 
@@ -127,42 +163,6 @@ if conf["ELF_IMAGE_XIP"] == "y":
 
 env.Append(LINKFLAGS = [
 	"-Wl,--defsym=LOAD_ADDRESS=%s" % env["LOAD_ADDRESS"],
-])
-
-env.Append(CFLAGS = [
-	"-Os",
-	"-g3",
-	"-gdwarf-4",
-	"-fno-common",
-	"-fdiagnostics-color=always",
-	"-ffunction-sections",
-	"-fdata-sections",
-	"-fdiagnostics-color=always",
-	"--std=gnu2x",
-	"-Wall",
-	"-Wextra",
-	"-pedantic",
-	#~ "-Werror",
-	"-Winit-self",
-	"-Wreturn-local-addr",
-	"-Wswitch-default",
-	"-Wuninitialized",
-	"-Wundef",
-	#~ "-Wstack-usage=256",
-	"-Wshadow",
-	"-Wimplicit-function-declaration",
-	"-Wcast-qual",
-	# "-Wwrite-strings",
-	# "-Wconversion",
-	"-Wlogical-op",
-	"-Wmissing-declarations",
-	"-Wno-missing-field-initializers",
-	"-Wstack-protector",
-	"-Wredundant-decls",
-	"-Wmissing-prototypes",
-	"-Wstrict-prototypes",
-	"-Wno-expansion-to-defined",
-	"-Wno-unused-function",
 ])
 
 env.Append(LIBS = [
