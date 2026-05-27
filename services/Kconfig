@@ -436,7 +436,21 @@ menu "User interface services"
 	config SERVICE_LOGINMGR
 		bool "Console login manager"
 		default n
-		select LIB_LINEEDIT
+
+	config SERVICE_LOGINMGR_PASSWORD_AUTH
+		bool "Login manager password authenticator"
+		depends on SERVICE_LOGINMGR
+		default n
+
+	config SERVICE_LOGINMGR_PASSWORD_AUTH_LOGIN
+		string "Login username"
+		depends on SERVICE_LOGINMGR_PASSWORD_AUTH
+		default "admin"
+
+	config SERVICE_LOGINMGR_PASSWORD_AUTH_PASSWORD
+		string "Login password"
+		depends on SERVICE_LOGINMGR_PASSWORD_AUTH
+		default "admin"
 
 	config SERVICE_FB_CONSOLE
 		bool "Simple text console on a framebuffer device"
@@ -556,6 +570,8 @@ menu "Communication protocols"
 		config SERVICE_NBUS_FLASH
 			bool "NBUS flash access interface"
 			default n
+
+		source "services/proto-conf/Kconfig"
 	endmenu
 endmenu
 
