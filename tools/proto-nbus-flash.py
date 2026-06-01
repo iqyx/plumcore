@@ -25,6 +25,8 @@ def init_args():
 	parser.add_argument('-e', '--ep', type=int, required=True, help='service endpoint to connect to')
 	parser.add_argument('-d', '--download', type=str, help='download content of the flash volume')
 	parser.add_argument('-u', '--upload', type=str, help='upload content to the flash volume')
+	parser.add_argument('-v', '--verify', action='store_true', help='verify flash contents after upload')
+	parser.add_argument('--erase', type=str, help='erase the whole flash partition')
 	parser.add_argument('-f', '--file', type=str, default='file.bin', help='name of the file to read from/write to')
 
 	return parser.parse_args()
@@ -46,7 +48,7 @@ class NbusClient:
 		self._s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self._s.bind((f'fd00:dead:beef::1', 52000))
 		self._s.connect((f'fd00:dead:beef::{self._sid[:4]}:{self._sid[4:]}', 52000 + self._ep))
-		self._s.settimeout(0.02)
+		self._s.settimeout(0.05)
 
 	def call(self, req: dict):
 		timeout = 50
@@ -136,6 +138,21 @@ class FlashClient:
 		with open(fname, 'wb') as f:
 			f.write(d)
 
+	def _erase_all(self, flash_size, erase_size):
+		with tqdm(desc='Erase', total=flash_size, ncols=120, unit='B', unit_scale=True, unit_divisor=1024) as progress_bar:
+			for i in range(0, flash_size, erase_size):
+				self._erase(i, erase_size)
+				progress_bar.update(erase_size)
+
+	def erase(self, vol):
+		r = self.info(vol)
+		flash_size = r.get('sizes')[0].get('s')
+		erase_size = r.get('sizes')[1].get('s')
+
+		self._open(vol)
+		self._erase_all(flash_size, erase_size)
+		self._close()
+
 	def upload(self, vol, fname):
 		r = self.info(vol)
 		flash_size = r.get('sizes')[0].get('s')
@@ -143,10 +160,7 @@ class FlashClient:
 		page_size = 256
 
 		self._open(vol)
-		with tqdm(desc='Erase', total=flash_size, ncols=120, unit='B', unit_scale=True, unit_divisor=1024) as progress_bar:
-			for i in range(0, flash_size, erase_size):
-				self._erase(i, erase_size)
-				progress_bar.update(erase_size)
+		self._erase_all(flash_size, erase_size)
 
 		with open(fname, 'rb') as f:
 			d = f.read()
@@ -162,6 +176,29 @@ class FlashClient:
 
 		self._close()
 
+	def verify(self, vol, fname):
+		with open(fname, 'rb') as f:
+			original = f.read()
+
+		page_size = 256
+		read_size = ((len(original) + page_size - 1) // page_size) * page_size
+
+		self._open(vol)
+		d = b''
+		with tqdm(desc='Verify', total=read_size, ncols=120, unit='B', unit_scale=True, unit_divisor=1024) as progress_bar:
+			for i in range(0, read_size, page_size):
+				d += self._read(i, page_size)
+				progress_bar.update(page_size)
+		self._close()
+
+		if d[:len(original)] == original:
+			print(f'{Fore.GREEN}{Style.BRIGHT}Verify OK{Style.RESET_ALL}')
+		else:
+			for i, (a, b) in enumerate(zip(original, d[:len(original)])):
+				if a != b:
+					print(f'{Fore.RED}{Style.BRIGHT}Verify FAILED{Style.RESET_ALL}: first mismatch at offset 0x{i:08x} (expected 0x{a:02x}, got 0x{b:02x})')
+					break
+			sys.exit(1)
 
 
 
@@ -175,9 +212,13 @@ if __name__ == "__main__":
 
 	if args.list:
 		f.list()
+	if args.erase:
+		f.erase(args.erase)
 	if args.download:
 		f.download(args.download, args.file)
 	if args.upload:
 		f.upload(args.upload, args.file)
+		if args.verify:
+			f.verify(args.upload, args.file)
 	if args.reset:
 		f.reset()
