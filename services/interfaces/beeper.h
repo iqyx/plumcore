@@ -51,9 +51,10 @@ typedef uint32_t beeper_seq_item_t;
  * Each item must have a command defined. The last item of a sequence must be END
  * (or simply, zero).
  */
-#define BEEPER_SEQ_END  0x0u
-#define BEEPER_SEQ_WAIT 0x1u
-#define BEEPER_SEQ_BEEP 0x2u
+#define BEEPER_SEQ_END    0x0u
+#define BEEPER_SEQ_WAIT   0x1u
+#define BEEPER_SEQ_BEEP   0x2u
+#define BEEPER_SEQ_REPEAT 0x3u
 
 /**
  * @brief Duration for WAIT (silence) and BEEP commands, in milliseconds.

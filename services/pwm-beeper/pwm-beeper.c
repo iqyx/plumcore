@@ -51,6 +51,9 @@ static void task(void *p) {
 	beeper_seq_item_t seq[SEQ_BUF_LEN] = {0};
 
 	while (self->task_needed) {
+		/* Assume the sequence ends after first run by default. */
+		self->task_needed = false;
+
 		if (self->sequence) {
 			size_t i = 0;
 			for (i = 0; i < SEQ_BUF_LEN && self->sequence[i]; i++) {
@@ -64,7 +67,9 @@ static void task(void *p) {
 			uint32_t time_ms = (seq[pos] >> 2) & 0xffffu;
 			uint32_t freq_hz = (seq[pos] >> 18) & 0x3fffu;
 
-			if (cmd == BEEPER_SEQ_BEEP && freq_hz > 0) {
+			if (cmd == BEEPER_SEQ_REPEAT) {
+				self->task_needed = true;
+			} else if (cmd == BEEPER_SEQ_BEEP && freq_hz > 0) {
 				self->pwm->vmt->set_freq(self->pwm, freq_hz);
 				self->pwm->vmt->set_pwm(self->pwm, 0.5f);
 			} else {
@@ -80,7 +85,6 @@ static void task(void *p) {
 		vTaskDelay(10);
 	}
 
-	self->pwm->vmt->set_pwm(self->pwm, 0.0f);
 	vTaskDelete(NULL);
 }
 

@@ -172,6 +172,10 @@ stm32_timer_ret_t stm32_timer_pwm_init(Stm32Timer *self, uint8_t channel, Pwm **
 	/* Advanced-control timers gate the outputs behind the main output enable. */
 	tim->BDTR |= TIM_BDTR_MOE;
 
+	/* Zero the compare register before the update event latches it — this guarantees
+	 * the channel starts at 0 % duty regardless of the register's previous contents. */
+	(&tim->CCR1)[channel - 1] = 0;
+
 	/* Latch the buffered prescaler/auto-reload values and start the counter. */
 	tim->EGR |= TIM_EGR_UG;
 	tim->CR1 |= TIM_CR1_CEN;
