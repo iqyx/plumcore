@@ -90,9 +90,6 @@ static void task(void *p) {
 
 
 static pwm_beeper_ret_t create_task(PwmBeeper *self) {
-	if (self->task != NULL) {
-		return PWM_BEEPER_RET_OK;
-	}
 
 	self->task_needed = true;
 	xTaskCreate(task, "pwm-beeper", configMINIMAL_STACK_SIZE, (void *)self, 1, &(self->task));
