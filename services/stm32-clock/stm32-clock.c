@@ -218,9 +218,17 @@ static stm32_clock_ret_t sysclk_reconfigure(Stm32Clock *self, const struct stm32
 #define TIM_TISEL(tim_base) MMIO32((tim_base) + 0x5c)
 #define TIM_OR1(tim_base) MMIO32((tim_base) + 0x68)
 
+/* Maximum number of measurement timer overflows (~4 ms each at 16 MHz) to wait for an
+ * input capture edge before giving up. Generous; a live clock captures within one overflow. */
+#define STM32_CLOCK_MEAS_MAX_OVERFLOWS 8
+
 static uint32_t meas_timer_get_hz(Stm32Clock *self, enum stm32_clock_src c) {
 	/* Keep prescaler at 0, run at tim_ker_ck, keep ARR at 0xffff, just enable the timer. */
 	RCC_APB2ENR |= RCC_APB2ENR_TIM16EN;
+	/* A dummy read-back guarantees the clock enable has taken effect before the peripheral
+	 * registers are accessed. Without it the following writes may be silently dropped,
+	 * leaving the capture unit unconfigured and the measurement loop spinning forever. */
+	(void)RCC_APB2ENR;
 	TIM_CR1(TIM16) |= TIM_CR1_CEN;
 
 	switch (c) {
@@ -239,21 +247,41 @@ static uint32_t meas_timer_get_hz(Stm32Clock *self, enum stm32_clock_src c) {
 	TIM_CCMR1(TIM16) = TIM_CCMR1_IC1PSC_8 | TIM_CCMR1_CC1S_IN_TI1;
 	TIM_CCER(TIM16) |= TIM_CCER_CC1E;
 
-	/* Catch stale CC1IF and reset it. */
-	TIM_SR(TIM16) &= ~TIM_SR_CC1IF;
+	/* Catch stale capture and overflow flags and reset them. */
+	TIM_SR(TIM16) &= ~(TIM_SR_CC1IF | TIM_SR_UIF);
 
-	/* Catch two capture events. */
-	while (!(TIM_SR(TIM16) & TIM_SR_CC1IF)) ;
-	uint16_t cc1 = TIM_CCR1(TIM16);
-
-	while (!(TIM_SR(TIM16) & TIM_SR_CC1IF)) ;
-	uint16_t cc2 = TIM_CCR1(TIM16);
+	/* Catch two capture events. The measured clock comes from an external source which
+	 * may be absent or dead, so bound the wait: a capture must arrive within a few timer
+	 * overflows (each is ~4 ms at 16 MHz tim_ker_ck), otherwise abort instead of hanging
+	 * the whole boot. A present clock always captures well within a single overflow. */
+	uint32_t overflows = 0;
+	uint16_t cc1 = 0;
+	uint16_t cc2 = 0;
+	for (uint8_t edge = 0; edge < 2; edge++) {
+		while (!(TIM_SR(TIM16) & TIM_SR_CC1IF)) {
+			if (TIM_SR(TIM16) & TIM_SR_UIF) {
+				TIM_SR(TIM16) &= ~TIM_SR_UIF;
+				if (++overflows > STM32_CLOCK_MEAS_MAX_OVERFLOWS) {
+					goto timeout;
+				}
+			}
+		}
+		/* Reading the capture register clears CC1IF. */
+		cc1 = cc2;
+		cc2 = TIM_CCR1(TIM16);
+	}
 
 	/* Disable input capture. */
 	TIM_CCER(TIM16) &= ~TIM_CCER_CC1E;
 	TIM_CR1(TIM16) &= ~TIM_CR1_CEN;
 
 	return self->tim_ker_ck * 8UL / (uint16_t)(cc2 - cc1) * (c == STM32_CLOCK_SRC_HSE ? 32UL : 1UL);
+
+timeout:
+	TIM_CCER(TIM16) &= ~TIM_CCER_CC1E;
+	TIM_CR1(TIM16) &= ~TIM_CR1_CEN;
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("timeout measuring frequency, no input clock"));
+	return 0;
 }
 
 
