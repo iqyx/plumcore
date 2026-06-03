@@ -1,0 +1,28 @@
+config SERVICE_PROTO_CONF
+	bool "Remote configuration tree access protocol"
+	default n
+
+	config SERVICE_PROTO_CONF_MAX_DATAGRAM_LEN
+		int "Maximum datagram size (bytes)"
+		default 512
+		depends on SERVICE_PROTO_CONF
+
+	config SERVICE_PROTO_CONF_MAX_PATH_DEPTH
+		int "Maximum path nesting depth"
+		default 8
+		depends on SERVICE_PROTO_CONF
+
+	config SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN
+		int "Maximum path component string length (bytes)"
+		default 32
+		depends on SERVICE_PROTO_CONF
+
+	config SERVICE_PROTO_CONF_MAX_STR_LEN
+		int "Maximum string/bytestring value buffer size (bytes)"
+		default 128
+		depends on SERVICE_PROTO_CONF
+
+	config SERVICE_PROTO_CONF_MAX_SIBLINGS
+		int "Maximum siblings returned per walk_siblings response"
+		default 16
+		depends on SERVICE_PROTO_CONF
