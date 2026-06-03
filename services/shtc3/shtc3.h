@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <waveform_source.h>
+#include <waveform-source.h>
 
 #include <interfaces/i2c-bus.h>
 #include <interfaces/sensor.h>

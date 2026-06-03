@@ -15,7 +15,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#include <interfaces/waveform_source.h>
+#include <interfaces/waveform-source.h>
 #include <interfaces/mq.h>
 #include <interfaces/clock.h>
 

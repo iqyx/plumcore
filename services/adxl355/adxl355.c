@@ -5,7 +5,7 @@
 #include <main.h>
 
 #include <interfaces/spi.h>
-#include <interfaces/waveform_source.h>
+#include <interfaces/waveform-source.h>
 
 #include "adxl355.h"
 
@@ -105,14 +105,16 @@ uint32_t adxl355_fifo_read_sample(Adxl355 *self) {
  * Waveform source API
  **********************************************************************************************************************/
 
-waveform_source_ret_t adxl355_start(Adxl355 *self) {
+static waveform_source_ret_t adxl355_start(WaveformSource *source) {
+	Adxl355 *self = (Adxl355 *)source->parent;
 	write8(self, ADXL355_REG_POWER_CTL, 0x00);
 	vTaskDelay(50);
 	return WAVEFORM_SOURCE_RET_OK;
 }
 
 
-waveform_source_ret_t adxl355_stop(Adxl355 *self) {
+static waveform_source_ret_t adxl355_stop(WaveformSource *source) {
+	Adxl355 *self = (Adxl355 *)source->parent;
 	/* Enable standby mode. */
 	write8(self, ADXL355_REG_POWER_CTL, 0x01);
 	vTaskDelay(50);
@@ -120,7 +122,8 @@ waveform_source_ret_t adxl355_stop(Adxl355 *self) {
 }
 
 
-waveform_source_ret_t adxl355_read(Adxl355 *self, void *data, size_t sample_count, size_t *read) {
+static waveform_source_ret_t adxl355_read(WaveformSource *source, void *data, size_t sample_count, size_t *read) {
+	Adxl355 *self = (Adxl355 *)source->parent;
 	/* Work with the read buffer as with unsigned 32 bit ints. */
 	uint32_t *data32 = data;
 	int32_t *sdata32 = data;
@@ -181,23 +184,33 @@ waveform_source_ret_t adxl355_read(Adxl355 *self, void *data, size_t sample_coun
 }
 
 
-waveform_source_ret_t adxl355_get_format(Adxl355 *self, enum waveform_source_format *format, uint32_t *channels) {
+static waveform_source_ret_t adxl355_get_format(WaveformSource *source, enum waveform_source_format *format, uint32_t *channels) {
 	*format = WAVEFORM_SOURCE_FORMAT_S32;
 	*channels = 3;
 	return WAVEFORM_SOURCE_RET_OK;
 }
 
 
-waveform_source_ret_t adxl355_set_sample_rate(Adxl355 *self, float sample_rate_Hz) {
+static waveform_source_ret_t adxl355_set_sample_rate(WaveformSource *source, float sample_rate_Hz) {
 
 
 }
 
 
-waveform_source_ret_t adxl355_get_sample_rate(Adxl355 *self, float *sample_rate_Hz) {
+static waveform_source_ret_t adxl355_get_sample_rate(WaveformSource *source, float *sample_rate_Hz) {
 
 
 }
+
+
+static const struct waveform_source_vmt adxl355_source_vmt = {
+	.start = adxl355_start,
+	.stop = adxl355_stop,
+	.read = adxl355_read,
+	.get_format = adxl355_get_format,
+	.set_sample_rate = adxl355_set_sample_rate,
+	.get_sample_rate = adxl355_get_sample_rate,
+};
 
 
 adxl355_ret_t adxl355_init_defaults(Adxl355 *self) {
@@ -262,14 +275,8 @@ adxl355_ret_t adxl355_init(Adxl355 *self, SpiDev *spidev) {
 
 	adxl355_init_defaults(self);
 
-	waveform_source_init(&self->source);
+	self->source.vmt = &adxl355_source_vmt;
 	self->source.parent = self;
-	self->source.start = (typeof(self->source.start))adxl355_start;
-	self->source.stop= (typeof(self->source.stop))adxl355_stop;
-	self->source.read = (typeof(self->source.read))adxl355_read;
-	self->source.get_format = (typeof(self->source.get_format))adxl355_get_format;
-	self->source.get_sample_rate = (typeof(self->source.get_sample_rate))adxl355_get_sample_rate;
-	self->source.set_sample_rate = (typeof(self->source.set_sample_rate))adxl355_set_sample_rate;
 
 	self->die_temp.vmt = &die_temp_sensor_vmt;
 	self->die_temp.info = &die_temp_sensor_info;

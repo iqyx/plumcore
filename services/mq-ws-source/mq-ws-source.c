@@ -17,7 +17,7 @@
 #include "u_log.h"
 #include "u_assert.h"
 
-#include <interfaces/waveform_source.h>
+#include <interfaces/waveform-source.h>
 #include <interfaces/mq.h>
 
 #include "mq-ws-source.h"
@@ -56,7 +56,7 @@ static size_t get_buffer_may_receive(MqWsSource *self) {
 
 /* Count bytes used by a single sample of the WaveformSource data stream */
 static void get_source_format(MqWsSource *self) {
-	self->source->get_format(self->source->parent, &self->source_format, &self->source_channels);
+	self->source->vmt->get_format(self->source, &self->source_format, &self->source_channels);
 	switch (self->source_format) {
 		case WAVEFORM_SOURCE_FORMAT_U8:
 			self->source_dtype = DTYPE_UINT8;
@@ -133,8 +133,8 @@ static mq_ws_source_ret_t write_channels(MqWsSource *self, size_t samples) {
 
 			/** @todo get the exact sample time from somewhere */
 			struct timespec ts = {0};
-			if (self->ts_clock && self->ts_clock->get != NULL) {
-				self->ts_clock->get(self->ts_clock->parent, &ts);
+			if (self->ts_clock != NULL && self->ts_clock->vmt->get != NULL) {
+				self->ts_clock->vmt->get(self->ts_clock, &ts);
 			}
 
 			/* Publish the array and clear the channel buffer. */
@@ -168,7 +168,7 @@ static void mq_ws_source_task(void *p) {
 		/* Read maximum of may_receive samples, but keep in mind that the
 		 * actual number of received samples may be lower. */
 		size_t read = 0;
-		self->source->read(self->source->parent, self->rxbuf, may_receive, &read);
+		self->source->vmt->read(self->source, self->rxbuf, may_receive, &read);
 
 		/* Traverse all channels and copy samples into channel buffers. */
 		write_channels(self, read);
@@ -232,7 +232,7 @@ mq_ws_source_ret_t mq_ws_source_start(MqWsSource *self, uint32_t prio) {
 	}
 
 	/* And enable the source to get some data in. */
-	if (self->source->start(self->source->parent) != WAVEFORM_SOURCE_RET_OK) {
+	if (self->source->vmt->start(self->source) != WAVEFORM_SOURCE_RET_OK) {
 		goto err;
 	}
 
@@ -251,7 +251,7 @@ mq_ws_source_ret_t mq_ws_source_stop(MqWsSource *self) {
 		return MQ_WS_SOURCE_RET_FAILED;
 	}
 
-	if (self->source->stop(self->source->parent) != WAVEFORM_SOURCE_RET_OK) {
+	if (self->source->vmt->stop(self->source) != WAVEFORM_SOURCE_RET_OK) {
 		goto err;
 	}
 

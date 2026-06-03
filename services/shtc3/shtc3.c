@@ -5,7 +5,7 @@
 #include <main.h>
 
 #include <interfaces/i2c-bus.h>
-#include <interfaces/waveform_source.h>
+#include <interfaces/waveform-source.h>
 
 #include "shtc3.h"
 
@@ -53,7 +53,7 @@ static const struct sensor_vmt temp_sensor_vmt = {
 };
 
 
-const struct sensor_info temp_sensor_info = {
+static const struct sensor_info temp_sensor_info = {
 	.description = "PCB temperature",
 	.unit = "°C",
 };
@@ -87,7 +87,7 @@ static const struct sensor_vmt rh_sensor_vmt = {
 };
 
 
-const struct sensor_info rh_sensor_info = {
+static const struct sensor_info rh_sensor_info = {
 	.description = "PCB humidity",
 	.unit = "%Rh",
 };

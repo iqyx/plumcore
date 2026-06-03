@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <waveform_source.h>
+#include <waveform-source.h>
 
 #include <interfaces/spi.h>
 
@@ -49,11 +49,4 @@ uint16_t icm42688p_fifo_count(Icm42688p *self);
 icm42688p_ret_t icm42688p_init_defaults(Icm42688p *self);
 icm42688p_ret_t icm42688p_init(Icm42688p *self, SpiDev *spi_dev);
 icm42688p_ret_t icm42688p_free(Icm42688p *self);
-
-/* WaveformSource API (Icm42688p.source) */
-waveform_source_ret_t icm42688p_read(Icm42688p *self, void *data, size_t sample_count, size_t *read);
-waveform_source_ret_t icm42688p_set_format(void *parent, enum waveform_source_format format, uint32_t channels);
-waveform_source_ret_t icm42688p_get_format(void *parent, enum waveform_source_format *format, uint32_t *channels);
-waveform_source_ret_t icm42688p_set_sample_rate(void *parent, float sample_rate_Hz);
-waveform_source_ret_t icm42688p_get_sample_rate(void *parent, float *sample_rate_Hz);
 

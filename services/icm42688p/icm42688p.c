@@ -10,7 +10,7 @@
 #include "icm42688p.h"
 #include "u_log.h"
 #include "u_assert.h"
-#include <waveform_source.h>
+#include <waveform-source.h>
 
 #define MODULE_NAME "icm42688p"
 
@@ -71,7 +71,8 @@ uint16_t icm42688p_fifo_count(Icm42688p *self) {
 }
 
 
-waveform_source_ret_t icm42688p_start(Icm42688p *self) {
+static waveform_source_ret_t icm42688p_start(WaveformSource *source) {
+	Icm42688p *self = (Icm42688p *)source->parent;
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 0);
 	/* Enable accelerometer low noise mode. */
 	write8(self->spidev, ICM42688P_REG_PWR_MGMT0, 0x23);
@@ -79,7 +80,8 @@ waveform_source_ret_t icm42688p_start(Icm42688p *self) {
 }
 
 
-waveform_source_ret_t icm42688p_stop(Icm42688p *self) {
+static waveform_source_ret_t icm42688p_stop(WaveformSource *source) {
+	Icm42688p *self = (Icm42688p *)source->parent;
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 0);
 	/* Disable everything including the temperature sensor. */
 	write8(self->spidev, ICM42688P_REG_PWR_MGMT0, 0x20);
@@ -87,7 +89,8 @@ waveform_source_ret_t icm42688p_stop(Icm42688p *self) {
 }
 
 
-waveform_source_ret_t icm42688p_read(Icm42688p *self, void *data, size_t sample_count, size_t *read) {
+static waveform_source_ret_t icm42688p_read(WaveformSource *source, void *data, size_t sample_count, size_t *read) {
+	Icm42688p *self = (Icm42688p *)source->parent;
 	write8(self->spidev, ICM42688P_REG_SEL_BANK, 0);
 	int16_t *data16 = (int16_t *)data;
 	*read = 0;
@@ -170,23 +173,33 @@ waveform_source_ret_t icm42688p_read(Icm42688p *self, void *data, size_t sample_
 }
 
 
-waveform_source_ret_t icm42688p_get_format(void *parent, enum waveform_source_format *format, uint32_t *channels) {
+static waveform_source_ret_t icm42688p_get_format(WaveformSource *source, enum waveform_source_format *format, uint32_t *channels) {
 	*format = WAVEFORM_SOURCE_FORMAT_S16;
 	*channels = 8;
 	return WAVEFORM_SOURCE_RET_OK;
 }
 
 
-waveform_source_ret_t icm42688p_set_sample_rate(void *parent, float sample_rate_Hz) {
+static waveform_source_ret_t icm42688p_set_sample_rate(WaveformSource *source, float sample_rate_Hz) {
 
 
 }
 
 
-waveform_source_ret_t icm42688p_get_sample_rate(void *parent, float *sample_rate_Hz) {
+static waveform_source_ret_t icm42688p_get_sample_rate(WaveformSource *source, float *sample_rate_Hz) {
 
 
 }
+
+
+static const struct waveform_source_vmt icm42688p_source_vmt = {
+	.start = icm42688p_start,
+	.stop = icm42688p_stop,
+	.read = icm42688p_read,
+	.get_format = icm42688p_get_format,
+	.set_sample_rate = icm42688p_set_sample_rate,
+	.get_sample_rate = icm42688p_get_sample_rate,
+};
 
 
 icm42688p_ret_t icm42688p_init_defaults(Icm42688p *self) {
@@ -229,14 +242,8 @@ icm42688p_ret_t icm42688p_init(Icm42688p *self, SpiDev *spidev) {
 		return ICM42688P_RET_FAILED;
 	}
 
-	waveform_source_init(&self->source);
+	self->source.vmt = &icm42688p_source_vmt;
 	self->source.parent = self;
-	self->source.start = (typeof(self->source.start))icm42688p_start;
-	self->source.stop= (typeof(self->source.stop))icm42688p_stop;
-	self->source.read = (typeof(self->source.read))icm42688p_read;
-	self->source.get_format = (typeof(self->source.get_format))icm42688p_get_format;
-	self->source.get_sample_rate = (typeof(self->source.get_sample_rate))icm42688p_get_sample_rate;
-	self->source.set_sample_rate = (typeof(self->source.set_sample_rate))icm42688p_set_sample_rate;
 
 	icm42688p_init_defaults(self);
 

@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <waveform_source.h>
+#include <waveform-source.h>
 
 #include <interfaces/spi.h>
 #include <interfaces/sensor.h>
@@ -104,12 +104,4 @@ uint32_t adxl355_fifo_read_sample(Adxl355 *self);
 adxl355_ret_t adxl355_init_defaults(Adxl355 *self);
 adxl355_ret_t adxl355_init(Adxl355 *self, SpiDev *spi_dev);
 adxl355_ret_t adxl355_free(Adxl355 *self);
-
-/* WaveformSource API */
-waveform_source_ret_t adxl355_start(Adxl355 *self);
-waveform_source_ret_t adxl355_stop(Adxl355 *self);
-waveform_source_ret_t adxl355_read(Adxl355 *self, void *data, size_t sample_count, size_t *read);
-waveform_source_ret_t adxl355_get_format(Adxl355 *self, enum waveform_source_format *format, uint32_t *channels);
-waveform_source_ret_t adxl355_set_sample_rate(Adxl355 *self, float sample_rate_Hz);
-waveform_source_ret_t adxl355_get_sample_rate(Adxl355 *self, float *sample_rate_Hz);
 

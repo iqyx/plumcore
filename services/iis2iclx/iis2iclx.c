@@ -5,7 +5,7 @@
 #include <main.h>
 
 #include <interfaces/spi.h>
-#include <interfaces/waveform_source.h>
+#include <interfaces/waveform-source.h>
 
 #include "iis2iclx.h"
 
