@@ -1,0 +1,3 @@
+config SERVICE_INERTIAL_LIS2HH12
+	bool "ST LIS2HH12 3 axis accelerometer"
+	default n

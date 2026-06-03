@@ -234,6 +234,7 @@ menu "High level device drivers"
 		default n
 
 	source "services/iis2iclx/Kconfig"
+	source "services/lis2hh12/Kconfig"
 	source "services/gpio-led/Kconfig"
 	source "services/pwm-beeper/Kconfig"
 	source "services/shtc3/Kconfig"
