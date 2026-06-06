@@ -522,6 +522,24 @@ menu "Communication server/client services"
 				default 500
 		endif
 
+		config SERVICE_MQ_COMPENSATION
+			bool "Polynomial offset/gain/nonlinearity and temperature compensation"
+			default y
+
+		if SERVICE_MQ_COMPENSATION
+			config SERVICE_MQ_COMPENSATION_MAX_TOPIC_LEN
+				int "Maximum length of the MQ topic"
+				default 32
+
+			config SERVICE_MQ_COMPENSATION_MAX_ORDER
+				int "Maximum order of the value correction polynomial"
+				default 3
+
+			config SERVICE_MQ_COMPENSATION_RXBUF_SAMPLES
+				int "Number of samples in the receive buffer"
+				default 8
+		endif
+
 		config SERVICE_MQ_BATCH
 			bool "MQ data batching service"
 			default y
