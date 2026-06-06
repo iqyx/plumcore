@@ -117,36 +117,46 @@ mcp3564_ret_t mcp3564_update(Mcp3564 *self) {
 
 
 mcp3564_ret_t mcp3564_check(Mcp3564 *self) {
+	(void)self;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_shutdown(Mcp3564 *self) {
+	(void)self;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_select_clock(Mcp3564 *self, enum mcp3564_clock_sel sel) {
+	(void)self;
+	(void)sel;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_set_sensor_bias(Mcp3564 *self, enum mcp3564_sensor_bias bias) {
+	(void)self;
+	(void)bias;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_set_mode(Mcp3564 *self, enum mcp3564_mode mode) {
+	(void)self;
+	(void)mode;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_set_prescaler(Mcp3564 *self, enum mcp3564_prescaler prescaler) {
+	(void)self;
+	(void)prescaler;
 
 	return MCP3564_RET_FAILED;
 }
@@ -160,6 +170,8 @@ mcp3564_ret_t mcp3564_set_osr(Mcp3564 *self, enum mcp3564_osr osr) {
 
 
 mcp3564_ret_t mcp3564_set_boost(Mcp3564 *self, enum mcp3564_boost boost) {
+	(void)self;
+	(void)boost;
 
 	return MCP3564_RET_FAILED;
 }
@@ -173,36 +185,48 @@ mcp3564_ret_t mcp3564_set_gain(Mcp3564 *self, enum mcp3564_gain gain) {
 
 
 mcp3564_ret_t mcp3564_set_azmux(Mcp3564 *self, bool en) {
+	(void)self;
+	(void)en;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_set_conversion_mode(Mcp3564 *self, enum mcp3564_conversion_mode mode) {
+	(void)self;
+	(void)mode;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_set_data_format(Mcp3564 *self, enum mcp3564_data_format data_format) {
+	(void)self;
+	(void)data_format;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_set_pad_crc_enable(Mcp3564 *self, bool en) {
+	(void)self;
+	(void)en;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_set_offcal_enable(Mcp3564 *self, bool en) {
+	(void)self;
+	(void)en;
 
 	return MCP3564_RET_FAILED;
 }
 
 
 mcp3564_ret_t mcp3564_set_gaincal_enable(Mcp3564 *self, bool en) {
+	(void)self;
+	(void)en;
 
 	return MCP3564_RET_FAILED;
 }
@@ -218,6 +242,8 @@ mcp3564_ret_t mcp3564_set_irq_mode(Mcp3564 *self, enum mcp3564_irq_mode mode) {
 
 
 mcp3564_ret_t mcp3564_set_irq_inactive(Mcp3564 *self, enum mcp3564_irq_inactive inactive) {
+	(void)self;
+	(void)inactive;
 
 	return MCP3564_RET_FAILED;
 }

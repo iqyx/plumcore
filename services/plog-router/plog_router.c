@@ -9,7 +9,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <time.h>
 
 #include "FreeRTOS.h"
@@ -46,7 +45,6 @@ static bool plog_router_match_topic(const char *filter, const char *topic) {
 
 	char last_filter = '\0';
 	while (true) {
-		printf("%c == %c\n", *filter, *topic);
 		if (*filter == '#' && *topic != '\0') {
 			topic++;
 			continue;
@@ -97,10 +95,23 @@ static mq_ret_t plog_router_mq_client_subscribe(MqClient *self, const char *filt
 	}
 	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
 
-	/* We are implementing a single topic filter only. Overwrite the old one. */
-	strlcpy(c->topic_filter, filter, PLOG_ROUTER_TOPIC_LEN_MAX);
+	/* Ignore a duplicate subscription to keep the filter set tidy. */
+	for (size_t i = 0; i < PLOG_ROUTER_FILTERS_MAX; i++) {
+		if (!strcmp(c->topic_filters[i], filter)) {
+			return MQ_RET_OK;
+		}
+	}
 
-	return MQ_RET_FAILED;
+	/* Store the filter in the first free slot. */
+	for (size_t i = 0; i < PLOG_ROUTER_FILTERS_MAX; i++) {
+		if (c->topic_filters[i][0] == '\0') {
+			strlcpy(c->topic_filters[i], filter, PLOG_ROUTER_TOPIC_LEN_MAX);
+			return MQ_RET_OK;
+		}
+	}
+
+	/* No free slot left. */
+	return MQ_RET_NO_MEM;
 }
 
 
@@ -111,7 +122,12 @@ static mq_ret_t plog_router_mq_client_unsubscribe(MqClient *self, const char *fi
 	}
 	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
 
-	c->topic_filter[0] = '\0';
+	for (size_t i = 0; i < PLOG_ROUTER_FILTERS_MAX; i++) {
+		if (!strcmp(c->topic_filters[i], filter)) {
+			c->topic_filters[i][0] = '\0';
+			return MQ_RET_OK;
+		}
+	}
 
 	return MQ_RET_FAILED;
 }
@@ -174,6 +190,17 @@ static mq_ret_t deliver_to_client(struct plog_router_mq_client *to, const char *
 }
 
 
+/* Return true if any of the client's subscribed filters matches the topic. */
+static bool plog_router_client_matches(const struct plog_router_mq_client *c, const char *topic) {
+	for (size_t i = 0; i < PLOG_ROUTER_FILTERS_MAX; i++) {
+		if (c->topic_filters[i][0] != '\0' && plog_router_match_topic(c->topic_filters[i], topic)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
 static mq_ret_t plog_router_mq_client_publish(MqClient *self, const char *topic, const struct ndarray *array, const struct timespec *ts) {
 	if (u_assert(self != NULL) ||
 	    u_assert(topic != NULL) ||
@@ -184,16 +211,17 @@ static mq_ret_t plog_router_mq_client_publish(MqClient *self, const char *topic,
 	Mq *mq = self->parent;
 	PlogRouter *plog = (PlogRouter *)mq->parent;
 
-	/** @todo */
 	struct plog_router_mq_client *c = plog->first_client;
 	while (c) {
-		if (plog_router_match_topic(c->topic_filter, topic)) {
+		/* Never deliver a message back to the publishing client. Delivery is synchronous and
+		 * the publishing task would deadlock waiting to receive from itself. */
+		if (&c->client != self && plog_router_client_matches(c, topic)) {
 			deliver_to_client(c, topic, array, ts);
 		}
 		c = (struct plog_router_mq_client *)c->client.next;
 	}
 
-	return MQ_RET_FAILED;
+	return MQ_RET_OK;
 }
 
 
@@ -204,7 +232,9 @@ static mq_ret_t plog_router_mq_client_close(MqClient *self) {
 
 	/** @todo not implemented */
 	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
-	c->topic_filter[0] = '\0';
+	for (size_t i = 0; i < PLOG_ROUTER_FILTERS_MAX; i++) {
+		c->topic_filters[i][0] = '\0';
+	}
 
 	return MQ_RET_OK;
 }
@@ -248,8 +278,7 @@ static MqClient *plog_router_open(Mq *self) {
 	memset(c, 0, sizeof(struct plog_router_mq_client));
 
 	/* Initialize parts needed by the implementing service (plog-router).
-	 * The client is not subscribed to anything yet. */
-	c->topic_filter[0] = '\0';
+	 * The client is not subscribed to anything yet (memset cleared all filter slots). */
 
 	c->msg_mutex = xSemaphoreCreateMutex();
 	c->send_lock = xQueueCreate(1, sizeof(struct plog_router_msg_send));

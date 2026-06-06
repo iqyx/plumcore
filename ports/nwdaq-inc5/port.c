@@ -12,81 +12,59 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include <libopencm3/stm32/rcc.h>
-#include <libopencm3/stm32/gpio.h>
-#include <libopencm3/stm32/timer.h>
-#include <libopencm3/stm32/usart.h>
-#include <libopencm3/stm32/spi.h>
-#include <libopencm3/cm3/scb.h>
-#include <libopencm3/cm3/systick.h>
-#include <libopencm3/cm3/nvic.h>
-#include <libopencm3/stm32/adc.h>
-#include <libopencm3/stm32/dac.h>
-#include <libopencm3/stm32/i2c.h>
-#include <libopencm3/stm32/exti.h>
-#include <libopencm3/stm32/flash.h>
-#include <libopencm3/stm32/fdcan.h>
+#include <stm32g4xx.h>
 
 #include <main.h>
 #include "port.h"
 
-#include "module_led.h"
-#include "interface_led.h"
-
 #include <interfaces/sensor.h>
 #include <interfaces/servicelocator.h>
-#include <interfaces/i2c-bus.h>
 #include <interfaces/stream.h>
 #include <interfaces/uart.h>
-#include <interfaces/adc.h>
 
-/* Low level drivers for th STM32G4 family */
-#include <services/stm32-system-clock/clock.h>
-#include <services/stm32-rtc/rtc.h>
-#include <services/stm32-i2c/stm32-i2c.h>
+/* Low level drivers for the STM32G4 family */
+#include <services/stm32-gpio/stm32-gpio.h>
 #include <services/stm32-spi/stm32-spi.h>
 #include <services/stm32-uart/stm32-uart.h>
-#include <services/stm32-adc/stm32-adc.h>
-#include <services/stm32-dac/stm32-dac.h>
-#include <services/stm32-watchdog/watchdog.h>
-
-/* High level drivers */
-#if !defined(CONFIG_APP_BL)
-	#include <services/stm32-clock/stm32-clock.h>
-	#include <services/generic-power/generic-power.h>
-	#include <services/adc-sensor/adc-sensor.h>
-	#include <services/iis2iclx/iis2iclx.h>
-#endif
+#include <services/adc-mcp3564/mcp3564.h>
 
 
 /**
  * Port specific global variables and singleton instances.
  */
 
-Watchdog watchdog;
+uint32_t SystemCoreClock;
 
-#if !defined(CONFIG_APP_BL)
-	Stm32Clock cmgr;
-#endif
+Stm32Gpio gpioa;
+Stm32Gpio gpiob;
+Stm32Gpio gpioc;
+
+
+/* Forward declarations for ISR handlers wired into the libopencm3 vector table. */
+void usart1_isr(void);
+void tim4_isr(void);
+void tim2_isr(void);
 
 
 int32_t port_early_init(void) {
-	rcc_periph_clock_enable(RCC_GPIOA);
-	rcc_periph_clock_enable(RCC_GPIOB);
-	rcc_periph_clock_enable(RCC_GPIOC);
-	rcc_periph_clock_enable(RCC_USART1);
-	rcc_periph_clock_enable(RCC_DAC1);
-	rcc_periph_clock_enable(RCC_SPI1);
-	rcc_periph_clock_enable(RCC_SPI3);
+	SystemCoreClock = 16e6;
+
+	RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN;
+	RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
+	RCC->AHB2ENR |= RCC_AHB2ENR_GPIOCEN;
+	RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+	RCC->AHB2ENR |= RCC_AHB2ENR_DAC1EN;
+	RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+	RCC->APB1ENR1 |= RCC_APB1ENR1_SPI3EN;
 
 	/* Timer 6 needs to be initialized prior to starting the scheduler. It is
 	 * used as a reference clock for getting task statistics. */
-	rcc_periph_clock_enable(RCC_TIM6);
+	RCC->APB1ENR1 |= RCC_APB1ENR1_TIM6EN;
 
 	/* ADC is used for PCB temperature measurement */
-	rcc_periph_clock_enable(RCC_ADC1);
-	/** @todo needed fo G4? */
-	RCC_CCIPR |= 3 << 28;
+	RCC->AHB2ENR |= RCC_AHB2ENR_ADC12EN;
+	/* Select SYSCLK as the ADC12 kernel clock source. */
+	RCC->CCIPR |= 3 << 28;
 
 	return PORT_EARLY_INIT_OK;
 }
@@ -99,17 +77,20 @@ int32_t port_early_init(void) {
 /** @todo unused, remove */
 Stm32Uart uart1;
 static void console_init(void) {
-	/* USART1 RX/TX */
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO6 | GPIO7);
-	gpio_set_output_options(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO6 | GPIO7);
-	gpio_set_af(GPIOB, GPIO_AF7, GPIO6 | GPIO7);
+	/* USART1 RX/TX on PB6/PB7, AF7. */
+	gpiob.pin[6].vmt->set_mode(&(gpiob.pin[6]), MODE_ALTERNATE);
+	gpiob.pin[6].vmt->set_pull(&(gpiob.pin[6]), PULL_UP);
+	gpiob.pin[6].vmt->set_pinmux(&(gpiob.pin[6]), 7);
+	gpiob.pin[7].vmt->set_mode(&(gpiob.pin[7]), MODE_ALTERNATE);
+	gpiob.pin[7].vmt->set_pull(&(gpiob.pin[7]), PULL_UP);
+	gpiob.pin[7].vmt->set_pinmux(&(gpiob.pin[7]), 7);
 
 	/* Initialise and configure the UART */
-	stm32_uart_init(&uart1, USART1);
+	stm32_uart_init(&uart1, (void *)USART1);
 	uart1.uart.vmt->set_bitrate(&uart1.uart, 115200);
 
-	nvic_enable_irq(NVIC_USART1_IRQ);
-	nvic_set_priority(NVIC_USART1_IRQ, 7 * 16);
+	NVIC_EnableIRQ(USART1_IRQn);
+	NVIC_SetPriority(USART1_IRQn, 7);
 
 	/* Advertise the console stream output and set it as default for log output. */
 	Stream *console = &uart1.stream;
@@ -126,23 +107,24 @@ void usart1_isr(void) {
 void vPortSetupTimerInterrupt(void);
 void vPortSetupTimerInterrupt(void) {
 	/* Initialize systick interrupt for FreeRTOS. */
-	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
-	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
-	systick_set_reload(16000UL - 1);
-	systick_interrupt_enable();
-	systick_counter_enable();
+	NVIC_SetPriority(SysTick_IRQn, 15);
+	SysTick->LOAD = 16000UL - 1;
+	SysTick->VAL = 0;
+	SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;
 }
 
 
 static void port_setup_default_gpio(void) {
 	/* MUX selection outputs. */
-	gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO2);
+	gpioa.pin[2].vmt->set_mode(&(gpioa.pin[2]), MODE_OUTPUT);
 
 	/* Excitation outputs. */
-	gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4 | GPIO5);
+	gpioa.pin[4].vmt->set_mode(&(gpioa.pin[4]), MODE_ANALOG);
+	gpioa.pin[5].vmt->set_mode(&(gpioa.pin[5]), MODE_ANALOG);
 
 	/* LEDs */
-	gpio_mode_setup(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO12 | GPIO13);
+	gpiob.pin[12].vmt->set_mode(&(gpiob.pin[12]), MODE_OUTPUT);
+	gpiob.pin[13].vmt->set_mode(&(gpiob.pin[13]), MODE_OUTPUT);
 }
 
 
@@ -150,43 +132,47 @@ static void port_setup_default_gpio(void) {
  * Liquid sensor excitation
  **********************************************************************************************************************/
 
-Stm32Dac dac1_1;
-Stm32Dac dac1_2;
-
 static void liquid_sensor_init(void) {
 
-	/* Enable excitation. */
-	stm32_dac_init(&dac1_1, DAC1, DAC_CHANNEL1);
-	stm32_dac_init(&dac1_2, DAC1, DAC_CHANNEL2);
-	dac1_1.dac_iface.vmt->set_single(&dac1_1.dac_iface, 0.35f);
-	dac1_2.dac_iface.vmt->set_single(&dac1_2.dac_iface, 0.65f);
+	/* Enable excitation. The two DAC channels output static levels of 0.35 and 0.65
+	 * of the full scale (12 bit right-aligned). */
+	DAC1->DHR12R1 = (uint16_t)(0.35f * 4095.0f);
+	DAC1->DHR12R2 = (uint16_t)(0.65f * 4095.0f);
+	DAC1->CR |= DAC_CR_EN1;
+	DAC1->CR |= DAC_CR_EN2;
 
-	rcc_periph_clock_enable(RCC_TIM4);
-	timer_disable_counter(TIM4);
-	timer_set_mode(TIM4, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
-	timer_disable_preload(TIM4);
-	timer_set_prescaler(TIM4, 16 - 1);
-	timer_continuous_mode(TIM4);
-	timer_set_period(TIM4, 2500 - 1);
+	RCC->APB1ENR1 |= RCC_APB1ENR1_TIM4EN;
 
-	timer_disable_oc_output(TIM4, TIM_OC3);
-	timer_disable_oc_preload(TIM4, TIM_OC3);
-	timer_set_oc_mode(TIM4, TIM_OC3, TIM_OCM_PWM1);
-	timer_set_oc_value(TIM4, TIM_OC3, 1250 - 1);
-	timer_enable_irq(TIM4, TIM_DIER_CC3IE);
+	TIM4->CR1 &= ~TIM_CR1_CEN;
+	/* Edge-aligned, up-counting, no clock division. */
+	TIM4->CR1 &= ~(TIM_CR1_CKD | TIM_CR1_CMS | TIM_CR1_DIR);
+	TIM4->CR1 &= ~TIM_CR1_ARPE;
+	TIM4->PSC = 16 - 1;
+	TIM4->CR1 &= ~TIM_CR1_OPM;
+	TIM4->ARR = 2500 - 1;
 
-	timer_disable_oc_output(TIM4, TIM_OC4);
-	timer_disable_oc_preload(TIM4, TIM_OC4);
-	timer_set_oc_mode(TIM4, TIM_OC4, TIM_OCM_PWM1);
-	timer_set_oc_value(TIM4, TIM_OC4, 2300 - 1);
-	timer_enable_irq(TIM4, TIM_DIER_CC4IE);
+	/* OC3 and OC4 are used purely as compare-match time references for the measurement
+	 * sequence; the output stages stay disabled. */
+	TIM4->CCER &= ~TIM_CCER_CC3E;
+	TIM4->CCMR2 &= ~TIM_CCMR2_OC3PE;
+	TIM4->CCMR2 &= ~TIM_CCMR2_OC3M;
+	TIM4->CCMR2 |= TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2;
+	TIM4->CCR3 = 1250 - 1;
+	TIM4->DIER |= TIM_DIER_CC3IE;
+
+	TIM4->CCER &= ~TIM_CCER_CC4E;
+	TIM4->CCMR2 &= ~TIM_CCMR2_OC4PE;
+	TIM4->CCMR2 &= ~TIM_CCMR2_OC4M;
+	TIM4->CCMR2 |= TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4M_2;
+	TIM4->CCR4 = 2300 - 1;
+	TIM4->DIER |= TIM_DIER_CC4IE;
 
 	/* Enable toggling of the excitation outputs. */
-	timer_enable_irq(TIM4, TIM_DIER_UIE);
+	TIM4->DIER |= TIM_DIER_UIE;
 
-	nvic_enable_irq(NVIC_TIM4_IRQ);
-	nvic_set_priority(NVIC_TIM4_IRQ, 5 * 16);
-	timer_enable_counter(TIM4);
+	NVIC_EnableIRQ(TIM4_IRQn);
+	NVIC_SetPriority(TIM4_IRQn, 5);
+	TIM4->CR1 |= TIM_CR1_CEN;
 
 }
 
@@ -200,7 +186,6 @@ Stm32SpiDev spi1_adc;
 Mcp3564 mcp;
 SemaphoreHandle_t adc_meas;
 SemaphoreHandle_t adc_ready;
-SemaphoreHandle_t value_ready;
 SemaphoreHandle_t adc_new_cycle;
 
 #define MUX_CH_INC_X MCP3564_MUX_CH0
@@ -216,7 +201,72 @@ int32_t adc_avg[2];
 
 volatile uint32_t adc_cycle = 0;
 
+
+/**********************************************************************************************************************
+ * Sensor interface abstraction over the inclination and temperature values
+ **********************************************************************************************************************/
+
+static float adc_to_ntc(int32_t adc, float ref) {
+	return ref * (adc + 8388608.0f) / (16777215.0f - (adc + 8388608.0f));
+}
+
+
+static float ntc_to_temp(float ntc, float beta, float ref) {
+	return 1.0f / (1.0f / (25.0f + 273.15f) + (1.0f / beta) * log(ntc / ref)) - 273.15f;
+}
+
+
+/* A single measured quantity exported as a Sensor interface. The ADC task stores the latest
+ * converted value into @p value and gives the @p ready semaphore once per measurement cycle.
+ * A reader blocks in value_f on @p ready until the next measurement becomes available. Each
+ * sensor has its own semaphore so all of them can be read at the full measurement rate. */
+typedef struct {
+	Sensor sensor;
+	SemaphoreHandle_t ready;
+	float value;
+} Inc5Sensor;
+
+static sensor_ret_t inc5_sensor_value_f(Sensor *sensor, float *value) {
+	Inc5Sensor *self = sensor->parent;
+
+	/* Wait for the next measurement to become available. */
+	if (xSemaphoreTake(self->ready, portMAX_DELAY) != pdTRUE) {
+		return SENSOR_RET_FAILED;
+	}
+	if (value != NULL) {
+		*value = self->value;
+	}
+	return SENSOR_RET_OK;
+}
+
+static const struct sensor_vmt inc5_sensor_vmt = {
+	.value_f = inc5_sensor_value_f,
+};
+
+static const struct sensor_info inc_x_sensor_info = {
+	.description = "single-axis inclination",
+	.unit = "LSB",
+};
+
+static const struct sensor_info temp_x_sensor_info = {
+	.description = "PCB temperature",
+	.unit = "°C",
+};
+
+Inc5Sensor inc_x_sensor;
+Inc5Sensor temp_x_sensor;
+
+static void inc5_sensor_init(Inc5Sensor *self, const struct sensor_info *info) {
+	self->value = 0.0f;
+	self->ready = xSemaphoreCreateBinary();
+	self->sensor.vmt = &inc5_sensor_vmt;
+	self->sensor.info = info;
+	self->sensor.parent = self;
+}
+
+
 static void adc_task(void *p) {
+	(void)p;
 
 	while (true) {
 		uint8_t status = 0;
@@ -235,7 +285,6 @@ static void adc_task(void *p) {
 
 		/* Wait for the right time to start the measurement. */
 		xSemaphoreTake(adc_meas, portMAX_DELAY);
-		//gpio_set(GPIOB, GPIO2);
 		mcp3564_send_cmd(&mcp, MCP3564_CMD_START, &status, NULL, 0, NULL, 0);
 
 		/* Wait until data ready arrives. */
@@ -255,8 +304,15 @@ static void adc_task(void *p) {
 				adc_value[i] = 0;
 			}
 
-			gpio_toggle(GPIOB, GPIO12);
-			xSemaphoreGive(value_ready);
+			gpiob.pin[12].vmt->toggle(&(gpiob.pin[12]));
+
+			/* Convert the raw accumulators and expose them through the Sensor interfaces.
+			 * Give each sensor its own semaphore so both can be read at the full rate. */
+			inc_x_sensor.value = adc_avg[0] / 256.0f;
+			xSemaphoreGive(inc_x_sensor.ready);
+
+			temp_x_sensor.value = ntc_to_temp(adc_to_ntc(adc_avg[1], 10000.0f), 3977.0f, 10000.0f);
+			xSemaphoreGive(temp_x_sensor.ready);
 		}
 	}
 	vTaskDelete(NULL);
@@ -264,17 +320,20 @@ static void adc_task(void *p) {
 
 
 static void adc_init(void) {
-	gpio_mode_setup(GPIOA, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO6 | GPIO7);
-	gpio_set_af(GPIOA, GPIO_AF5, GPIO6 | GPIO7);
-	gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO3);
-	gpio_set_af(GPIOB, GPIO_AF5, GPIO3);
-	gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO4);
+	/* SPI1 on PA6/PA7 and PB3, AF5. */
+	gpioa.pin[6].vmt->set_mode(&(gpioa.pin[6]), MODE_ALTERNATE);
+	gpioa.pin[6].vmt->set_pinmux(&(gpioa.pin[6]), 5);
+	gpioa.pin[7].vmt->set_mode(&(gpioa.pin[7]), MODE_ALTERNATE);
+	gpioa.pin[7].vmt->set_pinmux(&(gpioa.pin[7]), 5);
+	gpiob.pin[3].vmt->set_mode(&(gpiob.pin[3]), MODE_ALTERNATE);
+	gpiob.pin[3].vmt->set_pinmux(&(gpiob.pin[3]), 5);
 
-	stm32_spibus_init(&spi1, SPI1);
+	stm32_spibus_init(&spi1, (void *)SPI1, STM32_SPI_PER_TYPE_SPI);
 	spi1.bus.vmt->set_sck_freq(&spi1.bus, 4e6);
 	spi1.bus.vmt->set_mode(&spi1.bus, 0, 0);
 
-	stm32_spidev_init(&spi1_adc, &spi1.bus, GPIOC, GPIO4);
+	/* Chip select on PC4, configured and driven by the SPI device driver. */
+	stm32_spidev_init(&spi1_adc, &spi1.bus, &(gpioc.pin[4]));
 
 	mcp3564_init(&mcp, &(spi1_adc.dev));
 	mcp3564_set_stp_enable(&mcp, false);
@@ -287,7 +346,6 @@ static void adc_init(void) {
 
 	adc_meas = xSemaphoreCreateBinary();
 	adc_ready = xSemaphoreCreateBinary();
-	value_ready = xSemaphoreCreateBinary();
 	adc_new_cycle = xSemaphoreCreateBinary();
 	xTaskCreate(adc_task, "adc-task", configMINIMAL_STACK_SIZE + 256, NULL, 2, NULL);
 
@@ -295,32 +353,32 @@ static void adc_init(void) {
 
 
 void tim4_isr(void) {
-	if (timer_get_flag(TIM4, TIM_SR_CC3IF)) {
-		timer_clear_flag(TIM4, TIM_SR_CC3IF);
+	if (TIM4->SR & TIM_SR_CC3IF) {
+		TIM4->SR &= ~TIM_SR_CC3IF;
 
 		BaseType_t woken = pdFALSE;
 		xSemaphoreGiveFromISR(adc_meas, &woken);
 		portYIELD_FROM_ISR(woken);
 	}
 
-	if (timer_get_flag(TIM4, TIM_SR_CC4IF)) {
-		timer_clear_flag(TIM4, TIM_SR_CC4IF);
+	if (TIM4->SR & TIM_SR_CC4IF) {
+		TIM4->SR &= ~TIM_SR_CC4IF;
 
 		BaseType_t woken = pdFALSE;
 		xSemaphoreGiveFromISR(adc_ready, &woken);
 		portYIELD_FROM_ISR(woken);
 	}
 
-	if (timer_get_flag(TIM4, TIM_SR_UIF)) {
-		timer_clear_flag(TIM4, TIM_SR_UIF);
+	if (TIM4->SR & TIM_SR_UIF) {
+		TIM4->SR &= ~TIM_SR_UIF;
 
 		adc_cycle++;
 
 		/* Alternate the excitation outputs. Must happen regardless of the measurement sequence. */
 		if (adc_cycle % 2) {
-			gpio_set(GPIOA, GPIO2);
+			gpioa.pin[2].vmt->set(&(gpioa.pin[2]), true);
 		} else {
-			gpio_clear(GPIOA, GPIO2);
+			gpioa.pin[2].vmt->set(&(gpioa.pin[2]), false);
 		}
 
 		BaseType_t woken = pdFALSE;
@@ -333,44 +391,24 @@ void tim4_isr(void) {
 }
 
 
-static float adc_to_ntc(int32_t adc, float ref) {
-	return ref * (adc + 8388608.0f) / (16777215.0f - (adc + 8388608.0f));
-}
-
-
-static float ntc_to_temp(float ntc, float beta, float ref) {
-	return 1.0f / (1.0f / (25.0f + 273.15f) + (1.0f / beta) * log(ntc / ref)) - 273.15f;
-}
-
-
-int _write(int handle, char *data, int size) {
-	(void)handle;
-
-	uart1.stream.vmt->write(&uart1.stream, (void *)data, size);
-
-	return size;
-}
-
-
 int32_t port_init(void) {
+	stm32_gpio_init(&gpioa, (void *)0x48000000);
+	stm32_gpio_init(&gpiob, (void *)0x48000400);
+	stm32_gpio_init(&gpioc, (void *)0x48000800);
+
 	port_setup_default_gpio();
 	console_init();
 
 	#if !defined(CONFIG_APP_BL)
+		inc5_sensor_init(&inc_x_sensor, &inc_x_sensor_info);
+		inc5_sensor_init(&temp_x_sensor, &temp_x_sensor_info);
 
-	#endif
-
-	//watchdog_init(&watchdog, 8000, 1);
-
-	#if !defined(CONFIG_APP_BL)
 		adc_init();
 		liquid_sensor_init();
 
-		while (true) {
-			xSemaphoreTake(value_ready, portMAX_DELAY);
-			float temp_x = ntc_to_temp(adc_to_ntc(adc_avg[1], 10000.0f), 3977.0f, 10000.0f);
-			printf("$INC1,X,%ld,%.3f*00\r\n", adc_avg[0] / 256, temp_x);
-		}
+		/* Advertise the inclination and temperature sensors so the application can read them. */
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&inc_x_sensor.sensor, "inc_x");
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&temp_x_sensor.sensor, "temp_x");
 	#endif
 
 	return PORT_INIT_OK;
@@ -378,8 +416,8 @@ int32_t port_init(void) {
 
 
 void tim2_isr(void) {
-	if (TIM_SR(TIM2) & TIM_SR_UIF) {
-		timer_clear_flag(TIM2, TIM_SR_UIF);
+	if (TIM2->SR & TIM_SR_UIF) {
+		TIM2->SR &= ~TIM_SR_UIF;
 		// system_clock_overflow_handler(&system_clock);
 	}
 }
@@ -388,18 +426,16 @@ void tim2_isr(void) {
 /* Configure dedicated timer (TIM6) for runtime task statistics. It should be later
  * redone to use one of the system monotonic clocks with interface_clock. */
 void port_task_timer_init(void) {
-	rcc_periph_reset_pulse(RST_TIM6);
+	RCC->APB1RSTR1 |= RCC_APB1RSTR1_TIM6RST;
+	RCC->APB1RSTR1 &= ~RCC_APB1RSTR1_TIM6RST;
 	/* The timer should run at 1MHz */
-	timer_set_prescaler(TIM6, 16 - 1);
-	timer_continuous_mode(TIM6);
-	timer_set_period(TIM6, UINT16_MAX);
-	timer_enable_counter(TIM6);
+	TIM6->PSC = 16 - 1;
+	TIM6->CR1 &= ~TIM_CR1_OPM;
+	TIM6->ARR = UINT16_MAX;
+	TIM6->CR1 |= TIM_CR1_CEN;
 }
 
 
 uint32_t port_task_timer_get_value(void) {
-	return timer_get_counter(TIM6);
+	return TIM6->CNT;
 }
-
-
-

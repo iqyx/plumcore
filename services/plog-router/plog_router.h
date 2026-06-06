@@ -19,6 +19,7 @@
 
 
 #define PLOG_ROUTER_TOPIC_LEN_MAX 64
+#define PLOG_ROUTER_FILTERS_MAX 8
 #define PLOG_ROUTER_RX_TIMEOUT_MS_DEFAULT 500
 
 typedef enum {
@@ -40,8 +41,9 @@ struct plog_router_msg_recv {
 
 struct plog_router_mq_client {
 	MqClient client;
-	/* We support one topic filter per client so far. */
-	char topic_filter[PLOG_ROUTER_TOPIC_LEN_MAX];
+	/* A client may subscribe to multiple topic filters at once. A message is delivered if it
+	 * matches any of them. Empty slots hold an empty string. */
+	char topic_filters[PLOG_ROUTER_FILTERS_MAX][PLOG_ROUTER_TOPIC_LEN_MAX];
 	uint32_t rx_timeout_ms;
 
 	SemaphoreHandle_t msg_mutex;

@@ -42,11 +42,12 @@ static spi_ret_t stm32_spibus_send(SpiBus *spibus, const uint8_t *txbuf, size_t 
 			while (!(base->SR & SPI_SR_TXE)) {
 				continue;
 			}
-			*(volatile uint8_t *)&base->DR = txbuf[i];
+			volatile uint8_t *dr = (volatile uint8_t *)&base->DR;
+			*dr = txbuf[i];
 			while (!(base->SR & SPI_SR_RXNE)) {
 				continue;
 			}
-			(void)*(volatile uint8_t *)&base->DR;
+			(void)*dr;
 		#elif defined(STM32H7)
 			while (!(base->SR & SPI_SR_TXC)) {
 				continue;
@@ -74,11 +75,12 @@ static spi_ret_t stm32_spibus_receive(SpiBus *spibus, uint8_t *rxbuf, size_t rxl
 			while (!(base->SR & SPI_SR_TXE)) {
 				continue;
 			}
-			*(volatile uint8_t *)&base->DR = 0x00;
+			volatile uint8_t *dr = (volatile uint8_t *)&base->DR;
+			*dr = 0x00;
 			while (!(base->SR & SPI_SR_RXNE)) {
 				continue;
 			}
-			rxbuf[i] = *(volatile uint8_t *)&base->DR;
+			rxbuf[i] = *dr;
 		#elif defined(STM32H7)
 			while (!(base->SR & SPI_SR_TXC)) {
 				continue;
@@ -100,8 +102,8 @@ static spi_ret_t stm32_spibus_exchange(SpiBus *spibus, const uint8_t *txbuf, uin
 	Stm32SpiBus *self = (Stm32SpiBus *)spibus->parent;
 
 	if (self->per_type == STM32_SPI_PER_TYPE_UART) {
-		USART_TypeDef *base = (USART_TypeDef *)self->base;
 		#if defined(STM32H7)
+			USART_TypeDef *base = (USART_TypeDef *)self->base;
 			for (size_t i = 0; i < len; i++) {
 				while (!(base->ISR & USART_ISR_TXE_TXFNF)) {
 					continue;
@@ -126,11 +128,12 @@ static spi_ret_t stm32_spibus_exchange(SpiBus *spibus, const uint8_t *txbuf, uin
 				while (!(base->SR & SPI_SR_TXE)) {
 					continue;
 				}
-				*(volatile uint8_t *)&base->DR = txbuf[i];
+				volatile uint8_t *dr = (volatile uint8_t *)&base->DR;
+				*dr = txbuf[i];
 				while (!(base->SR & SPI_SR_RXNE)) {
 					continue;
 				}
-				rxbuf[i] = *(volatile uint8_t *)&base->DR;
+				rxbuf[i] = *dr;
 			}
 
 		#elif defined(STM32H7)
@@ -341,6 +344,8 @@ stm32_spi_ret_t stm32_spibus_irq_handler(Stm32SpiBus *self) {
 				portYIELD_FROM_ISR(woken);
 			}
 		}
+	#elif defined(STM32G4)
+		(void)self;
 	#endif
 
 	return STM32_SPI_RET_OK;
