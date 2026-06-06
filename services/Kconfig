@@ -578,6 +578,7 @@ menu "Communication protocols"
 
 	menu "Presentation layer protocols"
 		source "services/proto-stream/Kconfig"
+		source "services/proto-dgtext/Kconfig"
 	endmenu
 
 	menu "Application layer protocols"

@@ -1,0 +1,8 @@
+config SERVICE_PROTO_DGTEXT
+	bool "Transport of arbitrary datagrams over a Stream as plain text lines"
+	default n
+
+	config SERVICE_PROTO_DGTEXT_MAX_DATAGRAM_LEN
+		int "Maximum datagram payload size (bytes)"
+		default 256
+		depends on SERVICE_PROTO_DGTEXT
