@@ -10,16 +10,13 @@
 
 #include <stdint.h>
 #include <main.h>
-#include <interfaces/stream.h>
 #include <interfaces/datagram.h>
 #include "blake2s-siv.h"
 
 
-#define NBUS_TIMEOUT_MS 1
 #define NBUS_PBUF_COUNT 4
 #define NBUS_PBUF_DATA_SIZE 1050
 #define NBUS_SOCKET_COUNT 8
-#define NBUS_SOCKET_TX_QUEUE_LEN 2
 #define NBUS_SOCKET_RX_QUEUE_LEN 2
 
 /** Key length in bytes for packet encryption. */
@@ -45,7 +42,6 @@ struct nbus_socket {
 	Nbus *parent;
 	Datagram datagram;
 
-	QueueHandle_t tx_queue;
 	QueueHandle_t rx_queue;
 
 	uint8_t local_id[4];
@@ -109,7 +105,7 @@ struct nbus_pbuf {
 };
 
 typedef struct nbus {
-	Stream *stream;
+	Datagram *dgram;
 	const uint8_t *mac_key;
 	size_t mac_key_len;
 
@@ -119,13 +115,17 @@ typedef struct nbus {
 	SemaphoreHandle_t socket_lock;
 	struct nbus_socket sockets[NBUS_SOCKET_COUNT];
 
-	TaskHandle_t mac_task;
+	/* Serializes the transmit path (sequence counter + encryption + medium write) as packets are
+	 * sent directly in the context of the calling thread. */
+	SemaphoreHandle_t tx_lock;
+
+	TaskHandle_t rx_task;
 	TaskHandle_t hk_task;
 
 } Nbus;
 
 
-nbus_ret_t nbus_init(Nbus *self, Stream *stream);
+nbus_ret_t nbus_init(Nbus *self, Datagram *dgram);
 nbus_ret_t nbus_set_mac_key(Nbus *self, const uint8_t *mac_key, size_t mac_key_len);
 
 struct nbus_pbuf *nbus_pbuf_allocate(Nbus *self);

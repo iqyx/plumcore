@@ -10,8 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <interfaces/stream.h>
-#include <libopencm3/stm32/gpio.h>
+#include <interfaces/datagram.h>
 #include <main.h>
 #include "nbus2.h"
 #include <blake2s.h>
@@ -46,125 +45,37 @@ uint16_t nbus_tx_counter = 0;
  * the packet. Then a variable number of variably sized extension headers follow.
  * Headers are padded to 4 bytes. Data follows, padded to 4 bytes.
  *
- * Packets are framed using an interpacket gap of at least 3 bytes.
- *
- * MAC is of a CSMA/CD type. When a reception is ongoing, no transmission is
- * allowed. When the MAC senses free medium, it starts transmitting a packet
- * if requested to do so. A variable length (3-11 bytes) interpacket gap is added
- * between packets to avoid transmitting all pending packets at the same time
- * once the previous transmission is completed.
+ * Medium access and framing of packets onto the physical medium are not handled
+ * here. This driver depends on a Datagram interface which delivers and accepts
+ * whole nbus2 packets. Framing the packets onto a byte stream (eg. an UART) is
+ * the responsibility of the underlying service providing that Datagram.
  */
 
 
-static void marker(uint32_t port, uint32_t pin, bool len) {
-	gpio_set(port, pin);
-	if (len) {
-		vTaskDelay(1);
-	} else {
-		for (int i = 0; i < 1000; i++) {
-			;
-		}
-	}
-	gpio_clear(port, pin);
-}
-
-
 /**
- * @brief Receive exact number of bytes from the input stream
+ * @brief Receive and validate a single nbus2 packet from the medium
  *
- * This is a wrapper for the Stream::read() method which doesn't wait for the requested
- * number of bytes to be received. For protocol parsing, we need to be sure we received
- * the exact number of bytes as we requested (and eventually wait until we do).
- */
-static nbus_ret_t stream_receive_expect(Nbus *self, uint8_t *buf, size_t size) {
-	size_t i = 0;
-
-	//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("receive %d bytes"), size);
-	while (i < size) {
-
-		/** @todo Do not read too much. Must be less then the source stream buffer size (FreeRTOS StreamBuffer).
-		 *        @see https://forums.freertos.org/t/how-to-deal-with-this-scenario-about-messagebuffer/8386/8 */
-		size_t read = 0;
-		size_t to_read = size - i;
-		if (to_read > 64) {
-			to_read = 64;
-		}
-		stream_ret_t ret = self->stream->vmt->read_timeout(self->stream, &(buf[i]), to_read, &read, NBUS_TIMEOUT_MS);
-		//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("ret %d, read %d"), ret, read);
-
-		if (ret == STREAM_RET_OK) {
-			/* All good, move on in the buffer. */
-			i += read;
-		} else if (ret == STREAM_RET_TIMEOUT) {
-			return NBUS_RET_TIMEOUT;
-		} else {
-			/* Something wrong, EOF, EOT or whatever. */
-			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("stream_receive_expect: no-OK %d"), ret);
-			return NBUS_RET_FAILED;
-		}
-	}
-	return NBUS_RET_OK;
-}
-
-
-/**
- * @brief Wait for any gap in the input stream
+ * A whole packet/datagram is read from the underlying Datagram interface into the packet buffer.
+ * The fixed 16 byte header is decrypted and its magic checked, then the payload is decrypted and
+ * authenticated against the SIV from the message.
  *
- * This function is used whenever the MAC loses framing. It waits for a timeout
- * (no further transmission ongoing), EOT (end of current packet encountered)
- * or simply any other fail. It basically consumes any continuous stream of data.
- */
-static nbus_ret_t stream_wait_for_eot(Nbus *self) {
-	uint8_t buf[8];
-	//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("wait for EOT"));
-	while (self->stream->vmt->read_timeout(self->stream, buf, sizeof(buf), NULL, 1) == STREAM_RET_OK) {
-		;
-	}
-	return NBUS_RET_OK;
-}
-
-
-static nbus_ret_t pbuf_receive_expect(Nbus *self, struct nbus_pbuf *pbuf, size_t len) {
-	if ((pbuf->buf_len + len) > pbuf->buf_size) {
-		stream_wait_for_eot(self);
-		return NBUS_RET_FAILED;
-	}
-
-	nbus_ret_t ret = stream_receive_expect(self, pbuf->buf + pbuf->buf_len, len);
-	if (ret == NBUS_RET_TIMEOUT) {
-		/* Nothing received. */
-		return NBUS_RET_TIMEOUT;
-	} else if (ret != NBUS_RET_OK) {
-		/* Some other non-OK return value means we cannot do much more here.
-		 * Try to regain framing. */
-		stream_wait_for_eot(self);
-		return NBUS_RET_FAILED;
-	}
-
-	pbuf->buf_len += len;
-	return NBUS_RET_OK;
-}
-
-
-/**
- * @brief Receive and validate the fixed header
- *
- * Read the beginning of the packet containing the fixed 16 byte header.
- * It consists of:
+ * The packet consists of:
  * - 8 byte SIV (synthetic IV) used for data authentication and encryption
  * - 8 byte fixed header with a packet magic number, length and flags
  * - 8 byte fixed ID header
- *
- * @todo The function takes 232 us to run, with chacha20 decryption 116 us.
- *       Key derivation alone is 80 us but it is done only once.
- *       Chacha20 decryption alone is 38 us.
+ * - the (optional) packet payload
  */
-static nbus_ret_t nbus_pbuf_receive_header(struct nbus_pbuf *self, Nbus *nbus) {
-	if (pbuf_receive_expect(nbus, self, 24) != NBUS_RET_OK) {
-		//u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("bad header recv"));
+static nbus_ret_t nbus_pbuf_receive(struct nbus_pbuf *self, Nbus *nbus) {
+	size_t len = self->buf_size;
+	if (nbus->dgram->vmt->read(nbus->dgram, self->buf, &len, NULL) != DATAGRAM_RET_OK) {
 		return NBUS_RET_FAILED;
 	}
-	//u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("ke = 0x%02x 0x%02x"), pbuf->ke[0], pbuf->ke[1]);
+	self->buf_len = len;
+
+	/* A valid packet always carries at least the fixed 24 byte header. */
+	if (self->buf_len < 24) {
+		return NBUS_RET_FAILED;
+	}
 
 	/* Decrypt the header. */
 	ChaCha20 ch;
@@ -177,31 +88,24 @@ static nbus_ret_t nbus_pbuf_receive_header(struct nbus_pbuf *self, Nbus *nbus) {
 		return NBUS_RET_FAILED;
 	}
 
-	return NBUS_RET_OK;
-}
-
-
-static nbus_ret_t nbus_pbuf_receive_data(struct nbus_pbuf *self, Nbus *nbus) {
+	/* The payload length is encoded in the header. It must match what was actually received. Trailing
+	 * bytes beyond the declared length (if any) are discarded so the MAC is computed over the exact
+	 * same range as on transmission. */
 	size_t packet_len = self->buf[10] << 8 | self->buf[11];
-	if (packet_len == 0) {
-		/* Zero length packet is valid, do not read anything. */
-		return NBUS_RET_OK;
-	}
-	if (pbuf_receive_expect(nbus, self, packet_len) != NBUS_RET_OK) {
+	if ((24 + packet_len) > self->buf_len) {
 		return NBUS_RET_FAILED;
 	}
+	self->buf_len = 24 + packet_len;
 
-	//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("received packet data len %u"), packet_len);
-	//u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("data 0x%02x, 0x%02x, 0x%02x, 0x%02x"), pbuf->buf[24], pbuf->buf[25], pbuf->buf[26], pbuf->buf[27]);
-
-	/* Decrypt data only, headers are already decrypted. */
-	ChaCha20 ch;
-	chacha20_keysetup(&ch, self->ke, 128);
-	chacha20_nonce(&ch, self->buf);
-	/* Consume first counter. */
-	uint8_t foo[8] = {0};
-	chacha20_encrypt(&ch, foo, foo, sizeof(foo));
-	chacha20_encrypt(&ch, self->buf + 24, self->buf + 24, packet_len);
+	if (packet_len > 0) {
+		/* Decrypt data only, headers are already decrypted. */
+		chacha20_keysetup(&ch, self->ke, 128);
+		chacha20_nonce(&ch, self->buf);
+		/* Consume first counter. */
+		uint8_t foo[8] = {0};
+		chacha20_encrypt(&ch, foo, foo, sizeof(foo));
+		chacha20_encrypt(&ch, self->buf + 24, self->buf + 24, packet_len);
+	}
 
 	/* Compute MAC from header and data. Compare with the SIV from the message. */
 	uint8_t mac[8];
@@ -247,7 +151,7 @@ static nbus_ret_t nbus_pbuf_transmit(struct nbus_pbuf *self, Nbus *nbus) {
 	/* Counter is incremented, the rest of the input is kept. Encrypt the data. */
 	chacha20_encrypt(&ch, self->buf + 24, self->buf + 24, self->buf_len - 24);
 
-	if (nbus->stream->vmt->write(nbus->stream, self->buf, self->buf_len) != STREAM_RET_OK) {
+	if (nbus->dgram->vmt->write(nbus->dgram, self->buf, self->buf_len, NULL) != DATAGRAM_RET_OK) {
 		return NBUS_RET_FAILED;
 	}
 
@@ -294,27 +198,6 @@ static nbus_ret_t nbus_pbuf_dispatch(Nbus *self, struct nbus_pbuf *pbuf) {
 }
 
 
-static struct nbus_pbuf *nbus_pbuf_collect_one(Nbus *self) {
-	if (xSemaphoreTake(self->socket_lock, 0) != pdTRUE) {
-		return NULL;
-	}
-
-	for (size_t i = 0; i < NBUS_SOCKET_COUNT; i++) {
-		if (self->sockets[i].used && self->sockets[i].enabled) {
-			struct nbus_pbuf *pbuf = NULL;
-			if (xQueueReceive(self->sockets[i].tx_queue, &pbuf, 0) != pdTRUE) {
-				continue;
-			}
-			xSemaphoreGive(self->socket_lock);
-			return pbuf;
-		}
-	}
-
-	xSemaphoreGive(self->socket_lock);
-	return NULL;
-}
-
-
 static void addr_to_str(uint8_t addr[4], char *s, size_t size) {
 	snprintf(s, size, "0x%02x%02x%02x%02x", addr[0], addr[1], addr[2], addr[3]);
 }
@@ -332,39 +215,24 @@ static void print_pbuf(Nbus *self, struct nbus_pbuf *pbuf, const char *prefix) {
 }
 */
 
-static void nbus_mac_task(void *p) {
+static void nbus_rx_task(void *p) {
 	Nbus *self = (Nbus *)p;
 
 	while (true) {
 		struct nbus_pbuf *pbuf = nbus_pbuf_allocate(self);
 		if (pbuf == NULL) {
-			/* Cannot allocate a buffer, we must drop the packet. Wait at least for EOT,
-			 * also yielding allowing other tasks to run. */
-			stream_wait_for_eot(self);
+			/* Cannot allocate a buffer, we must drop the packet. Yield to let other tasks run
+			 * (and packet buffers be released) before trying again. */
+			vTaskDelay(1);
 			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("buffer allocation error"));
 			continue;
 		}
 
-		nbus_ret_t ret = nbus_pbuf_receive_header(pbuf, self);
-		if (ret == NBUS_RET_OK) {
-			ret = nbus_pbuf_receive_data(pbuf, self);
-			if (ret == NBUS_RET_OK) {
-				/* End of packet. No additional data should be in the receive buffer.
-				 * Dispatch the received packet to the right socket, optionally discard the packet
-				 * if there is no suitable socket bound. Give up the pbuf ownership. */
-				nbus_pbuf_dispatch(self, pbuf);
-			}
-		}
-		/* Do not do 'else'! This must catch wrong status 'ret' from both inner conditions. */
-		if (ret != NBUS_RET_OK) {
-			nbus_pbuf_release(self, pbuf);
-		}
-
-		pbuf = nbus_pbuf_collect_one(self);
-		if (pbuf != NULL) {
-			/* Transmit and consume echo until EOT, we are not interested in the echo now. */
-			nbus_pbuf_transmit(pbuf, self);
-			stream_wait_for_eot(self);
+		if (nbus_pbuf_receive(pbuf, self) == NBUS_RET_OK) {
+			/* Dispatch the received packet to the right socket, optionally discard the packet
+			 * if there is no suitable socket bound. Give up the pbuf ownership. */
+			nbus_pbuf_dispatch(self, pbuf);
+		} else {
 			nbus_pbuf_release(self, pbuf);
 		}
 	}
@@ -429,12 +297,16 @@ static datagram_ret_t nbus_socket_write(Datagram *datagram, const void *buf, siz
 	memcpy(pbuf->buf + 24, buf, len);
 	pbuf->buf_len = len + 24;
 
-	if (xQueueSend(self->tx_queue, &pbuf, 0) != pdTRUE) {
-		nbus_pbuf_release(self->parent, pbuf);
-		return DATAGRAM_RET_FAILED;
-	}
+	/* Encrypt and transmit the packet directly in the caller context. The tx lock serializes the
+	 * sequence counter and the medium writes across concurrent senders; the underlying Datagram
+	 * interface takes care of framing the packet onto the medium and the inter-frame gap. */
+	xSemaphoreTake(self->parent->tx_lock, portMAX_DELAY);
+	nbus_ret_t ret = nbus_pbuf_transmit(pbuf, self->parent);
+	xSemaphoreGive(self->parent->tx_lock);
 
-	return DATAGRAM_RET_OK;
+	nbus_pbuf_release(self->parent, pbuf);
+
+	return (ret == NBUS_RET_OK) ? DATAGRAM_RET_OK : DATAGRAM_RET_FAILED;
 }
 
 
@@ -484,9 +356,9 @@ static const struct datagram_vmt nbus_socket_vmt = {
 
 
 
-nbus_ret_t nbus_init(Nbus *self, Stream *stream) {
+nbus_ret_t nbus_init(Nbus *self, Datagram *dgram) {
 	memset(self, 0, sizeof(Nbus));
-	self->stream = stream;
+	self->dgram = dgram;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialize protocol driver"));
 
@@ -514,20 +386,25 @@ nbus_ret_t nbus_init(Nbus *self, Stream *stream) {
 		goto err;
 	}
 	for (size_t i = 0; i < NBUS_SOCKET_COUNT; i++) {
-		self->sockets[i].tx_queue = xQueueCreate(NBUS_SOCKET_TX_QUEUE_LEN, sizeof(struct nbus_pbuf *));
 		self->sockets[i].rx_queue = xQueueCreate(NBUS_SOCKET_RX_QUEUE_LEN, sizeof(struct nbus_pbuf *));
-		if (self->sockets[i].tx_queue == NULL || self->sockets[i].rx_queue == NULL) {
+		if (self->sockets[i].rx_queue == NULL) {
 			goto err;
 		}
+	}
+
+	/* Serializes the transmit path, which runs in the context of the calling threads. */
+	self->tx_lock = xSemaphoreCreateMutex();
+	if (self->tx_lock == NULL) {
+		goto err;
 	}
 
 	/* Set default keys. */
 	self->mac_key = "abcd";
 	self->mac_key_len = 4;
 
-	xTaskCreate(nbus_mac_task, "nbus-mac", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->mac_task));
-	if (self->mac_task == NULL) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create MAC task"));
+	xTaskCreate(nbus_rx_task, "nbus-rx", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->rx_task));
+	if (self->rx_task == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create RX task"));
 		goto err;
 	}
 

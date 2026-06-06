@@ -1,0 +1,13 @@
+config SERVICE_PROTO_DGSTREAM
+	bool "Framing of datagrams over a Stream using inter-frame gaps"
+	default n
+
+	config SERVICE_PROTO_DGSTREAM_TX_GAP_MS
+		int "Inter-frame gap kept idle on the medium after transmitting a datagram (ms)"
+		default 2
+		depends on SERVICE_PROTO_DGSTREAM
+
+	config SERVICE_PROTO_DGSTREAM_RX_TIMEOUT_MS
+		int "Stream read timeout used to detect the end of a received frame (ms)"
+		default 2
+		depends on SERVICE_PROTO_DGSTREAM
