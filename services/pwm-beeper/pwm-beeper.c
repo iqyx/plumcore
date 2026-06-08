@@ -49,6 +49,7 @@ static const struct beeper_vmt pwm_beeper_vmt = {
 static void task(void *p) {
 	PwmBeeper *self = p;
 	beeper_seq_item_t seq[SEQ_BUF_LEN] = {0};
+	uint32_t repeats_done = 0;
 
 	while (self->task_needed) {
 		/* Assume the sequence ends after first run by default. */
@@ -68,7 +69,13 @@ static void task(void *p) {
 			uint32_t freq_hz = (seq[pos] >> 18) & 0x3fffu;
 
 			if (cmd == BEEPER_SEQ_REPEAT) {
-				self->task_needed = true;
+				/* The repeat count shares the frequency bit field. Zero means
+				 * repeat indefinitely, otherwise repeat the given number of times. */
+				uint32_t count = freq_hz;
+				if (count == 0 || repeats_done < count) {
+					repeats_done++;
+					self->task_needed = true;
+				}
 			} else if (cmd == BEEPER_SEQ_BEEP && freq_hz > 0) {
 				self->pwm->vmt->set_freq(self->pwm, freq_hz);
 				self->pwm->vmt->set_pwm(self->pwm, 0.5f);

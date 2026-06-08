@@ -70,6 +70,15 @@ typedef uint32_t beeper_seq_item_t;
  */
 #define BEEPER_SEQ_FREQ_HZ(hz) (((uint32_t)(hz) & 0x3fffu) << 18)
 
+/**
+ * @brief Repeat count for the REPEAT command.
+ *
+ * Number of times the whole sequence is repeated. A value of zero means repeat
+ * indefinitely. Shares the same bit field as BEEPER_SEQ_FREQ_HZ, so it is only
+ * meaningful when combined with BEEPER_SEQ_REPEAT. Valid range is 0-16383.
+ */
+#define BEEPER_SEQ_COUNT(n) (((uint32_t)(n) & 0x3fffu) << 18)
+
 
 typedef struct beeper Beeper;
 struct beeper_vmt {
