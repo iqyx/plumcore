@@ -27,6 +27,53 @@
 #define MODULE_NAME "stm32-i2c"
 
 
+/* Recover an I2C bus that is stuck because a slave still drives SDA low, holding an unfinished transaction from
+ * before a firmware reset (no power cycle nor reset line). The pins are bit-banged as open-drain outputs: up to
+ * nine clock pulses are generated to let the slave flush the pending byte, after which a STOP condition is issued.
+ * Meant to be called before stm32_i2c_init() while the bus pins are still plain GPIOs (not yet muxed to the I2C
+ * peripheral). */
+stm32_i2c_ret_t stm32_i2c_recovery(Gpio *sda, Gpio *scl) {
+	if (sda == NULL || scl == NULL) {
+		return STM32_I2C_RET_FAILED;
+	}
+
+	/* Drive both lines as open-drain outputs with pull-ups; releasing a line lets the pull-up pull it high. */
+	sda->vmt->set(sda, true);
+	scl->vmt->set(scl, true);
+	sda->vmt->set_otype(sda, OTYPE_OD);
+	scl->vmt->set_otype(scl, OTYPE_OD);
+	sda->vmt->set_pull(sda, PULL_UP);
+	scl->vmt->set_pull(scl, PULL_UP);
+	sda->vmt->set_mode(sda, MODE_OUTPUT);
+	scl->vmt->set_mode(scl, MODE_OUTPUT);
+	vTaskDelay(1);
+
+	/* Clock SCL until the slave releases SDA, but no more than nine pulses (eight data bits plus the ACK). */
+	for (uint32_t i = 0; i < 9; i++) {
+		bool sda_state = false;
+		sda->vmt->get(sda, &sda_state);
+		if (sda_state) {
+			break;
+		}
+
+		scl->vmt->set(scl, false);
+		vTaskDelay(1);
+		scl->vmt->set(scl, true);
+		vTaskDelay(1);
+	}
+
+	/* Issue a STOP condition: SDA low while SCL is high, then SDA released high. */
+	sda->vmt->set(sda, false);
+	vTaskDelay(1);
+	scl->vmt->set(scl, true);
+	vTaskDelay(1);
+	sda->vmt->set(sda, true);
+	vTaskDelay(1);
+
+	return STM32_I2C_RET_OK;
+}
+
+
 stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 	I2C_TypeDef *base = (I2C_TypeDef *)self->base;
 	base->CR1 &= ~I2C_CR1_PE;
@@ -49,16 +96,30 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 }
 
 
+/* Arm the requested interrupt(s) and block until the ISR wakes us. Besides the requested flags, the ISR always
+ * reports bus error/arbitration-lost/overrun, so check for those on every wakeup and bail out via the common
+ * cleanup path. On timeout we also bail out, which guarantees the bus lock is always released. */
 #define WAIT_FOR_INT(f) \
-	base->CR1 |= (f);\
+	base->CR1 |= (f) | I2C_CR1_ERRIE;\
 	if (xSemaphoreTake(self->wait_lock, pdMS_TO_TICKS(self->timeout_ms)) != pdTRUE) { \
-		return I2C_BUS_RET_FAILED;\
+		ret = I2C_BUS_RET_FAILED;\
+		goto err;\
+	}\
+	if (base->ISR & (I2C_ISR_BERR | I2C_ISR_ARLO | I2C_ISR_OVR)) { \
+		ret = I2C_BUS_RET_FAILED;\
+		goto err;\
 	}\
 
 
 static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen) {
 	Stm32I2c *self = bus->parent;
 	I2C_TypeDef *base = (I2C_TypeDef *)self->base;
+	i2c_bus_ret_t ret = I2C_BUS_RET_OK;
+
+	/* NBYTES is an 8-bit field; transfers longer than 255 bytes would need RELOAD mode, which is not implemented. */
+	if (txlen > 255 || rxlen > 255) {
+		return I2C_BUS_RET_FAILED;
+	}
 
 	if (xSemaphoreTake(self->bus_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
 		xSemaphoreTake(self->wait_lock, 0);
@@ -76,11 +137,10 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 				 * of the previous transfer. Wait for either of those. */
 				WAIT_FOR_INT(I2C_CR1_TXIE | I2C_CR1_NACKIE);
 
-				/* Handle NACKF in a specific way, it needs clearing. */
+				/* Handle NACKF in a specific way, it needs clearing and a STOP to release the bus. */
 				if (base->ISR & I2C_ISR_NACKF) {
-					base->ICR |= I2C_ICR_NACKCF;
-					xSemaphoreGive(self->bus_lock);
-					return I2C_BUS_RET_NACK;
+					ret = I2C_BUS_RET_NACK;
+					goto err;
 				}
 
 				base->TXDR = *txdata;
@@ -125,6 +185,15 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 
 	xSemaphoreGive(self->bus_lock);
 	return I2C_BUS_RET_OK;
+
+err:
+	/* Common error exit: release the bus with a STOP, clear all pending status flags and disable the transfer
+	 * interrupts so the peripheral is left in a clean idle state for the next transaction. */
+	base->CR2 |= I2C_CR2_STOP;
+	base->ICR |= I2C_ICR_NACKCF | I2C_ICR_BERRCF | I2C_ICR_ARLOCF | I2C_ICR_OVRCF | I2C_ICR_STOPCF;
+	base->CR1 &= ~(I2C_CR1_TXIE | I2C_CR1_NACKIE | I2C_CR1_RXIE | I2C_CR1_TCIE | I2C_CR1_ERRIE);
+	xSemaphoreGive(self->bus_lock);
+	return ret;
 }
 
 
@@ -159,7 +228,17 @@ stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, void *base) {
 
 
 stm32_i2c_ret_t stm32_i2c_free(Stm32I2c *self) {
+	/* Wait for any ongoing transfer to finish before tearing anything down, otherwise we would delete the
+	 * synchronization primitives from under a transfer in progress. The lock is never given back; no transfer
+	 * may start once we own it. */
+	xSemaphoreTake(self->bus_lock, portMAX_DELAY);
+
+	/* Disable the peripheral before tearing down the synchronization primitives. */
+	I2C_TypeDef *base = (I2C_TypeDef *)self->base;
+	base->CR1 &= ~I2C_CR1_PE;
+
 	vSemaphoreDelete(self->bus_lock);
+	vSemaphoreDelete(self->wait_lock);
 
 	return STM32_I2C_RET_OK;
 }
@@ -183,6 +262,12 @@ stm32_i2c_ret_t stm32_i2c_irq_handler(Stm32I2c *self) {
 	}
 	if (base->ISR & I2C_ISR_RXNE) {
 		base->CR1 &= ~I2C_CR1_RXIE;
+		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
+	}
+	/* Bus error, arbitration lost or overrun: wake the waiter so it can abort the transfer. The flags are left
+	 * set and cleared on the error cleanup path; only the error interrupt is masked to avoid an ISR storm. */
+	if (base->ISR & (I2C_ISR_BERR | I2C_ISR_ARLO | I2C_ISR_OVR)) {
+		base->CR1 &= ~I2C_CR1_ERRIE;
 		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
 	}
 	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);

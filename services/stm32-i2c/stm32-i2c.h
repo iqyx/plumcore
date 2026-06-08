@@ -13,6 +13,7 @@
 
 #include <main.h>
 #include <i2c-bus.h>
+#include <interfaces/gpio.h>
 
 
 typedef enum {
@@ -30,6 +31,7 @@ typedef struct {
 } Stm32I2c;
 
 
+stm32_i2c_ret_t stm32_i2c_recovery(Gpio *sda, Gpio *scl);
 stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self);
 stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, void *base);
 stm32_i2c_ret_t stm32_i2c_free(Stm32I2c *self);
