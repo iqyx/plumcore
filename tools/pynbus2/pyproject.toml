@@ -1,0 +1,29 @@
+[project]
+name = "pynbus2"
+version = "0.1.0"
+description = "Python client library for the plumCore nbus2 messaging bus"
+authors = [
+    { name = "Marek Koza", email = "qyx@krtko.org" },
+]
+license = { text = "GPL-3.0-or-later" }
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["nbus2", "plumcore", "embedded", "messaging"]
+dependencies = []
+
+[project.optional-dependencies]
+serial = ["pyserial>=3.4"]
+
+[project.urls]
+Homepage = "https://krtko.org"
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.build]
+package-dir = "src"
+source-includes = ["README.md"]

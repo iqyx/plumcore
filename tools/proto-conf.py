@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 from colorama import init as colorama_init, Fore, Back, Style
 import argparse
-import os
 import cbor2
-import socket
-import time
+
+# Allow running straight from the source tree without installing pynbus2.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pynbus2', 'src'))
+import pynbus2
 
 
 # enum conf_type (see services/interfaces/conf.h)
@@ -58,12 +60,11 @@ CONF_CREATE = (1 << 5)
 def init_args():
 	parser = argparse.ArgumentParser(
 		description="plumCore proto-conf over nbus2 configuration tree tool",
-		epilog="(c) 2026 Marek Koza <qyx@krtko.org>",
+		epilog="example: proto-conf.py udp6:///00010002/3 --walk\n\n(c) 2026 Marek Koza <qyx@krtko.org>",
 		formatter_class=argparse.RawDescriptionHelpFormatter
 	)
 
-	parser.add_argument('-s', '--sid', type=str, required=True, help='service ID to connect to')
-	parser.add_argument('-e', '--ep', type=int, required=True, help='service endpoint to connect to')
+	parser.add_argument('uri', type=str, help='nbus2 connection URI carrying the destination, e.g. udp6:///<sid>/<ep>')
 	parser.add_argument('-w', '--walk', type=str, nargs='?', const='', default=None, metavar='PATH', help='walk and show the configuration tree at PATH, slash separated (default: root)')
 	parser.add_argument('-r', '--read', type=str, default=None, metavar='PATH', help='read the value of the conf node at PATH and print it (script-friendly)')
 	parser.add_argument('-v', '--verbose', action='store_true', help='log all nbus2 protocol calls and responses')
@@ -72,44 +73,24 @@ def init_args():
 
 
 class NbusClient:
+	"""CBOR request/response over a pynbus2 socket, with optional protocol logging."""
 
-	def __init__(self, sid: str, ep: int, mtu=1024, verbose=False):
-		self._sid = sid
-		self._ep = ep
-		self._mtu = mtu
+	def __init__(self, sock: pynbus2.NbusSocket, verbose=False):
+		self._sock = sock
 		self._verbose = verbose
 
-		self._connect()
-
-	def _connect(self):
-		self._s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-		# self._s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, 'nbus'.encode())
-		self._s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-		self._s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-		self._s.bind((f'fd00:dead:beef::1', 52000))
-		self._s.connect((f'fd00:dead:beef::{self._sid[:4]}:{self._sid[4:]}', 52000 + self._ep))
-		self._s.settimeout(0.05)
-
 	def call(self, req: dict):
-		timeout = 50
-		while True:
-			timeout -= 1
-			if timeout == 0:
-				self._log(req, None)
-				return None
-
-			self._s.send(cbor2.dumps(req));
-			try:
-				resp = cbor2.loads(self._s.recv(self._mtu))
-				self._log(req, resp)
-				return resp
-			except TimeoutError:
-				continue
-			except Exception as e:
-				self._log(req, e)
-				return None
-
-		return None
+		reply = self._sock.request(cbor2.dumps(req), timeout=0.05, retries=50)
+		if reply is None:
+			self._log(req, None)
+			return None
+		try:
+			resp = cbor2.loads(reply)
+		except Exception as e:
+			self._log(req, e)
+			return None
+		self._log(req, resp)
+		return resp
 
 	def _log(self, req, resp):
 		if not self._verbose:
@@ -213,10 +194,15 @@ if __name__ == "__main__":
 	colorama_init()
 	args = init_args()
 
-	n = NbusClient(args.sid, args.ep, verbose=args.verbose)
-	c = ConfClient(n)
+	with pynbus2.connect(args.uri) as nbus:
+		sock = nbus.socket()
+		if not sock._connected:
+			print(f'the URI must carry a destination, e.g. udp6:///<sid>/<ep>', file=sys.stderr)
+			sys.exit(1)
+		n = NbusClient(sock, verbose=args.verbose)
+		c = ConfClient(n)
 
-	if args.walk is not None:
-		c.walk([p for p in args.walk.split('/') if p])
-	if args.read is not None:
-		c.read([p for p in args.read.split('/') if p])
+		if args.walk is not None:
+			c.walk([p for p in args.walk.split('/') if p])
+		if args.read is not None:
+			c.read([p for p in args.read.split('/') if p])

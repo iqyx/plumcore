@@ -1,0 +1,14 @@
+# Build artifacts
+/dist/
+/build/
+*.egg-info/
+.pdm-build/
+
+# pdm
+/.venv/
+/.pdm-python
+pdm.lock
+
+# Python caches
+__pycache__/
+*.py[cod]
