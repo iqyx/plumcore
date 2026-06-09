@@ -2,21 +2,49 @@
  *
  * nbus2 messaging bus implementation
  *
- * Copyright (c) 2023-2025, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2023-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
+ */
+
+/**
+ * @file
+ * @brief nbus2 protocol driver (data link layer)
+ *
+ * nbus2 is a lightweight, UDP-like messaging bus: services/nodes are identified by 32-bit IDs and
+ * 4-bit endpoints, with sockets resembling srcID:srcEP -> dstID:dstEP. This file implements the
+ * protocol itself (packet assembly, parsing, dispatch and the data-link-layer authenticated
+ * encryption). Medium access and framing of whole packets onto the physical medium are out of
+ * scope and are provided through the Datagram interface configured in struct nbus_config.
+ *
+ * Every packet is authenticated and encrypted at the data link layer with a SIV-mode construction
+ * (the synthetic IV doubles as the MAC tag and as the keystream IV). Two interchangeable schemes
+ * are supported and selected at runtime through struct nbus_config:
+ *
+ * - NBUS_CRYPTO_CHACHA20_HALFSIPHASH: a ChaCha20 keystream with a HalfSipHash tag (the legacy
+ *   firmware scheme).
+ * - NBUS_CRYPTO_BLAKE2S_SIV: a BLAKE2s-only SIV-mode construction (b2s_crypt + b2s_siv).
+ *
+ * A sender emits a single configured scheme on transmit. A receiver may accept several schemes at
+ * once: because both ciphers are an XOR of a deterministic keystream (keyed by ke and the cleartext
+ * SIV), a failed authentication attempt is undone by re-applying the same keystream, so the next
+ * scheme can be tried on the original ciphertext.
+ *
+ * The on-wire packet format, key derivation and the security considerations of both schemes are
+ * documented in nbus2.rst next to this file.
  */
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <interfaces/datagram.h>
+
 #include <main.h>
+#include <interfaces/datagram.h>
+#include <chacha20.h>
+
 #include "nbus2.h"
-#include <blake2s.h>
 #include "blake2s-siv.h"
 #include "halfsiphash.h"
-#include <chacha20.h>
 
 #define MODULE_NAME "nbus"
 
@@ -26,48 +54,132 @@ uint8_t nbus_my_ep = 0;
 uint16_t nbus_tx_counter = 0;
 
 
-/**
- * tl;dr of the nbus2 packet format
+/**********************************************************************************************************************
+ * Packet protection (data link crypto)
+ **********************************************************************************************************************/
+
+/*
+ * Each scheme provides a protect()/unprotect() pair operating in place on a packet buffer. Both
+ * ciphers are an XOR of a keystream that depends only on the encryption key and the cleartext SIV
+ * (buf[0..7], never encrypted), so any in-place transform is its own inverse. unprotect() therefore
+ * restores the original ciphertext on any failure, which lets the receiver try the next scheme.
  *
- * NBUS2 protocol uses UART framing over a CAN PHY, generally at 1 or 4 MBaud.
- * Other PHYs are possible, some at lower speeds (such as single-wire TTL-level
- * UART at 250 kBaud).
- *
- * Services/nodes are identified by 32 bit identifiers. Endpoints are 4 bits
- * (for 16 total source and destination endpoints). The protocol heavily resembles
- * UDP with sockets srcIP:srcPort->dstIP:dstPort being srcID:srcEP -> dstID:dstEP.
- *
- * Protocol encryption and MAC uses a SIV-mode cipher constructed from a single
- * primitive (blake2s PRF). Keys are preshared. This layer creates a basic
- * feeling of security (incl. data integrity).
- *
- * There is a fixed 8 byte SIV header + 8 byte fixed header at the beginning of
- * the packet. Then a variable number of variably sized extension headers follow.
- * Headers are padded to 4 bytes. Data follows, padded to 4 bytes.
- *
- * Medium access and framing of packets onto the physical medium are not handled
- * here. This driver depends on a Datagram interface which delivers and accepts
- * whole nbus2 packets. Framing the packets onto a byte stream (eg. an UART) is
- * the responsibility of the underlying service providing that Datagram.
+ * On entry to unprotect() self->buf_len is the number of bytes received; on success it is trimmed to
+ * the declared packet length and the cleartext header and payload are left in place.
  */
 
 
+/* Decrypt/encrypt the 16-byte fixed header in place (ChaCha20 block 0). Self-inverse. */
+static void nbus_chacha_header(struct nbus_pbuf *self) {
+	ChaCha20 ch;
+	chacha20_keysetup(&ch, self->ke, 128);
+	chacha20_nonce(&ch, self->buf);
+	chacha20_encrypt(&ch, self->buf + 8, self->buf + 8, 16);
+}
+
+
+/* Decrypt/encrypt the payload in place; it starts in ChaCha20 block 1 (the header is block 0). */
+static void nbus_chacha_payload(struct nbus_pbuf *self, size_t packet_len) {
+	if (packet_len == 0) {
+		return;
+	}
+	ChaCha20 ch;
+	chacha20_keysetup(&ch, self->ke, 128);
+	chacha20_nonce(&ch, self->buf);
+	/* Advance over block 0 (the header) so the payload is keyed with block 1 onward. */
+	uint8_t skip[8] = {0};
+	chacha20_encrypt(&ch, skip, skip, sizeof(skip));
+	chacha20_encrypt(&ch, self->buf + 24, self->buf + 24, packet_len);
+}
+
+
+static void nbus_protect_chacha(struct nbus_pbuf *self) {
+	/* The SIV is a HalfSipHash tag over the cleartext header and payload. */
+	halfsiphash(self->buf + 8, self->buf_len - 8, self->km, self->buf, 8);
+	nbus_chacha_header(self);
+	nbus_chacha_payload(self, self->buf_len - 24);
+}
+
+
+static nbus_ret_t nbus_unprotect_chacha(struct nbus_pbuf *self) {
+	nbus_chacha_header(self);
+
+	/* Check the magic right at the beginning of the fixed header. */
+	if (self->buf[8] != 'n' || self->buf[9] != '2') {
+		nbus_chacha_header(self);
+		return NBUS_RET_FAILED;
+	}
+
+	/* The declared payload length must fit within the received frame. */
+	size_t packet_len = self->buf[10] << 8 | self->buf[11];
+	if ((24 + packet_len) > self->buf_len) {
+		nbus_chacha_header(self);
+		return NBUS_RET_FAILED;
+	}
+
+	nbus_chacha_payload(self, packet_len);
+
+	/* Authenticate the now-cleartext header and payload against the SIV from the packet. */
+	uint8_t mac[8];
+	halfsiphash(self->buf + 8, (24 + packet_len) - 8, self->km, mac, sizeof(mac));
+	if (memcmp(self->buf, mac, 8)) {
+		/* Undo decryption so another scheme may be tried on the original bytes. */
+		nbus_chacha_payload(self, packet_len);
+		nbus_chacha_header(self);
+		return NBUS_RET_FAILED;
+	}
+
+	self->buf_len = 24 + packet_len;
+	return NBUS_RET_OK;
+}
+
+
+static void nbus_protect_b2ssiv(struct nbus_pbuf *self) {
+	/* The SIV is a keyed BLAKE2s tag over the cleartext header and payload. */
+	b2s_siv(self->buf + 8, self->buf_len - 8, self->buf, 8, self->km);
+	/* The header and payload are encrypted as one contiguous region keyed by the SIV. */
+	b2s_crypt(self->buf + 8, self->buf_len - 8, self->buf, 8, self->ke);
+}
+
+
+static nbus_ret_t nbus_unprotect_b2ssiv(struct nbus_pbuf *self) {
+	/* Decrypt the whole received region in one contiguous pass (b2s_crypt has no per-field gap). */
+	b2s_crypt(self->buf + 8, self->buf_len - 8, self->buf, 8, self->ke);
+
+	if (self->buf[8] != 'n' || self->buf[9] != '2') {
+		b2s_crypt(self->buf + 8, self->buf_len - 8, self->buf, 8, self->ke);
+		return NBUS_RET_FAILED;
+	}
+
+	size_t packet_len = self->buf[10] << 8 | self->buf[11];
+	if ((24 + packet_len) > self->buf_len) {
+		b2s_crypt(self->buf + 8, self->buf_len - 8, self->buf, 8, self->ke);
+		return NBUS_RET_FAILED;
+	}
+
+	/* The SIV authenticates the declared cleartext header and payload. */
+	uint8_t siv[8];
+	b2s_siv(self->buf + 8, (24 + packet_len) - 8, siv, 8, self->km);
+	if (memcmp(self->buf, siv, 8)) {
+		b2s_crypt(self->buf + 8, self->buf_len - 8, self->buf, 8, self->ke);
+		return NBUS_RET_FAILED;
+	}
+
+	self->buf_len = 24 + packet_len;
+	return NBUS_RET_OK;
+}
+
+
 /**
- * @brief Receive and validate a single nbus2 packet from the medium
+ * @brief Receive and authenticate a single nbus2 packet from the medium
  *
- * A whole packet/datagram is read from the underlying Datagram interface into the packet buffer.
- * The fixed 16 byte header is decrypted and its magic checked, then the payload is decrypted and
- * authenticated against the SIV from the message.
- *
- * The packet consists of:
- * - 8 byte SIV (synthetic IV) used for data authentication and encryption
- * - 8 byte fixed header with a packet magic number, length and flags
- * - 8 byte fixed ID header
- * - the (optional) packet payload
+ * A whole packet/datagram is read from the underlying Datagram interface into the packet buffer and
+ * then tried against every cryptographic scheme enabled in the receive configuration until one
+ * authenticates. See nbus2.rst for the packet format.
  */
 static nbus_ret_t nbus_pbuf_receive(struct nbus_pbuf *self, Nbus *nbus) {
 	size_t len = self->buf_size;
-	if (nbus->dgram->vmt->read(nbus->dgram, self->buf, &len, NULL) != DATAGRAM_RET_OK) {
+	if (nbus->config.dgram->vmt->read(nbus->config.dgram, self->buf, &len, NULL) != DATAGRAM_RET_OK) {
 		return NBUS_RET_FAILED;
 	}
 	self->buf_len = len;
@@ -77,46 +189,14 @@ static nbus_ret_t nbus_pbuf_receive(struct nbus_pbuf *self, Nbus *nbus) {
 		return NBUS_RET_FAILED;
 	}
 
-	/* Decrypt the header. */
-	ChaCha20 ch;
-	chacha20_keysetup(&ch, self->ke, 128);
-	chacha20_nonce(&ch, self->buf);
-	chacha20_encrypt(&ch, self->buf + 8, self->buf + 8, 16);
-
-	/* Check the magic. It is right at the beginning of the fixed header. */
-	if (self->buf[8] != 'n' || self->buf[9] != '2') {
-		return NBUS_RET_FAILED;
+	if ((nbus->config.rx_crypto & NBUS_CRYPTO_BLAKE2S_SIV) && nbus_unprotect_b2ssiv(self) == NBUS_RET_OK) {
+		return NBUS_RET_OK;
+	}
+	if ((nbus->config.rx_crypto & NBUS_CRYPTO_CHACHA20_HALFSIPHASH) && nbus_unprotect_chacha(self) == NBUS_RET_OK) {
+		return NBUS_RET_OK;
 	}
 
-	/* The payload length is encoded in the header. It must match what was actually received. Trailing
-	 * bytes beyond the declared length (if any) are discarded so the MAC is computed over the exact
-	 * same range as on transmission. */
-	size_t packet_len = self->buf[10] << 8 | self->buf[11];
-	if ((24 + packet_len) > self->buf_len) {
-		return NBUS_RET_FAILED;
-	}
-	self->buf_len = 24 + packet_len;
-
-	if (packet_len > 0) {
-		/* Decrypt data only, headers are already decrypted. */
-		chacha20_keysetup(&ch, self->ke, 128);
-		chacha20_nonce(&ch, self->buf);
-		/* Consume first counter. */
-		uint8_t foo[8] = {0};
-		chacha20_encrypt(&ch, foo, foo, sizeof(foo));
-		chacha20_encrypt(&ch, self->buf + 24, self->buf + 24, packet_len);
-	}
-
-	/* Compute MAC from header and data. Compare with the SIV from the message. */
-	uint8_t mac[8];
-	halfsiphash(self->buf + 8, self->buf_len - 8, self->km, mac, sizeof(mac));
-
-	if (memcmp(self->buf, mac, 8)) {
-		//syslog(LOG_ERR, "pbuf: receive data bad MAC");
-		return NBUS_RET_FAILED;
-	}
-
-	return NBUS_RET_OK;
+	return NBUS_RET_FAILED;
 }
 
 
@@ -140,18 +220,18 @@ static nbus_ret_t nbus_pbuf_transmit(struct nbus_pbuf *self, Nbus *nbus) {
 
 	/* buf[16-23] are destination and source id. */
 
-	/* Compute SIV first */
-	halfsiphash(self->buf + 8, self->buf_len - 8, self->km, self->buf, 8);
+	/* Protect the packet with the single configured transmit scheme. */
+	switch (nbus->config.tx_crypto) {
+		case NBUS_CRYPTO_BLAKE2S_SIV:
+			nbus_protect_b2ssiv(self);
+			break;
+		case NBUS_CRYPTO_CHACHA20_HALFSIPHASH:
+		default:
+			nbus_protect_chacha(self);
+			break;
+	}
 
-	ChaCha20 ch;
-	chacha20_keysetup(&ch, self->ke, 128);
-	chacha20_nonce(&ch, self->buf);
-	/* Encrypt the header first. */
-	chacha20_encrypt(&ch, self->buf + 8, self->buf + 8, 16);
-	/* Counter is incremented, the rest of the input is kept. Encrypt the data. */
-	chacha20_encrypt(&ch, self->buf + 24, self->buf + 24, self->buf_len - 24);
-
-	if (nbus->dgram->vmt->write(nbus->dgram, self->buf, self->buf_len, NULL) != DATAGRAM_RET_OK) {
+	if (nbus->config.dgram->vmt->write(nbus->config.dgram, self->buf, self->buf_len, NULL) != DATAGRAM_RET_OK) {
 		return NBUS_RET_FAILED;
 	}
 
@@ -252,7 +332,9 @@ static void nbus_hk_task(void *p) {
 
 
 
-/* ****************************************** Datagram API ************************************************************/
+/**********************************************************************************************************************
+ * Datagram API
+ **********************************************************************************************************************/
 
 static datagram_ret_t nbus_socket_write(Datagram *datagram, const void *buf, size_t len, const struct datagram_msg *msg) {
 	struct nbus_socket *self = datagram->parent;
@@ -356,9 +438,9 @@ static const struct datagram_vmt nbus_socket_vmt = {
 
 
 
-nbus_ret_t nbus_init(Nbus *self, Datagram *dgram) {
+nbus_ret_t nbus_init(Nbus *self, const struct nbus_config *config) {
 	memset(self, 0, sizeof(Nbus));
-	self->dgram = dgram;
+	memcpy(&self->config, config, sizeof(self->config));
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialize protocol driver"));
 
@@ -431,7 +513,9 @@ nbus_ret_t nbus_set_mac_key(Nbus *self, const uint8_t *mac_key, size_t mac_key_l
 
 
 
-/* ************************************* packet buffer pool manipulation ******************************************** */
+/**********************************************************************************************************************
+ * Packet buffer pool manipulation
+ **********************************************************************************************************************/
 
 
 /**
@@ -543,7 +627,9 @@ static nbus_ret_t nbus_pbuf_send(struct nbus_pbuf *self, void *buf, size_t len, 
 }
 
 
-/* ******************************************** nbus socket manipulation **********************************************/
+/**********************************************************************************************************************
+ * nbus socket manipulation
+ **********************************************************************************************************************/
 
 
 struct nbus_socket *nbus_socket_allocate(Nbus *self) {

@@ -117,8 +117,13 @@ void b2s_siv(const uint8_t *buf, size_t len, uint8_t *siv, size_t siv_len, const
 	u_assert(siv_len >= 4);
 	u_assert(km != NULL);
 
+	/* blake2s_final() always writes the full digest configured at init (32 bytes), so it must not be
+	 * pointed directly at the caller's siv buffer which is only siv_len bytes long (and, in protect(),
+	 * aliases the packet header). Digest into a local and copy out only the requested leading bytes. */
+	uint8_t full[32] = {0};
 	blake2s_state s;
 	blake2s_init_key(&s, 32, km, B2S_KM_LEN);
 	blake2s_update(&s, buf, len);
-	blake2s_final(&s, siv);
+	blake2s_final(&s, full);
+	memcpy(siv, full, siv_len);
 }

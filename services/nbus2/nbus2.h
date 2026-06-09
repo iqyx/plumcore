@@ -2,7 +2,7 @@
  *
  * nbus2 messaging bus implementation
  *
- * Copyright (c) 2023-2025, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2023-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -34,6 +34,36 @@ typedef enum {
 	NBUS_RET_BIG,
 	NBUS_RET_TIMEOUT,
 } nbus_ret_t;
+
+/**
+ * Data-link-layer cryptographic schemes used to protect nbus2 packets. The values are bit flags
+ * so a receiver may accept several schemes at once (see struct nbus_config). Refer to nbus2.rst
+ * for the on-wire details of each construction.
+ */
+enum nbus_crypto {
+	/** ChaCha20 keystream + HalfSipHash MAC/SIV (the legacy firmware scheme). */
+	NBUS_CRYPTO_CHACHA20_HALFSIPHASH = (1 << 0),
+	/** BLAKE2s-only SIV-mode authenticated encryption (b2s_crypt + b2s_siv). */
+	NBUS_CRYPTO_BLAKE2S_SIV = (1 << 1),
+};
+
+/**
+ * Runtime configuration of an Nbus instance. A const instance is passed to nbus_init() which copies
+ * it into the Nbus object; the caller's struct does not need to outlive the call.
+ */
+struct nbus_config {
+	/** Datagram interface providing medium access and framing for whole nbus2 packets. */
+	Datagram *dgram;
+
+	/** A single cryptographic scheme used to protect transmitted packets. */
+	enum nbus_crypto tx_crypto;
+
+	/**
+	 * Bitmask of cryptographic schemes accepted on receive. Multiple schemes may be enabled at
+	 * once; every received packet is tried against each enabled scheme until one authenticates.
+	 */
+	uint32_t rx_crypto;
+};
 
 typedef struct nbus Nbus;
 struct nbus_socket {
@@ -105,7 +135,7 @@ struct nbus_pbuf {
 };
 
 typedef struct nbus {
-	Datagram *dgram;
+	struct nbus_config config;
 	const uint8_t *mac_key;
 	size_t mac_key_len;
 
@@ -125,7 +155,7 @@ typedef struct nbus {
 } Nbus;
 
 
-nbus_ret_t nbus_init(Nbus *self, Datagram *dgram);
+nbus_ret_t nbus_init(Nbus *self, const struct nbus_config *config);
 nbus_ret_t nbus_set_mac_key(Nbus *self, const uint8_t *mac_key, size_t mac_key_len);
 
 struct nbus_pbuf *nbus_pbuf_allocate(Nbus *self);
