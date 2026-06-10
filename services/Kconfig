@@ -544,6 +544,10 @@ menu "Communication server/client services"
 			bool "MQ data batching service"
 			default y
 
+		config SERVICE_MQ_CONVOLVE
+			bool "MQ moving-window service"
+			default y
+
 		config SERVICE_MQ_STATS
 			bool "MQ data statistics service"
 			default y
