@@ -19,6 +19,9 @@
 #ifndef _ED25519_H_
 #define _ED25519_H_
 
+#include <stdint.h>
+#include <stddef.h>
+#include <sha2.h>
 
 
 /* 512bit hash function used in sign/verify */
@@ -86,6 +89,21 @@ void ed25519_publickey(const ed25519_secret_key sk, ed25519_public_key pk);
 int ed25519_verify(const ed25519_signature RS, const ed25519_public_key pk, const unsigned char *m, size_t mlen);
 #define ED25519_VERIFY_OK 0
 #define ED25519_VERIFY_BAD_SIGNATURE 1
+
+/**
+ * Streaming variant of ed25519_verify for messages that do not fit in memory (e.g. read from
+ * flash in chunks). Feed the whole message through ed25519_verify_update, then call
+ * ed25519_verify_final. The result matches ed25519_verify over the concatenated message.
+ */
+typedef struct {
+	ed25519_hash_context hash;
+	ed25519_signature RS;
+	ed25519_public_key pk;
+} ed25519_verify_context;
+
+void ed25519_verify_init(ed25519_verify_context *ctx, const ed25519_signature RS, const ed25519_public_key pk);
+void ed25519_verify_update(ed25519_verify_context *ctx, const unsigned char *m, size_t mlen);
+int ed25519_verify_final(ed25519_verify_context *ctx);
 
 void ed25519_sign(ed25519_signature RS, const ed25519_secret_key sk, const ed25519_public_key pk, const unsigned char *m, size_t mlen);
 

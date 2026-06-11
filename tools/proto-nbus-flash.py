@@ -1,78 +1,65 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 from colorama import init as colorama_init, Fore, Back, Style
 import argparse
-import os
 import cbor2
-import socket
-import time
-from datetime import datetime, timedelta
-import pytz
 from tqdm import tqdm
+
+# Allow running straight from the source tree without installing pynbus2.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pynbus2', 'src'))
+import pynbus2
+
+
+# Default flash transfer block size. The device caps a flash read/write block at NBUS_FLASH_BLOCK_LEN
+# (256 B), but the limiting factor is the transport: the proto-dgtext serial console link caps a whole
+# datagram at 256 B, which has to hold the 24-byte nbus2 header plus the CBOR-framed block. 128 B keeps
+# both read responses and write requests safely under that limit and works on every transport.
+DEFAULT_BLOCK_SIZE = 128
 
 
 def init_args():
 	parser = argparse.ArgumentParser(
 		description="plumCore proto-flash over nbus2 upload/download tool",
-		epilog="(c) 2025 Marek Koza <qyx@krtko.org>",
+		epilog="example: proto-nbus-flash.py udp6:///00010002/1 --list\n\n(c) 2025 Marek Koza <qyx@krtko.org>",
 		formatter_class=argparse.RawDescriptionHelpFormatter
 	)
 
+	parser.add_argument('uri', type=str, help='nbus2 connection URI carrying the destination, e.g. udp6:///<sid>/<ep>')
 	parser.add_argument('-l', '--list', action='store_true', help='list flash partitions')
 	parser.add_argument('-r', '--reset', action='store_true', help='reset the device')
-	parser.add_argument('-s', '--sid', type=str, required=True, help='service ID to connect to')
-	parser.add_argument('-e', '--ep', type=int, required=True, help='service endpoint to connect to')
 	parser.add_argument('-d', '--download', type=str, help='download content of the flash volume')
 	parser.add_argument('-u', '--upload', type=str, help='upload content to the flash volume')
 	parser.add_argument('-v', '--verify', action='store_true', help='verify flash contents after upload')
 	parser.add_argument('--erase', type=str, help='erase the whole flash partition')
 	parser.add_argument('-f', '--file', type=str, default='file.bin', help='name of the file to read from/write to')
+	parser.add_argument('-b', '--block', type=int, default=DEFAULT_BLOCK_SIZE, help=f'transfer block size in bytes (default: {DEFAULT_BLOCK_SIZE})')
 
 	return parser.parse_args()
 
 
 class NbusClient:
+	"""CBOR request/response over a pynbus2 socket."""
 
-	def __init__(self, sid: str, ep: int, mtu=1024):
-		self._sid = sid
-		self._ep = ep
-		self._mtu = mtu
-
-		self._connect()
-
-	def _connect(self):
-		self._s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-		# self._s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, 'nbus'.encode())
-		self._s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-		self._s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-		self._s.bind((f'fd00:dead:beef::1', 52000))
-		self._s.connect((f'fd00:dead:beef::{self._sid[:4]}:{self._sid[4:]}', 52000 + self._ep))
-		self._s.settimeout(0.05)
+	def __init__(self, sock: pynbus2.NbusSocket):
+		self._sock = sock
 
 	def call(self, req: dict):
-		timeout = 50
-		while True:
-			timeout -= 1
-			if timeout == 0:
-				return None
-
-			self._s.send(cbor2.dumps(req));
-			try:
-				resp = cbor2.loads(self._s.recv(self._mtu))
-				return resp
-			except TimeoutError:
-				continue
-			except Exception as e:
-				return None
-
-		return None
+		reply = self._sock.request(cbor2.dumps(req), timeout=0.05, retries=50)
+		if reply is None:
+			return None
+		try:
+			return cbor2.loads(reply)
+		except Exception:
+			return None
 
 
 class FlashClient:
 
-	def __init__(self, n: NbusClient):
+	def __init__(self, n: NbusClient, block_size=DEFAULT_BLOCK_SIZE):
 		self._n = n
+		self._page = block_size
 
 	def info(self, vol):
 		r = self._n.call({'c': 'info', 'n': vol})
@@ -123,7 +110,7 @@ class FlashClient:
 	def download(self, vol, fname):
 		r = self.info(vol)
 		flash_size = r.get('sizes')[0].get('s')
-		page_size = 256
+		page_size = self._page
 
 		self._open(vol)
 		d = b''
@@ -157,7 +144,7 @@ class FlashClient:
 		r = self.info(vol)
 		flash_size = r.get('sizes')[0].get('s')
 		erase_size = r.get('sizes')[1].get('s')
-		page_size = 256
+		page_size = self._page
 
 		self._open(vol)
 		self._erase_all(flash_size, erase_size)
@@ -180,7 +167,7 @@ class FlashClient:
 		with open(fname, 'rb') as f:
 			original = f.read()
 
-		page_size = 256
+		page_size = self._page
 		read_size = ((len(original) + page_size - 1) // page_size) * page_size
 
 		self._open(vol)
@@ -207,18 +194,23 @@ if __name__ == "__main__":
 	colorama_init()
 	args = init_args()
 
-	n = NbusClient(args.sid, args.ep)
-	f = FlashClient(n)
+	with pynbus2.connect(args.uri) as nbus:
+		sock = nbus.socket()
+		if not sock._connected:
+			print(f'the URI must carry a destination, e.g. udp6:///<sid>/<ep>', file=sys.stderr)
+			sys.exit(1)
+		n = NbusClient(sock)
+		f = FlashClient(n, args.block)
 
-	if args.list:
-		f.list()
-	if args.erase:
-		f.erase(args.erase)
-	if args.download:
-		f.download(args.download, args.file)
-	if args.upload:
-		f.upload(args.upload, args.file)
-		if args.verify:
-			f.verify(args.upload, args.file)
-	if args.reset:
-		f.reset()
+		if args.list:
+			f.list()
+		if args.erase:
+			f.erase(args.erase)
+		if args.download:
+			f.download(args.download, args.file)
+		if args.upload:
+			f.upload(args.upload, args.file)
+			if args.verify:
+				f.verify(args.upload, args.file)
+		if args.reset:
+			f.reset()

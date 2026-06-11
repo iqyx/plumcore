@@ -264,6 +264,9 @@ menu "Filesystem and memory management services"
 
 	config SERVICE_FLASH_CBOR_MIB
 		bool "MIB stored in a flash in a CBOR format"
+		select LIB_TINYCBOR
+		select LIB_PLUMCORE_CRYPTOLIB
+		select LIB_PLUMCORE_CONFIGLIB
 		default y
 
 	config SERVICE_OBJECT_STORE

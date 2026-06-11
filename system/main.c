@@ -69,7 +69,9 @@ static void init_task(void *p) {
 	#endif
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initializing application..."));
-	app_init(&app);
+	if (app_init(&app) != APP_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("application init failed"));
+	}
 
 	vTaskDelete(NULL);
 }

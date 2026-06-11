@@ -1580,32 +1580,57 @@ void ed25519_sign(ed25519_signature RS, const ed25519_secret_key sk, const ed255
 /**
  * verify signature RS of message m with length mlen using public key pk
  */
-int ed25519_verify(const ed25519_signature RS, const ed25519_public_key pk, const unsigned char *m, size_t mlen) {
+/*
+ * Streaming verify. H(R,A,m) is computed incrementally: ed25519_verify_init seeds the hash with
+ * R and the public key A, ed25519_verify_update feeds successive message chunks and
+ * ed25519_verify_final completes the hash and performs the curve check. This mirrors the
+ * monolithic ed25519_verify below, which is now implemented in terms of these.
+ */
+void ed25519_verify_init(ed25519_verify_context *ctx, const ed25519_signature RS, const ed25519_public_key pk) {
+	memcpy(ctx->RS, RS, 64);
+	memcpy(ctx->pk, pk, 32);
+	ed25519_hash_init(&ctx->hash);
+	ed25519_hash_update(&ctx->hash, ctx->RS, 32);
+	ed25519_hash_update(&ctx->hash, ctx->pk, 32);
+}
+
+void ed25519_verify_update(ed25519_verify_context *ctx, const unsigned char *m, size_t mlen) {
+	ed25519_hash_update(&ctx->hash, m, mlen);
+}
+
+int ed25519_verify_final(ed25519_verify_context *ctx) {
 	ge25519 ALIGN(16) R, A;
 	hash_512bits hash;
 	bignum256modm hram, S;
 	unsigned char checkR[32];
 
-	if ((RS[63] & 224) || !ge25519_unpack_negative_vartime(&A, pk))
+	if ((ctx->RS[63] & 224) || !ge25519_unpack_negative_vartime(&A, ctx->pk))
 		return -1;
 
 	/* hram = H(R,A,m) */
-	ed25519_hram(hash, RS, pk, m, mlen);
+	ed25519_hash_final(&ctx->hash, hash);
 	expand256_modm(hram, hash, 64);
 
 	/* S */
-	expand256_modm(S, RS + 32, 32);
+	expand256_modm(S, ctx->RS + 32, 32);
 
 	/* SB - H(R,A,m)A */
 	ge25519_double_scalarmult_vartime(&R, &A, hram, S);
 	ge25519_pack(checkR, &R);
 
 	/* check that R = SB - H(R,A,m)A */
-	if (ed25519_compare(RS, checkR, 32)) {
+	if (ed25519_compare(ctx->RS, checkR, 32)) {
 		return ED25519_VERIFY_OK;
 	} else {
 		return ED25519_VERIFY_BAD_SIGNATURE;
 	}
+}
+
+int ed25519_verify(const ed25519_signature RS, const ed25519_public_key pk, const unsigned char *m, size_t mlen) {
+	ed25519_verify_context ctx;
+	ed25519_verify_init(&ctx, RS, pk);
+	ed25519_verify_update(&ctx, m, mlen);
+	return ed25519_verify_final(&ctx);
 }
 
 /**
