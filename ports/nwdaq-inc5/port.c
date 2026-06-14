@@ -28,6 +28,15 @@
 #include <services/stm32-uart/stm32-uart.h>
 #include <services/adc-mcp3564/mcp3564.h>
 
+#include <services/stm32-flash/stm32-flash.h>
+#include <services/flash-vol-static/flash-vol-static.h>
+#if !defined(CONFIG_APP_BL)
+	#include <services/flash-cbor-mib/flash-cbor-mib.h>
+#endif
+
+#include <interfaces/led-sequences.h>
+#include <services/gpio-led/gpio-led.h>
+
 
 /**
  * Port specific global variables and singleton instances.
@@ -39,6 +48,8 @@ Stm32Gpio gpioa;
 Stm32Gpio gpiob;
 Stm32Gpio gpioc;
 
+Gpio *led_error_gpio = &(gpiob.pin[12]);
+Gpio *led_stat_gpio = &(gpiob.pin[13]);
 
 /* Forward declarations for ISR handlers wired into the libopencm3 vector table. */
 void usart1_isr(void);
@@ -147,7 +158,7 @@ static void liquid_sensor_init(void) {
 	/* Edge-aligned, up-counting, no clock division. */
 	TIM4->CR1 &= ~(TIM_CR1_CKD | TIM_CR1_CMS | TIM_CR1_DIR);
 	TIM4->CR1 &= ~TIM_CR1_ARPE;
-	TIM4->PSC = 16 - 1;
+	TIM4->PSC = 8 - 1;
 	TIM4->CR1 &= ~TIM_CR1_OPM;
 	TIM4->ARR = 2500 - 1;
 
@@ -157,14 +168,14 @@ static void liquid_sensor_init(void) {
 	TIM4->CCMR2 &= ~TIM_CCMR2_OC3PE;
 	TIM4->CCMR2 &= ~TIM_CCMR2_OC3M;
 	TIM4->CCMR2 |= TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2;
-	TIM4->CCR3 = 1250 - 1;
+	TIM4->CCR3 = 1000 - 1;
 	TIM4->DIER |= TIM_DIER_CC3IE;
 
 	TIM4->CCER &= ~TIM_CCER_CC4E;
 	TIM4->CCMR2 &= ~TIM_CCMR2_OC4PE;
 	TIM4->CCMR2 &= ~TIM_CCMR2_OC4M;
 	TIM4->CCMR2 |= TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4M_2;
-	TIM4->CCR4 = 2300 - 1;
+	TIM4->CCR4 = 2000 - 1;
 	TIM4->DIER |= TIM_DIER_CC4IE;
 
 	/* Enable toggling of the excitation outputs. */
@@ -273,22 +284,30 @@ static void adc_task(void *p) {
 		int32_t r = 0;
 
 		xSemaphoreTake(adc_new_cycle, portMAX_DELAY);
+		led_error_gpio->vmt->set(led_error_gpio, true);
+		led_error_gpio->vmt->set(led_error_gpio, false);
 
 		/* Try to take the following semaphores. The reason for this is the first one
 		 * which should be signalled is adc_new_cycle but that happens during the update
 		 * event which happens last. */
-		xSemaphoreTake(adc_meas, 0);
-		xSemaphoreTake(adc_ready, 0);
 
 		/* Manage the measurement sequence. */
 		mcp3564_set_mux(&mcp, MCP3564_MUX_VCM, adc_mux_config[(adc_cycle % 4) / 2]);
 
 		/* Wait for the right time to start the measurement. */
+		xSemaphoreTake(adc_meas, 0);
 		xSemaphoreTake(adc_meas, portMAX_DELAY);
+		led_error_gpio->vmt->set(led_error_gpio, true);
+		led_error_gpio->vmt->set(led_error_gpio, false);
 		mcp3564_send_cmd(&mcp, MCP3564_CMD_START, &status, NULL, 0, NULL, 0);
+		led_error_gpio->vmt->set(led_error_gpio, true);
+		led_error_gpio->vmt->set(led_error_gpio, false);
 
 		/* Wait until data ready arrives. */
+		xSemaphoreTake(adc_ready, 0);
 		xSemaphoreTake(adc_ready, portMAX_DELAY);
+		led_error_gpio->vmt->set(led_error_gpio, true);
+		led_error_gpio->vmt->set(led_error_gpio, false);
 		mcp3564_read_reg(&mcp, MCP3564_REG_ADCDATA, 4, (uint32_t *)&r, &status);
 
 		/* Process the measurement. */
@@ -298,13 +317,11 @@ static void adc_task(void *p) {
 			adc_value[(adc_cycle % 4) / 2] -= r;
 		}
 
-		if ((adc_cycle % 80) == 79) {
+		if ((adc_cycle % 160) == 159) {
 			for (size_t i = 0; i < 2; i++) {
-				adc_avg[i] = adc_value[i] / 20.0f;
+				adc_avg[i] = adc_value[i] / 40.0f;
 				adc_value[i] = 0;
 			}
-
-			gpiob.pin[12].vmt->toggle(&(gpiob.pin[12]));
 
 			/* Convert the raw accumulators and expose them through the Sensor interfaces.
 			 * Give each sensor its own semaphore so both can be read at the full rate. */
@@ -314,6 +331,8 @@ static void adc_task(void *p) {
 			temp_x_sensor.value = ntc_to_temp(adc_to_ntc(adc_avg[1], 10000.0f), 3977.0f, 10000.0f);
 			xSemaphoreGive(temp_x_sensor.ready);
 		}
+		led_error_gpio->vmt->set(led_error_gpio, true);
+		led_error_gpio->vmt->set(led_error_gpio, false);
 	}
 	vTaskDelete(NULL);
 }
@@ -338,7 +357,7 @@ static void adc_init(void) {
 	mcp3564_init(&mcp, &(spi1_adc.dev));
 	mcp3564_set_stp_enable(&mcp, false);
 	mcp3564_set_gain(&mcp, MCP3564_GAIN_1);
-	mcp3564_set_osr(&mcp, MCP3564_OSR_256);
+	mcp3564_set_osr(&mcp, MCP3564_OSR_128);
 	mcp3564_set_mux(&mcp, MCP3564_MUX_VCM, MCP3564_MUX_CH4);
 	mcp3564_set_irq_mode(&mcp, MCP3564_IRQ_MODE_IRQ);
 	mcp3564_set_stp_enable(&mcp, true);
@@ -347,7 +366,7 @@ static void adc_init(void) {
 	adc_meas = xSemaphoreCreateBinary();
 	adc_ready = xSemaphoreCreateBinary();
 	adc_new_cycle = xSemaphoreCreateBinary();
-	xTaskCreate(adc_task, "adc-task", configMINIMAL_STACK_SIZE + 256, NULL, 2, NULL);
+	xTaskCreate(adc_task, "adc-task", configMINIMAL_STACK_SIZE + 256, NULL, 3, NULL);
 
 }
 
@@ -391,6 +410,69 @@ void tim4_isr(void) {
 }
 
 
+/**********************************************************************************************************************
+ * Internal flash memory and MIB initialisation
+ **********************************************************************************************************************/
+
+Stm32Flash iflash;
+FlashVolStatic pv_iflash;
+Flash *lv_bl;
+Flash *lv_conf;
+Flash *lv_mib;
+Flash *lv_app;
+Flash *lv_update;
+#if !defined(CONFIG_APP_BL)
+FlashCborMib mib;
+#endif
+
+static void port_flash_init(void) {
+	stm32_flash_init(&iflash);
+
+	flash_vol_static_init(&pv_iflash, &iflash.flash);
+	flash_vol_static_create(&pv_iflash, "bootloader", 0,          60 * 1024,  &lv_bl);
+	flash_vol_static_create(&pv_iflash, "bootconf",   60 * 1024,  2 * 1024,   &lv_conf);
+	flash_vol_static_create(&pv_iflash, "mib",        62 * 1024,  2 * 1024,   &lv_mib);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_mib, "mib");
+	flash_vol_static_create(&pv_iflash, "app",        64 * 1024,  128 * 1024, &lv_app);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_app, "app");
+	flash_vol_static_create(&pv_iflash, "update",     192 * 1024, 64 * 1024,  &lv_update);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_update, "update");
+
+	#if !defined(CONFIG_APP_BL)
+		const struct flash_cbor_mib_conf mib_conf = {
+			.flash = lv_mib,
+			.offset = 0,
+			.max_size = 0,
+			.public_key_b64 = CONFIG_PORT_NWDAQ_INC5_MIB_PUBKEY,
+			.root_name = "mib",
+		};
+		if (flash_cbor_mib_init(&mib, &mib_conf) == FLASH_CBOR_MIB_RET_OK) {
+			Conf *mib_root = NULL;
+			flash_cbor_mib_get_root(&mib, &mib_root);
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)mib_root, "mib");
+		}
+	#endif
+}
+
+
+/**********************************************************************************************************************
+ * LED initialization
+ **********************************************************************************************************************/
+
+GpioLed led_error;
+GpioLed led_stat;
+
+static void led_init(void) {
+	gpio_led_init(&led_error, led_error_gpio, NULL, NULL);
+	gpio_led_init(&led_stat, led_stat_gpio, NULL, NULL);
+	#if defined(CONFIG_APP_BL)
+		led_error.led.vmt->sequence(&led_error.led, LED_SEQ_FAST_BLINK);
+	#else
+		led_stat.led.vmt->sequence(&led_stat.led, LED_SEQ_HEARTBEAT);
+	#endif
+}
+
+
 int32_t port_init(void) {
 	stm32_gpio_init(&gpioa, (void *)0x48000000);
 	stm32_gpio_init(&gpiob, (void *)0x48000400);
@@ -398,6 +480,8 @@ int32_t port_init(void) {
 
 	port_setup_default_gpio();
 	console_init();
+	led_init();
+	port_flash_init();
 
 	#if !defined(CONFIG_APP_BL)
 		inc5_sensor_init(&inc_x_sensor, &inc_x_sensor_info);

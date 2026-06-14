@@ -1,0 +1,11 @@
+config APP_INC5
+	bool "nwdaq-inc5 inclination measurement application"
+
+menu "inc5 application configuration"
+ 	depends on APP_INC5
+
+	config APP_NAME
+		string
+		default "inc5"
+
+endmenu
