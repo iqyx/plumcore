@@ -626,7 +626,7 @@ flash_cbor_mib_ret_t flash_cbor_mib_init(FlashCborMib *self, const struct flash_
 	memset(self, 0, sizeof(FlashCborMib));
 	memcpy(&self->config, config, sizeof(struct flash_cbor_mib_conf));
 
-	xTaskCreate(flash_cbor_mib_task, "flash-cbor-mib", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->task));
+	xTaskCreate(flash_cbor_mib_task, "flash-cbor-mib", configMINIMAL_STACK_SIZE + 192, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		return FLASH_CBOR_MIB_RET_FAILED;
 	}
