@@ -38,20 +38,20 @@ static const char *mq_compensation_coef_names[] = {
 
 
 /* Compute the compensated value for a single channel from the raw value @p x and the current
- * temperature @p temp_c. See the description of struct mq_compensation_coefs for the model. */
+ * temperature @p temp_c. See the description of struct mq_compensation_channel_conf for the model. */
 static float mq_compensation_apply(const struct mq_compensation_channel *ch, float x, float temp_c) {
 	/* Center the input around the calibration reference point. */
-	float xr = x - ch->coefs.x_ref;
+	float xr = x - ch->conf.x_ref;
 
 	/* Evaluate the correction polynomial using Horner's method. */
 	float y = 0.0f;
 	for (int i = MQ_COMPENSATION_MAX_ORDER; i >= 0; i--) {
-		y = y * xr + ch->coefs.c[i];
+		y = y * xr + ch->conf.c[i];
 	}
 
 	/* Apply the quadratic temperature compensation. */
-	float tr = temp_c - ch->coefs.t_ref;
-	float tc = 1.0f + tr * (ch->coefs.tc1 + tr * ch->coefs.tc2);
+	float tr = temp_c - ch->conf.t_ref;
+	float tc = 1.0f + tr * (ch->conf.tc1 + tr * ch->conf.tc2);
 	if (tc != 0.0f) {
 		y /= tc;
 	}
@@ -197,12 +197,12 @@ static void mq_compensation_task(void *p) {
 		 * array in place, then republish it with its original dtype and shape preserved. */
 		struct mq_compensation_channel *ch = self->first_channel;
 		while (ch != NULL) {
-			if (!strcmp(topic, ch->input_topic)) {
+			if (!strcmp(topic, ch->conf.input_topic)) {
 				for (size_t i = 0; i < self->rxbuf.asize; i++) {
 					float out = mq_compensation_apply(ch, mq_compensation_get_value(&self->rxbuf, i), self->temp_c);
 					mq_compensation_set_value(&self->rxbuf, i, out);
 				}
-				self->mqc->vmt->publish(self->mqc, ch->output_topic, &self->rxbuf, &ts);
+				self->mqc->vmt->publish(self->mqc, ch->conf.output_topic, &self->rxbuf, &ts);
 				break;
 			}
 			ch = ch->next;
@@ -222,7 +222,7 @@ mq_compensation_ret_t mq_compensation_init(MqCompensation *self, Mq *mq) {
 	self->mq = mq;
 	self->temp_c = MQ_COMPENSATION_DEFAULT_TEMP_C;
 
-	configlib_init(&self->root_conf, "compensation");
+	configlib_init_map(&self->root_conf, "compensation", NULL, CONF_SUBTREE);
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 	return MQ_COMPENSATION_RET_OK;
@@ -246,11 +246,9 @@ mq_compensation_ret_t mq_compensation_free(MqCompensation *self) {
 }
 
 
-mq_compensation_ret_t mq_compensation_add_channel(MqCompensation *self, const char *input_topic, const char *output_topic, const struct mq_compensation_coefs *coefs) {
+mq_compensation_ret_t mq_compensation_add_channel(MqCompensation *self, const struct mq_compensation_channel_conf *conf) {
 	if (u_assert(self != NULL) ||
-	    u_assert(input_topic != NULL) ||
-	    u_assert(output_topic != NULL) ||
-	    u_assert(coefs != NULL)) {
+	    u_assert(conf != NULL)) {
 		return MQ_COMPENSATION_RET_FAILED;
 	}
 
@@ -259,29 +257,28 @@ mq_compensation_ret_t mq_compensation_add_channel(MqCompensation *self, const ch
 		goto err;
 	}
 	memset(ch, 0, sizeof(struct mq_compensation_channel));
-	strlcpy(ch->input_topic, input_topic, MQ_COMPENSATION_MAX_TOPIC_LEN);
-	strlcpy(ch->output_topic, output_topic, MQ_COMPENSATION_MAX_TOPIC_LEN);
-	memcpy(&ch->coefs, coefs, sizeof(ch->coefs));
+	memcpy(&ch->conf, conf, sizeof(ch->conf));
 
-	/* Build the configuration subtree for this channel. The subtree is named after the output
-	 * topic and holds the reference points and polynomial coefficients. */
-	configlib_init_map_append(&ch->channel_conf, ch->output_topic, NULL, CONF_SUBTREE, &self->root_conf, CONF_DIR_CHILD);
-	configlib_init_map_append(&ch->x_ref_conf, "x_ref", &ch->coefs.x_ref, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
+	/* Build the configuration subtree for this channel. The subtree is named after the channel
+	 * name and holds the reference points and polynomial coefficients. */
+	configlib_init_map_append(&ch->channel_conf, ch->conf.name, NULL, CONF_SUBTREE, &self->root_conf, CONF_DIR_CHILD);
+
+	configlib_init_map_append(&ch->x_ref_conf, "x_ref", &ch->conf.x_ref, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
 	for (size_t i = 0; i <= MQ_COMPENSATION_MAX_ORDER; i++) {
-		configlib_init_map_append(&ch->c_conf[i], mq_compensation_coef_names[i], &ch->coefs.c[i], CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
+		configlib_init_map_append(&ch->c_conf[i], mq_compensation_coef_names[i], &ch->conf.c[i], CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
 	}
-	configlib_init_map_append(&ch->t_ref_conf, "t_ref", &ch->coefs.t_ref, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
-	configlib_init_map_append(&ch->tc1_conf, "tc1", &ch->coefs.tc1, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
-	configlib_init_map_append(&ch->tc2_conf, "tc2", &ch->coefs.tc2, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
+	configlib_init_map_append(&ch->t_ref_conf, "t_ref", &ch->conf.t_ref, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
+	configlib_init_map_append(&ch->tc1_conf, "tc1", &ch->conf.tc1, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
+	configlib_init_map_append(&ch->tc2_conf, "tc2", &ch->conf.tc2, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
 
 	/* And append it to the linked list. */
 	ch->next = self->first_channel;
 	self->first_channel = ch;
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("added channel '%s' -> '%s'"), input_topic, output_topic);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("added channel '%s' ('%s' -> '%s')"), conf->name, conf->input_topic, conf->output_topic);
 	return MQ_COMPENSATION_RET_OK;
 err:
-	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("error adding channel '%s' -> '%s'"), input_topic, output_topic);
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("error adding channel '%s'"), conf->name);
 	return MQ_COMPENSATION_RET_FAILED;
 }
 
@@ -329,7 +326,7 @@ mq_compensation_ret_t mq_compensation_start(MqCompensation *self, uint32_t prio)
 	/* Subscribe to all channel input topics and the temperature topic. */
 	struct mq_compensation_channel *ch = self->first_channel;
 	while (ch != NULL) {
-		self->mqc->vmt->subscribe(self->mqc, ch->input_topic);
+		self->mqc->vmt->subscribe(self->mqc, ch->conf.input_topic);
 		ch = ch->next;
 	}
 

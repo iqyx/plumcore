@@ -36,7 +36,8 @@ typedef enum {
 
 
 /**
- * Set of calibration coefficients applied to a single channel.
+ * Configuration for a single compensation channel, including routing topics, a human-readable
+ * name, and the calibration coefficients.
  *
  * The measured value @p x is first centered around @p x_ref and corrected by the polynomial
  *
@@ -51,7 +52,11 @@ typedef enum {
  * degree squared. Centering both polynomials around a reference keeps the float coefficients
  * well conditioned around the operating point.
  */
-struct mq_compensation_coefs {
+struct mq_compensation_channel_conf {
+	char name[MQ_COMPENSATION_MAX_TOPIC_LEN];
+	char input_topic[MQ_COMPENSATION_MAX_TOPIC_LEN];
+	char output_topic[MQ_COMPENSATION_MAX_TOPIC_LEN];
+
 	/* Value polynomial reference point and coefficients. */
 	float x_ref;
 	float c[MQ_COMPENSATION_MAX_ORDER + 1];
@@ -64,10 +69,7 @@ struct mq_compensation_coefs {
 
 
 struct mq_compensation_channel {
-	char input_topic[MQ_COMPENSATION_MAX_TOPIC_LEN];
-	char output_topic[MQ_COMPENSATION_MAX_TOPIC_LEN];
-
-	struct mq_compensation_coefs coefs;
+	struct mq_compensation_channel_conf conf;
 
 	/* Configuration subtree exposing the coefficients of this channel. */
 	ConfiglibValue channel_conf;
@@ -127,19 +129,16 @@ mq_compensation_ret_t mq_compensation_free(MqCompensation *self);
 /**
  * @brief Add a compensation channel
  *
- * Values received on @p input_topic are compensated using @p coefs and published on
- * @p output_topic. A configuration subtree named after @p output_topic exposing the
- * coefficients is appended to the service configuration tree.
+ * Values received on @p conf->input_topic are compensated using the coefficients in @p conf and
+ * published on @p conf->output_topic. A configuration subtree named after @p conf->name exposing
+ * the coefficients is appended to the service configuration tree.
  *
  * @param self The service instance.
- * @param input_topic Topic to receive raw values from.
- * @param output_topic Topic to publish compensated values to. Also used as the name of the
- *                     channel configuration subtree.
- * @param coefs Initial set of calibration coefficients. The structure is copied.
+ * @param conf Channel configuration (topics, name, coefficients). The structure is copied.
  *
  * @return MQ_COMPENSATION_RET_FAILED on error or MQ_COMPENSATION_RET_OK otherwise.
  */
-mq_compensation_ret_t mq_compensation_add_channel(MqCompensation *self, const char *input_topic, const char *output_topic, const struct mq_compensation_coefs *coefs);
+mq_compensation_ret_t mq_compensation_add_channel(MqCompensation *self, const struct mq_compensation_channel_conf *conf);
 
 
 /**
