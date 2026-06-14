@@ -46,7 +46,7 @@ class NbusClient:
 		self._sock = sock
 
 	def call(self, req: dict):
-		reply = self._sock.request(cbor2.dumps(req), timeout=0.05, retries=50)
+		reply = self._sock.request(cbor2.dumps(req), timeout=0.10, retries=20)
 		if reply is None:
 			return None
 		try:
