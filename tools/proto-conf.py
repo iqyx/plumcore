@@ -67,6 +67,7 @@ def init_args():
 	parser.add_argument('uri', type=str, help='nbus2 connection URI carrying the destination, e.g. udp6:///<sid>/<ep>')
 	parser.add_argument('-w', '--walk', type=str, nargs='?', const='', default=None, metavar='PATH', help='walk and show the configuration tree at PATH, slash separated (default: root)')
 	parser.add_argument('-r', '--read', type=str, default=None, metavar='PATH', help='read the value of the conf node at PATH and print it (script-friendly)')
+	parser.add_argument('-W', '--write', type=str, nargs=2, default=None, metavar=('PATH', 'VALUE'), help='write VALUE to the conf node at PATH (slash separated)')
 	parser.add_argument('-v', '--verbose', action='store_true', help='log all nbus2 protocol calls and responses')
 
 	return parser.parse_args()
@@ -188,6 +189,56 @@ class ConfClient:
 			sys.exit(1)
 		print(self._fmt_value(val))
 
+	def _stat(self, path):
+		r = self._n.call({'c': 'stat', 'p': path})
+		if r is None or r.get('err'):
+			return None
+		return r
+
+	@staticmethod
+	def _parse_value(type_int, s):
+		try:
+			if type_int == CONF_F:
+				return float(s)
+			elif type_int in (CONF_U32, CONF_U16, CONF_U8, CONF_ENUM):
+				return int(s, 0)
+			elif type_int in (CONF_S32, CONF_S16, CONF_S8):
+				return int(s, 0)
+			elif type_int == CONF_B:
+				if s.lower() in ('true', '1', 'yes', 'on'):
+					return True
+				if s.lower() in ('false', '0', 'no', 'off'):
+					return False
+				return None
+			elif type_int == CONF_STR:
+				return s
+			elif type_int == CONF_BSTR:
+				return bytes.fromhex(s)
+		except (ValueError, TypeError):
+			return None
+		return None
+
+	def write(self, path=None, value_str=None):
+		path = path or []
+		stat = self._stat(path)
+		if stat is None:
+			print(f'cannot stat {"/".join(path) if path else "root"}', file=sys.stderr)
+			sys.exit(1)
+		type_int = stat.get('t', CONF_NONE)
+		if type_int in (CONF_NONE, CONF_SUBTREE):
+			print(f'node type {TYPE_NAMES.get(type_int, str(type_int))!r} is not writable', file=sys.stderr)
+			sys.exit(1)
+		val = self._parse_value(type_int, value_str)
+		if val is None:
+			print(f'cannot parse {value_str!r} as {TYPE_NAMES.get(type_int, str(type_int))}', file=sys.stderr)
+			sys.exit(1)
+		r = self._n.call({'c': 'write', 'p': path, 't': type_int, 'val': val})
+		if r is None or r.get('err'):
+			err = r.get('err', 'no response') if r else 'no response'
+			print(f'write failed: {err}', file=sys.stderr)
+			sys.exit(1)
+		print('ok')
+
 
 if __name__ == "__main__":
 
@@ -206,3 +257,5 @@ if __name__ == "__main__":
 			c.walk([p for p in args.walk.split('/') if p])
 		if args.read is not None:
 			c.read([p for p in args.read.split('/') if p])
+		if args.write is not None:
+			c.write([p for p in args.write[0].split('/') if p], args.write[1])
