@@ -155,10 +155,15 @@ static bool decode_conf_val_from_map(CborValue *map, enum conf_type type, union 
 
 	switch (type) {
 		case CONF_F: {
-			if (!cbor_value_is_float(&v)) {
+			if (cbor_value_is_float(&v)) {
+				cbor_value_get_float(&v, &val->f);
+			} else if (cbor_value_is_double(&v)) {
+				double d = 0.0;
+				cbor_value_get_double(&v, &d);
+				val->f = (float)d;
+			} else {
 				return false;
 			}
-			cbor_value_get_float(&v, &val->f);
 			return true;
 		}
 		case CONF_U32:
