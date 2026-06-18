@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <waveform-source.h>
 
+#include <main.h>
+
 #include <interfaces/i2c-bus.h>
 #include <interfaces/sensor.h>
 
@@ -20,6 +22,15 @@ typedef struct {
 	Sensor temp;
 	Sensor rh;
 	uint8_t id[3];
+
+	/* Both sensor values come from a single conversion. The lock makes the check-and-refresh of the cache below
+	 * atomic, so temperature and humidity are always read from the same measurement even when the two Sensor
+	 * instances are queried from different tasks. */
+	SemaphoreHandle_t lock;
+	bool valid;
+	TickType_t last_update;
+	float temp_value;
+	float rh_value;
 } Shtc3;
 
 
