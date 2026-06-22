@@ -189,11 +189,21 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 	return I2C_BUS_RET_OK;
 
 err:
-	/* Common error exit: release the bus with a STOP, clear all pending status flags and disable the transfer
-	 * interrupts so the peripheral is left in a clean idle state for the next transaction. */
-	base->CR2 |= I2C_CR2_STOP;
-	base->ICR |= I2C_ICR_NACKCF | I2C_ICR_BERRCF | I2C_ICR_ARLOCF | I2C_ICR_OVRCF | I2C_ICR_STOPCF;
+	/* Common error exit. Disable the transfer interrupts first so the ISR cannot fire while we tear the
+	 * transaction down, then recover the peripheral depending on the failure. Either way the bus lock is
+	 * always released so the bus never stays stuck. */
 	base->CR1 &= ~(I2C_CR1_TXIE | I2C_CR1_NACKIE | I2C_CR1_RXIE | I2C_CR1_TCIE | I2C_CR1_ERRIE);
+	if (ret == I2C_BUS_RET_NACK) {
+		/* A NACK is a normal slave response: the state machine is still healthy, so just release the bus
+		 * with a STOP and clear the pending flags. */
+		base->CR2 |= I2C_CR2_STOP;
+		base->ICR |= I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+	} else {
+		/* A timeout or a bus/arbitration/overrun error means an expected TXIS/RXNE/TC event never arrived
+		 * and the peripheral state machine is wedged. A STOP alone does not recover it, so fully
+		 * re-initialize the peripheral (PE off/on), which resets the state machine and clears all flags. */
+		stm32_i2c_bus_init(self);
+	}
 	xSemaphoreGive(self->bus_lock);
 	return ret;
 }
