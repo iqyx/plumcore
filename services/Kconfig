@@ -460,6 +460,10 @@ menu "User interface services"
 		bool "Simple text console on a framebuffer device"
 		default n
 
+	config SERVICE_FB_COMPOSITOR
+		bool "Window compositor on top of a framebuffer device"
+		default n
+
 	config SERVICE_SENSOR_KEYPAD
 		bool "Keypad using Sensor devices"
 		default n
