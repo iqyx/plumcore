@@ -165,6 +165,10 @@ menu "High level device drivers"
 		bool "MCP3564 ADC"
 		default n
 
+	config SERVICE_SJA1105
+		bool "NXP SJA1105P/Q/R/S Ethernet switch"
+		default n
+
 	config SERVICE_ADC_COMPOSITE
 		bool "Composite ADC device"
 		default n

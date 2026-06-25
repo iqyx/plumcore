@@ -24,4 +24,5 @@ It contains, among others:
 	nwdaq-br28-fdc/index.rst
 	nwdaq-rtd18-fdc/index.rst
 	nwdaq-if-lpcan/index.rst
+	nwdaq-if-sr1s/index.rst
 
