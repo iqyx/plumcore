@@ -1,0 +1,3 @@
+config SERVICE_UART_OW
+	bool "1-Wire bus master over a UART peripheral"
+	default n

@@ -13,8 +13,7 @@
 
 #include <main.h>
 
-#include <interfaces/uart.h>
-#include <interfaces/stream.h>
+#include <interfaces/ow.h>
 #include <interfaces/flash.h>
 #include <interfaces/sensor.h>
 
@@ -22,15 +21,6 @@
 
 #define MODULE_NAME "tmp1826"
 
-
-/* 1-Wire-over-UART bitrates: the reset/presence slot is generated at 9600 baud (the framing start bit plus the low
- * data bits of 0xF0 form the ~520 us reset low pulse) while each bit slot is generated at 115200 baud (one UART byte
- * per 1-Wire bit). */
-#define TMP1826_OW_RESET_BAUD 9600
-#define TMP1826_OW_DATA_BAUD 115200
-
-/* Stream read timeout for the echoed bytes of a single transfer. Generous compared to the on-wire time. */
-#define TMP1826_IO_TIMEOUT_MS 20
 
 /* Worst case active conversion time is ~6 ms (CONV_TIME_SEL = 5.5 ms); keep a margin. */
 #define TMP1826_CONV_TIME_MS 12
@@ -41,14 +31,8 @@
 /* Idle bus time the device needs after the read address before it streams a block, tREADIDLE = 560 us. */
 #define TMP1826_READ_IDLE_MS 1
 
-/* Largest 1-Wire transfer performed in a single UART burst (in 1-Wire bytes). Reading scratchpad-1 needs 9 bytes;
- * each 1-Wire byte expands to 8 UART bytes, so this stays well within the UART rx buffer. */
-#define TMP1826_OW_MAX_BYTES 16
-
 /* ROM commands. */
 #define TMP1826_ROM_READ 0x33
-#define TMP1826_ROM_MATCH 0x55
-#define TMP1826_ROM_SKIP 0xcc
 
 /* Function commands. */
 #define TMP1826_FUNC_CONVERT_TEMP 0x44
@@ -72,7 +56,7 @@
 
 
 /**********************************************************************************************************************
- * 1-Wire link layer over the UART
+ * TMP1826 device access
  **********************************************************************************************************************/
 
 /* Dallas/Maxim 1-Wire CRC-8 (polynomial x^8 + x^5 + x^4 + 1, reflected as 0x8c, initial value 0x00). */
@@ -92,128 +76,15 @@ static uint8_t ow_crc8(const uint8_t *data, size_t len) {
 }
 
 
-/* Discard any stale bytes left in the UART receive buffer before starting a new transfer. */
-static void ow_flush(Tmp1826 *self) {
-	uint8_t tmp[16];
-	size_t read = 0;
-	while (self->stream->vmt->read_timeout(self->stream, tmp, sizeof(tmp), &read, 0) == STREAM_RET_OK) {
-		;
-	}
-}
-
-
-/* Read exactly @p len bytes from the stream, looping until they all arrive or a timeout occurs. */
-static tmp1826_ret_t ow_read_exact(Tmp1826 *self, uint8_t *buf, size_t len) {
-	size_t got = 0;
-	while (got < len) {
-		size_t read = 0;
-		if (self->stream->vmt->read_timeout(self->stream, buf + got, len - got, &read,
-		                                    TMP1826_IO_TIMEOUT_MS) != STREAM_RET_OK) {
-			return TMP1826_RET_FAILED;
-		}
-		got += read;
-	}
-	return TMP1826_RET_OK;
-}
-
-
-/*
- * Transfer @p n 1-Wire bytes in a single UART burst. Each 1-Wire bit is encoded as one UART byte: 0xFF drives a
- * short low pulse (write/read '1') and 0x00 drives a long low pulse (write '0'). On a single-wire half-duplex UART
- * the line state is read back for every transmitted byte, so the device response is recovered by sampling the echo:
- * a returned 0xFF means the line stayed high (bit '1'), anything else means the device pulled it low (bit '0').
- *
- * If @p out is NULL all bit slots are read slots (0xFF). If @p in is NULL the read-back bytes are discarded.
- */
-static tmp1826_ret_t ow_io(Tmp1826 *self, const uint8_t *out, uint8_t *in, size_t n) {
-	if (n == 0 || n > TMP1826_OW_MAX_BYTES) {
-		return TMP1826_RET_FAILED;
-	}
-
-	uint8_t tx[TMP1826_OW_MAX_BYTES * 8];
-	uint8_t rx[TMP1826_OW_MAX_BYTES * 8];
-
-	for (size_t i = 0; i < n; i++) {
-		uint8_t b = (out != NULL) ? out[i] : 0xff;
-		for (size_t bit = 0; bit < 8; bit++) {
-			tx[i * 8 + bit] = (b & (1 << bit)) ? 0xff : 0x00;
-		}
-	}
-
-	ow_flush(self);
-	if (self->stream->vmt->write(self->stream, tx, n * 8) != STREAM_RET_OK) {
-		return TMP1826_RET_FAILED;
-	}
-	if (ow_read_exact(self, rx, n * 8) != TMP1826_RET_OK) {
-		return TMP1826_RET_FAILED;
-	}
-
-	if (in != NULL) {
-		for (size_t i = 0; i < n; i++) {
-			uint8_t b = 0;
-			for (size_t bit = 0; bit < 8; bit++) {
-				if (rx[i * 8 + bit] == 0xff) {
-					b |= (1 << bit);
-				}
-			}
-			in[i] = b;
-		}
-	}
-	return TMP1826_RET_OK;
-}
-
-
-/* Generate a 1-Wire bus reset and detect the device presence pulse. */
-static tmp1826_ret_t ow_reset(Tmp1826 *self, bool *present) {
-	self->uart->vmt->set_bitrate(self->uart, TMP1826_OW_RESET_BAUD);
-	ow_flush(self);
-
-	uint8_t tx = 0xf0;
-	uint8_t rx = 0xf0;
-	tmp1826_ret_t ret = TMP1826_RET_OK;
-	if (self->stream->vmt->write(self->stream, &tx, 1) != STREAM_RET_OK ||
-	    ow_read_exact(self, &rx, 1) != TMP1826_RET_OK) {
-		ret = TMP1826_RET_FAILED;
-	}
-
-	self->uart->vmt->set_bitrate(self->uart, TMP1826_OW_DATA_BAUD);
-	if (ret != TMP1826_RET_OK) {
-		return ret;
-	}
-
-	/* Without a device the line follows our transmission and reads back as 0xF0; a present device pulls the line
-	 * low during the presence window, corrupting the echoed byte. */
-	if (present != NULL) {
-		*present = (rx != 0xf0);
-	}
-	return TMP1826_RET_OK;
-}
-
-
-/* Reset the bus and address the (single) device on it using SKIP ROM. */
-static tmp1826_ret_t tmp1826_select(Tmp1826 *self) {
-	bool present = false;
-	if (ow_reset(self, &present) != TMP1826_RET_OK || !present) {
-		return TMP1826_RET_FAILED;
-	}
-	uint8_t cmd = TMP1826_ROM_SKIP;
-	return ow_io(self, &cmd, NULL, 1);
-}
-
-
-/**********************************************************************************************************************
- * TMP1826 device access
- **********************************************************************************************************************/
-
 /* Read the 64-bit ROM unique address of the single device on the bus (used as a presence probe at init). */
 static tmp1826_ret_t tmp1826_read_rom(Tmp1826 *self, uint8_t *rom) {
 	bool present = false;
-	if (ow_reset(self, &present) != TMP1826_RET_OK || !present) {
+	if (self->ow->vmt->reset(self->ow, &present) != OW_RET_OK || !present) {
 		return TMP1826_RET_FAILED;
 	}
 	uint8_t cmd = TMP1826_ROM_READ;
-	if (ow_io(self, &cmd, NULL, 1) != TMP1826_RET_OK ||
-	    ow_io(self, NULL, rom, 8) != TMP1826_RET_OK) {
+	if (self->ow->vmt->exchange(self->ow, &cmd, NULL, 1) != OW_RET_OK ||
+	    self->ow->vmt->exchange(self->ow, NULL, rom, 8) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	if (ow_crc8(rom, 7) != rom[7]) {
@@ -225,28 +96,28 @@ static tmp1826_ret_t tmp1826_read_rom(Tmp1826 *self, uint8_t *rom) {
 
 /* Trigger a one-shot conversion and read back the resulting die temperature in degrees Celsius. */
 static tmp1826_ret_t tmp1826_measure(Tmp1826 *self, float *value) {
-	if (tmp1826_select(self) != TMP1826_RET_OK) {
+	if (self->ow->vmt->select(self->ow) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	uint8_t cmd = TMP1826_FUNC_CONVERT_TEMP;
-	if (ow_io(self, &cmd, NULL, 1) != TMP1826_RET_OK) {
+	if (self->ow->vmt->exchange(self->ow, &cmd, NULL, 1) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 
 	/* The bus must stay idle while the bus-powered device performs the conversion. */
 	vTaskDelay(pdMS_TO_TICKS(TMP1826_CONV_TIME_MS));
 
-	if (tmp1826_select(self) != TMP1826_RET_OK) {
+	if (self->ow->vmt->select(self->ow) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	cmd = TMP1826_FUNC_READ_SCRATCHPAD1;
-	if (ow_io(self, &cmd, NULL, 1) != TMP1826_RET_OK) {
+	if (self->ow->vmt->exchange(self->ow, &cmd, NULL, 1) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 
 	/* The device sends the first 8 scratchpad-1 bytes followed by their CRC. */
 	uint8_t sp[9] = {0};
-	if (ow_io(self, NULL, sp, sizeof(sp)) != TMP1826_RET_OK) {
+	if (self->ow->vmt->exchange(self->ow, NULL, sp, sizeof(sp)) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	if (ow_crc8(sp, 8) != sp[8]) {
@@ -268,30 +139,33 @@ static tmp1826_ret_t tmp1826_measure(Tmp1826 *self, float *value) {
 
 /* Read one 8-byte EEPROM block at the block-aligned address @p addr. */
 static tmp1826_ret_t tmp1826_eeprom_read_block(Tmp1826 *self, uint16_t addr, uint8_t *data) {
-	if (tmp1826_select(self) != TMP1826_RET_OK) {
+	if (self->ow->vmt->select(self->ow) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	uint8_t cmd[3] = {TMP1826_FUNC_READ_EEPROM, (addr >> 8) & 0xff, addr & 0xff};
-	if (ow_io(self, cmd, NULL, sizeof(cmd)) != TMP1826_RET_OK) {
+	if (self->ow->vmt->exchange(self->ow, cmd, NULL, sizeof(cmd)) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	/* The device needs an idle gap after the address before it starts streaming the block data. */
 	vTaskDelay(pdMS_TO_TICKS(TMP1826_READ_IDLE_MS));
-	return ow_io(self, NULL, data, TMP1826_EEPROM_BLOCK);
+	if (self->ow->vmt->exchange(self->ow, NULL, data, TMP1826_EEPROM_BLOCK) != OW_RET_OK) {
+		return TMP1826_RET_FAILED;
+	}
+	return TMP1826_RET_OK;
 }
 
 
 /* Write one full 8-byte EEPROM block at the block-aligned address @p addr and commit it to the EEPROM. */
 static tmp1826_ret_t tmp1826_eeprom_write_block(Tmp1826 *self, uint16_t addr, const uint8_t *data) {
 	/* Stage the address and data in scratchpad-2; the device echoes a CRC over the 2 address and 8 data bytes. */
-	if (tmp1826_select(self) != TMP1826_RET_OK) {
+	if (self->ow->vmt->select(self->ow) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	uint8_t cmd[3] = {TMP1826_FUNC_WRITE_SCRATCHPAD2, (addr >> 8) & 0xff, addr & 0xff};
 	uint8_t crc = 0;
-	if (ow_io(self, cmd, NULL, sizeof(cmd)) != TMP1826_RET_OK ||
-	    ow_io(self, data, NULL, TMP1826_EEPROM_BLOCK) != TMP1826_RET_OK ||
-	    ow_io(self, NULL, &crc, 1) != TMP1826_RET_OK) {
+	if (self->ow->vmt->exchange(self->ow, cmd, NULL, sizeof(cmd)) != OW_RET_OK ||
+	    self->ow->vmt->exchange(self->ow, data, NULL, TMP1826_EEPROM_BLOCK) != OW_RET_OK ||
+	    self->ow->vmt->exchange(self->ow, NULL, &crc, 1) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	uint8_t check[2 + TMP1826_EEPROM_BLOCK] = {cmd[1], cmd[2]};
@@ -302,11 +176,11 @@ static tmp1826_ret_t tmp1826_eeprom_write_block(Tmp1826 *self, uint16_t addr, co
 	}
 
 	/* Commit the staged scratchpad-2 content to the user EEPROM and wait for the programming to finish. */
-	if (tmp1826_select(self) != TMP1826_RET_OK) {
+	if (self->ow->vmt->select(self->ow) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	uint8_t copy[2] = {TMP1826_FUNC_COPY_SCRATCHPAD2, TMP1826_COPY_COMMIT};
-	if (ow_io(self, copy, NULL, sizeof(copy)) != TMP1826_RET_OK) {
+	if (self->ow->vmt->exchange(self->ow, copy, NULL, sizeof(copy)) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	vTaskDelay(pdMS_TO_TICKS(TMP1826_PROG_TIME_MS));
@@ -486,15 +360,13 @@ static const struct flash_vmt eeprom_flash_vmt = {
  * Public API
  **********************************************************************************************************************/
 
-tmp1826_ret_t tmp1826_init(Tmp1826 *self, Uart *uart, Stream *stream) {
+tmp1826_ret_t tmp1826_init(Tmp1826 *self, Ow *ow) {
 	if (u_assert(self != NULL) ||
-	    u_assert(uart != NULL) ||
-	    u_assert(stream != NULL)) {
+	    u_assert(ow != NULL)) {
 		return TMP1826_RET_FAILED;
 	}
 	memset(self, 0, sizeof(Tmp1826));
-	self->uart = uart;
-	self->stream = stream;
+	self->ow = ow;
 
 	self->lock = xSemaphoreCreateMutex();
 	if (self->lock == NULL) {
