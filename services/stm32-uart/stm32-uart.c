@@ -48,7 +48,13 @@ static uart_ret_t uart_set_bitrate(Uart *self, uint32_t bitrate_baud) {
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
 	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("port %p set baud rate to %u"), self, bitrate_baud);
+	/* Disabling the USART (UE=0) below to reprogram BRR re-asserts the TC and TXE flags to their reset (active)
+	 * state, and those flags cannot be cleared while UE=0. If their interrupt enables stayed set, the handler
+	 * would spin on the uncleared flags and starve the caller, which is fatal when the bitrate is switched at
+	 * runtime (e.g. a 1-Wire master toggling between reset and bit-slot rates). Mask them across the
+	 * reconfiguration and restore them once the port is re-enabled and the flags can be cleared again. */
+	uint32_t txie = port->CR1 & (USART_CR1_TCIE | USART_CR1_TXEIE_TXFNFIE);
+	port->CR1 &= ~(USART_CR1_TCIE | USART_CR1_TXEIE_TXFNFIE);
 
 	stm32_uart_enable(stm32_uart, false);
 	/** @todo clock selection */
@@ -60,6 +66,9 @@ static uart_ret_t uart_set_bitrate(Uart *self, uint32_t bitrate_baud) {
 		port->BRR = (clock + bitrate_baud / 2) / bitrate_baud;
 	#endif
 	stm32_uart_enable(stm32_uart, true);
+
+	port->ICR = USART_ICR_TCCF;
+	port->CR1 |= txie;
 
 	return UART_RET_OK;
 }
