@@ -1,0 +1,3 @@
+config SERVICE_TMP1826
+	bool "TMP1826 1-Wire temperature sensor and EEPROM driver"
+	default n
