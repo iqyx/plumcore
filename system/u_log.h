@@ -46,10 +46,15 @@
 // #define ESC_COLOR_FG_WHITE "\x1b[37m"
 
 
-#define u_log log_cbuffer_printf
+/* Logging is written straight to the output stream. The historic circular-buffer
+ * backend (log_cbuffer_append_msg) is intentionally bypassed: its wrap-around block
+ * placement overruns the buffer end and corrupts adjacent .data (see PORT_CLOG). */
+#define u_log u_log_write
 #define U_LOG_MODULE            "\x1b[33m" "%s: " "\x1b[0m"
 #define U_LOG_MODULE_PREFIX(x)  U_LOG_MODULE x, MODULE_NAME
 extern struct log_cbuffer *system_log;
+
+int32_t u_log_write(struct log_cbuffer *buf, uint8_t type, const char *fmt, ...);
 
 
 int32_t u_log_init(void);

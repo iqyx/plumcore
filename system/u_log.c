@@ -23,6 +23,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdarg.h>
 
 #include "u_log.h"
 #include "u_assert.h"
@@ -96,21 +98,13 @@ static void u_log_stream_print(Stream *stream, const char *s) {
 }
 
 
-static void u_log_print_handler(struct log_cbuffer *buf, uint32_t pos, void *ctx) {
-	if (ctx == NULL || buf == NULL) {
+/* Emit a single already-formatted log line to the output stream, prepending the
+ * timestamp, colour and severity label. Shared by the live logging path
+ * (u_log_write) and the on-demand circular-buffer history dump (u_log_print_handler). */
+static void u_log_emit(Stream *stream, uint8_t header, uint32_t time, struct interface_rtc *rtc, const char *msg) {
+	if (stream == NULL || msg == NULL) {
 		return;
 	}
-
-	uint8_t header;
-	char *msg;
-	uint32_t time;
-
-	log_cbuffer_get_header(buf, pos, &header);
-	log_cbuffer_get_message(buf, pos, &msg);
-	log_cbuffer_get_time(buf, pos, &time);
-
-	Stream *stream = (Stream *)ctx;
-	struct interface_rtc *rtc = (struct interface_rtc *)buf->time_handler_ctx;
 
 	char s[30] = {0};
 
@@ -165,6 +159,23 @@ static void u_log_print_handler(struct log_cbuffer *buf, uint32_t pos, void *ctx
 }
 
 
+static void u_log_print_handler(struct log_cbuffer *buf, uint32_t pos, void *ctx) {
+	if (ctx == NULL || buf == NULL) {
+		return;
+	}
+
+	uint8_t header;
+	char *msg;
+	uint32_t time;
+
+	log_cbuffer_get_header(buf, pos, &header);
+	log_cbuffer_get_message(buf, pos, &msg);
+	log_cbuffer_get_time(buf, pos, &time);
+
+	u_log_emit((Stream *)ctx, header, time, (struct interface_rtc *)buf->time_handler_ctx, msg);
+}
+
+
 static void u_log_time_handler(struct log_cbuffer *buf, uint32_t *time, void *ctx) {
 	if (ctx == NULL || buf == NULL) {
 		return;
@@ -199,4 +210,41 @@ int32_t u_log_set_rtc(struct interface_rtc *rtc) {
 	#endif
 
 	return U_LOG_SET_RTC_OK;
+}
+
+
+/**
+ * Live logging entry point (the u_log() macro target).
+ *
+ * Formats the message and writes it directly to the configured output stream. The
+ * circular log buffer is deliberately not used: log_cbuffer_append_msg()'s wrap-around
+ * placement overruns PORT_CLOG_SIZE and corrupts adjacent .data. The control struct is
+ * still kept valid so the stream/RTC handlers and the on-demand history dump keep working.
+ */
+int32_t u_log_write(struct log_cbuffer *buf, uint8_t type, const char *fmt, ...) {
+	if (buf == NULL) {
+		return -1;
+	}
+
+	/* The output stream is stored as the print handler context by u_log_set_stream().
+	 * Until a stream is attached (early boot) messages are dropped, not buffered. */
+	Stream *stream = (Stream *)buf->print_handler_ctx;
+	if (stream == NULL) {
+		return 0;
+	}
+
+	char msg[LOG_CBUFFER_MSG_LEN_MAX];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, args);
+	va_end(args);
+
+	uint32_t time = 0;
+	if (buf->time_handler != NULL) {
+		buf->time_handler(buf, &time, buf->time_handler_ctx);
+	}
+
+	u_log_emit(stream, type, time, (struct interface_rtc *)buf->time_handler_ctx, msg);
+
+	return 0;
 }
