@@ -189,10 +189,10 @@ static nbus_ret_t nbus_pbuf_receive(struct nbus_pbuf *self, Nbus *nbus) {
 		return NBUS_RET_FAILED;
 	}
 
-	if ((nbus->config.rx_crypto & NBUS_CRYPTO_BLAKE2S_SIV) && nbus_unprotect_b2ssiv(self) == NBUS_RET_OK) {
-		return NBUS_RET_OK;
-	}
-	if ((nbus->config.rx_crypto & NBUS_CRYPTO_CHACHA20_HALFSIPHASH) && nbus_unprotect_chacha(self) == NBUS_RET_OK) {
+	if (((nbus->config.rx_crypto & NBUS_CRYPTO_BLAKE2S_SIV) && nbus_unprotect_b2ssiv(self) == NBUS_RET_OK) ||
+	    ((nbus->config.rx_crypto & NBUS_CRYPTO_CHACHA20_HALFSIPHASH) && nbus_unprotect_chacha(self) == NBUS_RET_OK)) {
+		/* Deserialize the packet flags now that the header is in the clear. */
+		self->multicast = self->buf[15] & NBUS_FLAG_MULTICAST;
 		return NBUS_RET_OK;
 	}
 
@@ -214,9 +214,11 @@ static nbus_ret_t nbus_pbuf_transmit(struct nbus_pbuf *self, Nbus *nbus) {
 
 	/* buf[14] are endpoints. */
 
-	/* Clear flags */
-	/** @todo set flags */
+	/* Serialize the packet flags. */
 	self->buf[15] = 0;
+	if (self->multicast) {
+		self->buf[15] |= NBUS_FLAG_MULTICAST;
+	}
 
 	/* buf[16-23] are destination and source id. */
 
@@ -248,6 +250,11 @@ static nbus_ret_t nbus_pbuf_dispatch(Nbus *self, struct nbus_pbuf *pbuf) {
 	/* Try to match the socket naively. Receive everything for now. */
 	for (size_t i = 0; i < NBUS_SOCKET_COUNT; i++) {
 		if (self->sockets[i].used && self->sockets[i].enabled) {
+			/* A multicast socket only receives multicast packets and vice versa. */
+			if (self->sockets[i].multicast != pbuf->multicast) {
+				continue;
+			}
+
 			/* If the socket is locally bound, check the destination ID. */
 			if (memcmp(self->sockets[i].local_id, (uint8_t[4]){0, 0, 0, 0}, 4)) {
 				uint8_t dst_addr[4] = {0};
@@ -375,6 +382,9 @@ static datagram_ret_t nbus_socket_write(Datagram *datagram, const void *buf, siz
 		nbus_pbuf_release(self->parent, pbuf);
 		return DATAGRAM_RET_FAILED;
 	}
+
+	/* A multicast socket always sends multicast packets. */
+	pbuf->multicast = self->multicast;
 
 	memcpy(pbuf->buf + 24, buf, len);
 	pbuf->buf_len = len + 24;
@@ -538,6 +548,7 @@ struct nbus_pbuf *nbus_pbuf_allocate(Nbus *self) {
 			/* On the first free pbuf match, mark as allocated and clear it. */
 			self->pbufs[i].state = NBUS_PBUF_STATE_ALLOCATED;
 			self->pbufs[i].buf_len = 0;
+			self->pbufs[i].multicast = false;
 
 			/* It is sufficient to clear the header. */
 			memset(self->pbufs[i].buf, 0, 24);
@@ -648,6 +659,7 @@ struct nbus_socket *nbus_socket_allocate(Nbus *self) {
 			self->sockets[i].parent = self;
 			/** @todo do not enable until bound */
 			self->sockets[i].enabled = true;
+			self->sockets[i].multicast = false;
 
 			memset(self->sockets[i].local_id, 0, 4);
 			memset(self->sockets[i].local_id_mask, 0, 4);
@@ -710,4 +722,15 @@ nbus_ret_t nbus_socket_connect(struct nbus_socket *socket, const uint8_t *id, ui
 
 	return NBUS_RET_OK;
 
+}
+
+
+nbus_ret_t nbus_socket_set_multicast(struct nbus_socket *socket, bool multicast) {
+	if (u_assert(socket != NULL)) {
+		return NBUS_RET_BAD_PARAM;
+	}
+
+	socket->multicast = multicast;
+
+	return NBUS_RET_OK;
 }

@@ -102,6 +102,10 @@ offset  size    state       field
 The SIV authenticates the cleartext bytes from offset 8 to the end of the payload (the fixed
 header plus the payload).
 
+The flags field at offset 15 carries per-packet bit flags. The only flag currently defined is
+bit 0 (``NBUS_FLAG_MULTICAST``): when set, the packet is a multicast packet and is delivered to
+multicast sockets only.
+
 
 Transmit
 --------

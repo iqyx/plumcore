@@ -36,6 +36,15 @@ typedef enum {
 } nbus_ret_t;
 
 /**
+ * Bit flags carried in the fixed header flags field (offset 15). Refer to nbus2.rst for the
+ * on-wire details.
+ */
+enum nbus_flags {
+	/** The packet is a multicast packet, delivered to multicast sockets only. */
+	NBUS_FLAG_MULTICAST = (1 << 0),
+};
+
+/**
  * Data-link-layer cryptographic schemes used to protect nbus2 packets. The values are bit flags
  * so a receiver may accept several schemes at once (see struct nbus_config). Refer to nbus2.rst
  * for the on-wire details of each construction.
@@ -69,6 +78,10 @@ typedef struct nbus Nbus;
 struct nbus_socket {
 	bool used;
 	bool enabled;
+
+	/** When set, the socket sends and receives multicast packets only (see NBUS_FLAG_MULTICAST). */
+	bool multicast;
+
 	Nbus *parent;
 	Datagram datagram;
 
@@ -106,6 +119,9 @@ enum nbus_pbuf_state {
 
 struct nbus_pbuf {
 	enum nbus_pbuf_state state;
+
+	/** Whether the packet carries the multicast flag (serialized to/from the header flags field). */
+	bool multicast;
 
 	uint8_t ke[NBUS_PBUF_KE_LEN];
 	uint8_t km[NBUS_PBUF_KM_LEN];
@@ -169,3 +185,4 @@ struct nbus_socket *nbus_socket_allocate(Nbus *self);
 nbus_ret_t nbus_socket_release(Nbus *self, struct nbus_socket *socket);
 nbus_ret_t nbus_socket_bind(struct nbus_socket *socket, const uint8_t *id, uint8_t ep);
 nbus_ret_t nbus_socket_connect(struct nbus_socket *socket, const uint8_t *id, uint8_t ep);
+nbus_ret_t nbus_socket_set_multicast(struct nbus_socket *socket, bool multicast);
