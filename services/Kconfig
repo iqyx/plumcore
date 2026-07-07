@@ -629,6 +629,11 @@ menu "Language interpreters"
 		default n
 		select LIB_GRAVITY
 
+	config SERVICE_SCRIPT_PKPY
+		bool "pocketpy Python language interpreter"
+		default n
+		select LIB_PKPY
+
 endmenu
 
 menu "Test suites"

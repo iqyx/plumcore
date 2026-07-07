@@ -22,8 +22,28 @@ config LIB_WREN
 	bool "wren.io language compiler & VM"
 	default n
 
+if LIB_WREN
+
+config LIB_WREN_MINIMAL_CORE
+	bool "Strip rarely-used methods from the Wren core library"
+	default n
+	help
+	  Removes several convenience methods from Wren's built-in (Wren-source) core
+	  library to save heap, flash and startup compile stack on small MCUs:
+	  List.sort/quicksort_/partition_, String.split/replace/trim*, and the
+	  String.bytes/codePoints byte/code-point sequences. Dropping List.sort also
+	  removes the deepest closure nesting in the core library, lowering the
+	  compiler task's stack requirement. Basic iteration (for-in), the Sequence
+	  helpers (map/where/reduce/each/count) and list/map literals are unaffected.
+
+endif
+
 config LIB_GRAVITY
 	bool "Gravity language compiler & VM"
+	default n
+
+config LIB_PKPY
+	bool "pocketpy Python interpreter & VM"
 	default n
 
 config LIB_SPIFFS

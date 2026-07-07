@@ -6,13 +6,44 @@ if conf["LIB_WREN"] == "y":
 
 	env.Git('https://github.com/wren-lang/wren/', branch='main')
 
+	# Wren's single-pass compiler puts a whole `Compiler` struct on the C stack for every nesting
+	# level, and that struct is dominated by `Local locals[MAX_LOCALS]` (256 * 16 B = 4 kB) and
+	# `CompilerUpvalue upvalues[MAX_UPVALUES]` (256 * 8 B = 2 kB), i.e. ~6.2 kB each. Compiling the
+	# built-in core library nests three levels (module -> method -> the `sort` closure), so the
+	# compiler task would need a ~24 kB stack, which does not fit next to the VM heap on this MCU.
+	# The patch wraps both limits in #ifndef so they can be lowered from the command line; applied
+	# once, right after cloning.
+	#
+	# The second patch wraps rarely-used core-library methods (List.sort/quicksort_/partition_,
+	# String.split/replace/trim*, the byte/code-point sequences) in `#ifndef WREN_MINIMAL_CORE` so
+	# they can be compiled out to save heap, flash and startup compile stack (dropping List.sort
+	# also removes the deepest closure nesting). Both patches are applied once, right after cloning.
+	env.Patch([
+		'0001-configurable-compiler-limits.patch',
+		'0002-configurable-minimal-core-library.patch',
+	])
+
+	ddir = env['LIB_DEFAULT_REPO_DIR']
+
+	# Shrink the compile-time locals/upvalues tables so each `Compiler` frame is ~1.6 kB instead of
+	# ~6.2 kB, cutting the compiler task's stack requirement roughly threefold. 64 locals / 64
+	# upvalues per scope is far more than the core library or small embedded scripts use.
+	env.Append(CFLAGS = [
+		"-DMAX_LOCALS=64",
+		"-DMAX_UPVALUES=64",
+	])
+
+	# Optionally strip rarely-used core-library methods (see the 0002 patch above).
+	if conf["LIB_WREN_MINIMAL_CORE"] == "y":
+		env.Append(CFLAGS = ["-DWREN_MINIMAL_CORE=1"])
+
 	objs.append(env.Object([
-		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '/src/vm/*.c"')),
-		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '/src/optional/*.c"')),
+		File(Glob(ddir + '/src/vm/*.c')),
+		File(Glob(ddir + '/src/optional/*.c')),
 	]))
-	
+
 	env.Append(CPPPATH = [
-		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/src/include'),
-		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/src/optional'),
-		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/src/vm'),
+		Dir(ddir + '/src/include'),
+		Dir(ddir + '/src/optional'),
+		Dir(ddir + '/src/vm'),
 	])

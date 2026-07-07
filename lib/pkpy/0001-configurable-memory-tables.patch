@@ -1,0 +1,292 @@
+diff --git a/include/pocketpy/config.h b/include/pocketpy/config.h
+index 2e219c7..a8e15ea 100644
+--- a/include/pocketpy/config.h
++++ b/include/pocketpy/config.h
+@@ -52,6 +52,31 @@
+ #define PK_MAX_CO_VARNAMES          64
+ #endif
+ 
++// Number of slots in the internal fixed-size hash tables: the global string interning
++// table (name.c) and the per-VM cached-names map (fixedhash.h). Both are indexed by the
++// low bits of a hash, so this MUST be a power of two. The default 0x10000 (64Ki) matches
++// upstream; the tables are statically allocated, so lowering this on a memory constrained
++// target cuts static RAM dramatically at the cost of more hash collisions.
++//   string table:  PK_HASH_TABLE_SIZE * sizeof(void*) bytes
++//   cached names:  PK_HASH_TABLE_SIZE * sizeof(uint16_t) bytes (per VM)
++#ifndef PK_HASH_TABLE_SIZE          // can be overridden by cmake
++#define PK_HASH_TABLE_SIZE          0x10000
++#endif
++#define PK_HASH_TABLE_MASK          (PK_HASH_TABLE_SIZE - 1)
++
++// Size in bytes of a single garbage-collected object arena. Arenas are allocated on the
++// heap on demand, so this is the granularity (and minimum footprint) of the GC heap. The
++// default 120 KiB is far larger than a small target's whole RAM; lower it accordingly.
++#ifndef PK_GC_ARENA_SIZE            // can be overridden by cmake
++#define PK_GC_ARENA_SIZE            (120 * 1024)
++#endif
++
++// Size in bytes of the statically allocated stdout buffer used by picoterm's full
++// buffering mode. Defaults to 32 KiB upstream.
++#ifndef PK_PICOTERM_BUF_SIZE        // can be overridden by cmake
++#define PK_PICOTERM_BUF_SIZE        (1024 * 32)
++#endif
++
+ /*************** internal settings ***************/
+ // This is the maximum character length of a module path
+ #define PK_MAX_MODULE_PATH_LEN      63
+diff --git a/include/pocketpy/interpreter/objectpool.h b/include/pocketpy/interpreter/objectpool.h
+index d86fa00..4187696 100644
+--- a/include/pocketpy/interpreter/objectpool.h
++++ b/include/pocketpy/interpreter/objectpool.h
+@@ -2,8 +2,9 @@
+ 
+ #include "pocketpy/common/vector.h"
+ #include "pocketpy/common/str.h"
++#include "pocketpy/config.h"
+ 
+-#define kPoolArenaSize (120 * 1024)
++#define kPoolArenaSize PK_GC_ARENA_SIZE
+ #define kMultiPoolCount 5
+ // #define kPoolMaxBlockSize (32 * kMultiPoolCount)
+ 
+diff --git a/include/pocketpy/objects/base.h b/include/pocketpy/objects/base.h
+index 22e7f05..be3714c 100644
+--- a/include/pocketpy/objects/base.h
++++ b/include/pocketpy/objects/base.h
+@@ -4,7 +4,7 @@
+ 
+ typedef struct PyObject PyObject;
+ typedef struct VM VM;
+-extern _Thread_local VM* pk_current_vm;
++extern PK_THREAD_LOCAL VM* pk_current_vm;
+ 
+ typedef struct py_TValue {
+     py_Type type;
+diff --git a/include/pocketpy/xmacros/fixedhash.h b/include/pocketpy/xmacros/fixedhash.h
+index 866d0a9..8517080 100644
+--- a/include/pocketpy/xmacros/fixedhash.h
++++ b/include/pocketpy/xmacros/fixedhash.h
+@@ -38,7 +38,7 @@ typedef struct {
+ 
+ typedef struct {
+     int length;
+-    uint16_t indices[0x10000];
++    uint16_t indices[PK_HASH_TABLE_SIZE];
+     c11_chunkedvector /*T=FixedHashEntry*/ entries;
+ } NAME;
+ 
+@@ -76,16 +76,18 @@ void METHOD(delete)(NAME* self) {
+ 
+ void METHOD(set)(NAME* self, K key, V* value) {
+     uint64_t hash_value = hash(key);
+-    int index = (uint16_t)(hash_value & 0xFFFF);
++    int index = (int)(hash_value & PK_HASH_TABLE_MASK);
+     while(self->indices[index] != 0xFFFF) {
+         KV* entry = c11_chunkedvector__at(&self->entries, self->indices[index]);
+         if(equal(entry->key, key)) {
+             entry->val = *value;
+             return;
+         }
+-        index = ((5 * index) + 1) & 0xFFFF;
++        index = ((5 * index) + 1) & PK_HASH_TABLE_MASK;
+     }
+-    if(self->length >= 65000) abort();
++    /* Keep a fraction of the table empty so the open-addressing probe above always
++     * terminates. Scales with PK_HASH_TABLE_SIZE (was a fixed 65000 for the 0x10000 table). */
++    if(self->length >= PK_HASH_TABLE_SIZE - (PK_HASH_TABLE_SIZE >> 7)) abort();
+     KV* kv = c11_chunkedvector__emplace(&self->entries);
+     kv->hash = hash_value;
+     kv->key = key;
+@@ -96,11 +98,11 @@ void METHOD(set)(NAME* self, K key, V* value) {
+ 
+ V* METHOD(try_get)(NAME* self, K key) {
+     uint64_t hash_value = hash(key);
+-    int index = (uint16_t)(hash_value & 0xFFFF);
++    int index = (int)(hash_value & PK_HASH_TABLE_MASK);
+     while(self->indices[index] != 0xFFFF) {
+         KV* entry = c11_chunkedvector__at(&self->entries, self->indices[index]);
+         if(equal(entry->key, key)) return &entry->val;
+-        index = ((5 * index) + 1) & 0xFFFF;
++        index = ((5 * index) + 1) & PK_HASH_TABLE_MASK;
+     }
+     return NULL;
+ }
+diff --git a/src/common/dmath.c b/src/common/dmath.c
+index e587fdc..37c76b0 100644
+--- a/src/common/dmath.c
++++ b/src/common/dmath.c
+@@ -1,7 +1,7 @@
+ #include "pocketpy/common/dmath.h"
+ #include "pocketpy/common/algorithm.h"
+-#include "pocketpy/common/_log_spline_tbl.h"
+ #include <stdint.h>
++#include <math.h>  /* PLUMCORE: use libm log2() instead of the 64 kB spline tables */
+ 
+ union Float64Bits {
+     double f;
+@@ -65,48 +65,10 @@ double dmath_log2(double x) {
+ 	if(x == DMATH_INFINITY) return DMATH_INFINITY;
+ 	if(dmath_isnan(x)) return DMATH_NAN;
+ 
+-    const double fm_log_dinv =  4.09600000000000000000e+03;
+-    const double fm_log_dsq6 =  9.93410746256510361521e-09;
+-
+-    const int FM_DOUBLE_BIAS = 1023;
+-    const int FM_DOUBLE_EMASK = 2146435072;
+-    const int FM_DOUBLE_MBITS = 20;
+-    const int FM_DOUBLE_MMASK = 1048575;
+-    const int FM_DOUBLE_EZERO = 1072693248;
+-
+-    const int FM_SPLINE_SHIFT = 8;
+-
+-    udi_t val;
+-    double a,b,y;
+-    int32_t hx, ipart;
+-
+-    val.f = x;
+-    hx = val.s.i1;
+-    
+-    /* extract exponent and subtract bias */
+-    ipart = (((hx & FM_DOUBLE_EMASK) >> FM_DOUBLE_MBITS) - FM_DOUBLE_BIAS);
+-
+-    /* mask out exponent to get the prefactor to 2**ipart */
+-    hx &= FM_DOUBLE_MMASK;
+-    val.s.i1 = hx | FM_DOUBLE_EZERO;
+-    x = val.f;
+-
+-    /* table index */
+-    hx >>= FM_SPLINE_SHIFT;
+-
+-    /* compute x value matching table index */
+-    val.s.i0 = 0;
+-    val.s.i1 = FM_DOUBLE_EZERO | (hx << FM_SPLINE_SHIFT);
+-    b = (x - val.f) * fm_log_dinv;
+-    a = 1.0 - b;
+-
+-    /* evaluate spline */
+-    y = a * fm_log_q1[hx] + b * fm_log_q1[hx+1];
+-    a = (a*a*a-a) * fm_log_q2[hx];
+-    b = (b*b*b-b) * fm_log_q2[hx+1];
+-    y += (a + b) * fm_log_dsq6;
+-
+-    return ((double) ipart) + (y * DMATH_LOG2_E);
++    /* PLUMCORE: the upstream spline implementation embeds two 32 kB lookup tables
++     * (_log_spline_tbl.h) which alone exceed a small MCU's flash budget. libm is already
++     * linked on this target, so defer to its log2() and let --gc-sections drop the tables. */
++    return log2(x);
+ }
+ 
+ double dmath_exp(double x) {
+diff --git a/src/common/name.c b/src/common/name.c
+index 1973d8d..3090a0d 100644
+--- a/src/common/name.c
++++ b/src/common/name.c
+@@ -16,7 +16,7 @@ typedef struct NameBucket {
+ } NameBucket;
+ 
+ static struct {
+-    NameBucket* table[0x10000];
++    NameBucket* table[PK_HASH_TABLE_SIZE];
+ #if PK_ENABLE_THREADS
+     atomic_flag lock;
+ #endif
+@@ -33,7 +33,7 @@ void pk_names_initialize() {
+ }
+ 
+ void pk_names_finalize() {
+-    for(int i = 0; i < 0x10000; i++) {
++    for(int i = 0; i < PK_HASH_TABLE_SIZE; i++) {
+         NameBucket* p = pk_string_table.table[i];
+         while(p) {
+             NameBucket* next = p->next;
+@@ -51,7 +51,7 @@ py_Name py_namev(c11_sv name) {
+     }
+ #endif
+     uint64_t hash = c11_sv__hash(name);
+-    int index = hash & 0xFFFF;
++    int index = hash & PK_HASH_TABLE_MASK;
+     NameBucket* p = pk_string_table.table[index];
+     NameBucket* prev = NULL;
+     bool found = false;
+diff --git a/src/interpreter/vm.c b/src/interpreter/vm.c
+index bf0636c..fdb8726 100644
+--- a/src/interpreter/vm.c
++++ b/src/interpreter/vm.c
+@@ -240,28 +240,34 @@ void VM__ctor(VM* self) {
+ 
+     py_newnotimplemented(py_emplacedict(self->builtins, py_name("NotImplemented")));
+ 
+-    pk__add_module_stdc();
+-    pk__add_module_vmath();
+-    pk__add_module_array2d();
+-    // pk__add_module_colorcvt();
+-
+     // add modules
+     pk__add_module_os();
+     pk__add_module_sys();
+     pk__add_module_io();
++    pk__add_module_gc();
++    pk__add_module_time();
++    pk__add_module_traceback();
++    pk__add_module_importlib();
++
++    // Extended standard-library modules. On a flash constrained target these can be dropped by
++    // defining PK_MINIMAL_MODULES: the registration calls disappear, so with -ffunction-sections
++    // and --gc-sections the whole module (and anything only it reaches, e.g. the 64 kB dmath log
++    // spline tables pulled in by `math`) is garbage collected out of the image. The interpreter
++    // core, builtins, sys/io/gc/time/traceback/importlib remain fully functional.
++#ifndef PK_MINIMAL_MODULES
++    pk__add_module_stdc();
++    pk__add_module_vmath();
++    pk__add_module_array2d();
++    // pk__add_module_colorcvt();
+     pk__add_module_math();
+     pk__add_module_dis();
+     pk__add_module_random();
+     pk__add_module_json();
+-    pk__add_module_gc();
+-    pk__add_module_time();
+     pk__add_module_easing();
+-    pk__add_module_traceback();
+     pk__add_module_enum();
+     pk__add_module_inspect();
+     pk__add_module_pickle();
+     pk__add_module_base64();
+-    pk__add_module_importlib();
+     pk__add_module_unicodedata();
+ 
+     pk__add_module_conio();
+@@ -271,6 +277,7 @@ void VM__ctor(VM* self) {
+     py__add_module_periphery();  // optional
+     pk__add_module_pkpy();
+     pk__add_module_picoterm();
++#endif
+ 
+     // add python builtins
+     do {
+diff --git a/src/modules/picoterm.c b/src/modules/picoterm.c
+index ab3331f..7862969 100644
+--- a/src/modules/picoterm.c
++++ b/src/modules/picoterm.c
+@@ -17,7 +17,7 @@ static int c11__wcwidth(int c) {
+ 
+ static bool picoterm_enable_full_buffering_mode(int argc, py_Ref argv) {
+     PY_CHECK_ARGC(0);
+-    static char buf[1024 * 32];  // 32KB
++    static char buf[PK_PICOTERM_BUF_SIZE];
+     setvbuf(stdout, buf, _IOFBF, sizeof(buf));
+     py_newnone(py_retval());
+     return true;
+diff --git a/src/public/GlobalSetup.c b/src/public/GlobalSetup.c
+index d4d044f..5c74954 100644
+--- a/src/public/GlobalSetup.c
++++ b/src/public/GlobalSetup.c
+@@ -5,7 +5,7 @@
+ #include "pocketpy/common/name.h"
+ #include "pocketpy/interpreter/vm.h"
+ 
+-_Thread_local VM* pk_current_vm;
++PK_THREAD_LOCAL VM* pk_current_vm;
+ 
+ static bool pk_initialized;
+ static bool pk_finalized;

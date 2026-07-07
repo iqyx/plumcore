@@ -1,0 +1,60 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+import os
+import subprocess
+
+if conf["LIB_PKPY"] == "y":
+
+	env.Git('https://github.com/pocketpy/pocketpy', branch='main')
+
+	# Make pocketpy's oversized compile-time tables configurable. Upstream hardcodes a 64Ki-slot
+	# string-interning table (256 kB), a 64Ki-slot cached-names table per VM (128 kB) and a 120 kB
+	# GC arena, none of which fit a small MCU. The patch introduces PK_HASH_TABLE_SIZE,
+	# PK_GC_ARENA_SIZE and PK_PICOTERM_BUF_SIZE (all defaulting to the upstream values) so they can
+	# be lowered with -D below. Applied once, right after cloning.
+	env.Patch('0001-configurable-memory-tables.patch')
+
+	ddir = env['LIB_DEFAULT_REPO_DIR']
+	rdir = Dir(ddir).abspath
+
+	# pocketpy embeds its Python standard library as C string literals in
+	# include/pocketpy/common/_generated.h. This header is produced by prebuild.py
+	# from the python/ directory and must exist before any source file is compiled.
+	# Run it synchronously here (like the git clone above) so the generated header is
+	# present when SCons scans the sources. A stamp prevents needless regeneration.
+	if not os.path.exists(os.path.join(rdir, '.prebuilt.stamp')):
+		subprocess.run(['python', 'prebuild.py'], cwd=rdir, check=True)
+		open(os.path.join(rdir, '.prebuilt.stamp'), 'w').close()
+
+	# Configure pocketpy for a bare-metal, low-memory target. All of these land in .bss (static
+	# RAM) except PK_GC_ARENA_SIZE, which is the granularity of on-demand heap arenas:
+	#  - PK_ENABLE_OS=0 strips the filesystem/socket/os modules (no POSIX headers).
+	#  - PK_HASH_TABLE_SIZE=1024 shrinks the string table (256 kB -> 4 kB) and the per-VM cached
+	#    names table (128 kB -> 2 kB). Must stay a power of two.
+	#  - PK_VM_STACK_SIZE=512 shrinks the inline VM value stack (~390 kB -> ~14 kB).
+	#  - PK_GC_ARENA_SIZE=1920 B caps a single heap GC arena (default 120 kB). Each of the 5 object
+	#    pools reserves a whole arena on its first allocation, so a 16 kB arena could tie up 80 kB of
+	#    the 60 kB heap during VM init alone; 1920 caps all 5 pools at ~9.6 kB. 1920 is the LCM of the
+	#    pool block sizes (32/64/96/128/160) so it also satisfies PoolArena__new's divisibility assert.
+	#  - PK_PICOTERM_BUF_SIZE=256 shrinks picoterm's static stdout buffer (default 32 kB).
+	# __circle__ selects pocketpy's bare-metal fallbacks in the time module (returning 0 instead
+	# of calling POSIX clock_gettime()/C11 timespec_get(), which newlib-nano does not provide). It
+	# is referenced nowhere else in the source, so it is safe as a generic bare-metal marker.
+	env.Append(CFLAGS = [
+		"-DPK_ENABLE_OS=0",
+		"-DPK_HASH_TABLE_SIZE=1024",
+		"-DPK_VM_STACK_SIZE=512",
+		"-DPK_GC_ARENA_SIZE=1920",
+		"-DPK_PICOTERM_BUF_SIZE=256",
+		"-DPK_MINIMAL_MODULES",
+		"-D__circle__",
+	])
+
+	# pocketpy source is organized in one level of subdirectories under src/.
+	objs.append(env.Object(File(Glob(ddir + '/src/*/*.c'))))
+
+	env.Append(CPPPATH = [
+		Dir(ddir + '/include'),
+	])

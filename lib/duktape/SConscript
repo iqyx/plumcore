@@ -4,23 +4,29 @@ Import("objs")
 
 if conf["LIB_DUKTAPE"] == "y":
 
-	# env.Git('https://github.com/intel/tinycbor', branch='main')
+	env.Git('https://github.com/svaarala/duktape', branch='v2.6-maintenance')
+
+	ddir = env['LIB_DEFAULT_REPO_DIR']
+
+	# Build actions run from the project root, but LIB_DEFAULT_REPO_DIR is relative to this
+	# SConscript directory, so resolve it to an absolute path for the command line.
+	rdir = Dir(ddir).abspath
 
 	# TODO: rewrite filenames
 	duktape = env.Command(
 		source = None,
 		target = [
-			File(env['LIB_DEFAULT_REPO_DIR'] + '/src-custom/duktape.c'),
-			File(env['LIB_DEFAULT_REPO_DIR'] + '/src-custom/duktape.h')
+			File(f'{ddir}/src-custom/duktape.c'),
+			File(f'{ddir}/src-custom/duktape.h')
 		],
-		action = "python lib2/duktape/src/tools/configure.py --output-directory lib2/duktape/src/src-custom --source-directory lib2/duktape/src-input --config-metadata lib2/duktape/config --option-file lib2/duktape/config/examples/low_memory.yaml -DDUK_USE_FASTINT --rom-support",
+		action = f'python {rdir}/tools/configure.py --output-directory {rdir}/src-custom --source-directory {rdir}/src-input --config-metadata {rdir}/config --option-file {rdir}/config/examples/low_memory.yaml -DDUK_USE_FASTINT --rom-support',
 	)
 
 	objs.append(env.Object([
-		File(env['LIB_DEFAULT_REPO_DIR'] + '/src-custom/duktape.c'),
+		File(f'{ddir}/src-custom/duktape.c'),
 	]))
-	
+
 	env.Append(CPPPATH = [
-		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/src-custom'),
+		Dir(f'{ddir}/src-custom'),
 	])
 

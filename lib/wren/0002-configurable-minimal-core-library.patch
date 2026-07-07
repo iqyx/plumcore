@@ -1,0 +1,52 @@
+diff --git a/src/vm/wren_core.wren.inc b/src/vm/wren_core.wren.inc
+index be296cd..914a122 100644
+--- a/src/vm/wren_core.wren.inc
++++ b/src/vm/wren_core.wren.inc
+@@ -184,6 +184,7 @@ static const char* coreModuleSource =
+ "}\n"
+ "\n"
+ "class String is Sequence {\n"
++#ifndef WREN_MINIMAL_CORE
+ "  bytes { StringByteSequence.new(this) }\n"
+ "  codePoints { StringCodePointSequence.new(this) }\n"
+ "\n"
+@@ -279,6 +280,7 @@ static const char* coreModuleSource =
+ "\n"
+ "    return this[start..end]\n"
+ "  }\n"
++#endif
+ "\n"
+ "  *(count) {\n"
+ "    if (!(count is Num) || !count.isInteger || count < 0) {\n"
+@@ -293,6 +295,7 @@ static const char* coreModuleSource =
+ "  }\n"
+ "}\n"
+ "\n"
++#ifndef WREN_MINIMAL_CORE
+ "class StringByteSequence is Sequence {\n"
+ "  construct new(string) {\n"
+ "    _string = string\n"
+@@ -316,6 +319,7 @@ static const char* coreModuleSource =
+ "\n"
+ "  count { _string.count }\n"
+ "}\n"
++#endif
+ "\n"
+ "class List is Sequence {\n"
+ "  addAll(other) {\n"
+@@ -324,6 +328,7 @@ static const char* coreModuleSource =
+ "    }\n"
+ "    return other\n"
+ "  }\n"
++#ifndef WREN_MINIMAL_CORE
+ "\n"
+ "  sort() { sort {|low, high| low < high } }\n"
+ "\n"
+@@ -359,6 +364,7 @@ static const char* coreModuleSource =
+ "    this[high] = t\n"
+ "    return i+1\n"
+ "  }\n"
++#endif
+ "\n"
+ "  toString { \"[%(join(\", \"))]\" }\n"
+ "\n"

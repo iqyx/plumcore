@@ -1,0 +1,20 @@
+diff --git a/src/vm/wren_compiler.c b/src/vm/wren_compiler.c
+index 47705f5..85ba890 100644
+--- a/src/vm/wren_compiler.c
++++ b/src/vm/wren_compiler.c
+@@ -22,11 +22,15 @@
+ // Note that this limitation is also explicit in the bytecode. Since
+ // `CODE_LOAD_LOCAL` and `CODE_STORE_LOCAL` use a single argument byte to
+ // identify the local, only 256 can be in scope at one time.
++#ifndef MAX_LOCALS
+ #define MAX_LOCALS 256
++#endif
+ 
+ // The maximum number of upvalues (i.e. variables from enclosing functions)
+ // that a function can close over.
++#ifndef MAX_UPVALUES
+ #define MAX_UPVALUES 256
++#endif
+ 
+ // The maximum number of distinct constants that a function can contain. This
+ // value is explicit in the bytecode since `CODE_CONSTANT` only takes a single
