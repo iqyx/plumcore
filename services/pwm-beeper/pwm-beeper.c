@@ -20,6 +20,7 @@
 
 #define MODULE_NAME "pwm-beeper"
 #define SEQ_BUF_LEN 16
+#define PWM_BEEPER_TASK_STACK_DEPTH 160
 
 
 static pwm_beeper_ret_t create_task(PwmBeeper *self);
@@ -99,7 +100,7 @@ static void task(void *p) {
 static pwm_beeper_ret_t create_task(PwmBeeper *self) {
 
 	self->task_needed = true;
-	xTaskCreate(task, "pwm-beeper", configMINIMAL_STACK_SIZE, (void *)self, 1, &(self->task));
+	xTaskCreate(task, "pwm-beeper", PWM_BEEPER_TASK_STACK_DEPTH, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		return PWM_BEEPER_RET_FAILED;
 	}
