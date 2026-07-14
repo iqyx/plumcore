@@ -131,6 +131,28 @@ the original bytes — receivers attempt the schemes they support newest first, 
 emits a single configured scheme.
 
 
+Descriptor advertisement
+------------------------
+
+Every 2 seconds the housekeeping task walks all active sockets and, for each socket that has a
+descriptor set (see ``nbus_socket_set_descriptor``), emits one advertisement packet. The packet
+is sent from the socket's own local ID and endpoint to the well-known multicast descriptor
+address ``00000101`` endpoint 0 with the ``NBUS_FLAG_MULTICAST`` flag set, so only multicast
+sockets bound to that address receive it.
+
+The payload is a CBOR map with two mandatory keys and optional descriptor keys:
+
+======  ==========  ============================================================
+key     value       meaning
+======  ==========  ============================================================
+``adv`` unsigned    advertisement protocol version (currently ``1``)
+``p``   text        protocol name spoken on the socket
+``pv``  text        protocol version (optional; omitted when not set)
+======  ==========  ============================================================
+
+Descriptor keys that are not set are omitted from the map.
+
+
 Security considerations
 -----------------------
 

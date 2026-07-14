@@ -61,6 +61,7 @@ menu "Low-level platform drivers"
 
 		config SERVICE_NBUS2
 			bool "NBUS2 protocol MAC"
+			select LIB_TINYCBOR
 			default n
 
 		config SERVICE_NBUS_SWITCH

@@ -41,6 +41,7 @@
 #include <main.h>
 #include <interfaces/datagram.h>
 #include <chacha20.h>
+#include <cbor.h>
 
 #include "nbus2.h"
 #include "blake2s-siv.h"
@@ -327,12 +328,74 @@ static void nbus_rx_task(void *p) {
 }
 
 
+/**
+ * @brief Send a single descriptor advertisement for the given socket
+ *
+ * The advertisement is a multicast packet sent from the socket's own local ID and endpoint to the
+ * well-known descriptor advertisement multicast ID. Its payload is a CBOR map carrying the mandatory
+ * "adv" (protocol version) and "p" (protocol name) keys. Sockets without a bound local ID or without
+ * a descriptor protocol are skipped.
+ */
+static void nbus_socket_advertise(Nbus *self, struct nbus_socket *socket) {
+	if (socket->descriptor.protocol == NULL) {
+		return;
+	}
+	/* A source ID is required so receivers know who advertised. */
+	if (!memcmp(socket->local_id, (uint8_t[4]){0, 0, 0, 0}, 4)) {
+		return;
+	}
+
+	struct nbus_pbuf *pbuf = nbus_pbuf_allocate(self);
+	if (pbuf == NULL) {
+		return;
+	}
+
+	/* Encode the advertisement payload into the payload area: the mandatory "adv" (protocol version)
+	 * and "p" (protocol name) keys, plus the optional "pv" (protocol version) key when set. */
+	CborEncoder encoder;
+	CborEncoder map;
+	cbor_encoder_init(&encoder, pbuf->buf + 24, pbuf->buf_size - 24, 0);
+	cbor_encoder_create_map(&encoder, &map, CborIndefiniteLength);
+	cbor_encode_text_stringz(&map, "adv");
+	cbor_encode_int(&map, NBUS_ADV_VERSION);
+	cbor_encode_text_stringz(&map, "p");
+	cbor_encode_text_stringz(&map, socket->descriptor.protocol);
+	if (socket->descriptor.protocol_version != NULL) {
+		cbor_encode_text_stringz(&map, "pv");
+		cbor_encode_text_stringz(&map, socket->descriptor.protocol_version);
+	}
+	cbor_encoder_close_container(&encoder, &map);
+	pbuf->buf_len = 24 + cbor_encoder_get_buffer_size(&encoder, pbuf->buf + 24);
+
+	/* Advertisements are multicast, sent from the socket to the well-known descriptor address. */
+	pbuf->multicast = true;
+	nbus_pbuf_set_source(pbuf, socket->local_id, socket->local_ep);
+	nbus_pbuf_set_destination(pbuf, (uint8_t[4])NBUS_ADV_MULTICAST_ID, NBUS_ADV_MULTICAST_EP);
+
+	xSemaphoreTake(self->tx_lock, portMAX_DELAY);
+	nbus_pbuf_transmit(pbuf, self);
+	xSemaphoreGive(self->tx_lock);
+
+	nbus_pbuf_release(self, pbuf);
+}
+
+
 static void nbus_hk_task(void *p) {
 	Nbus *self = (Nbus *)p;
-	(void)self;
 
 	while (true) {
-		vTaskDelay(1000);
+		vTaskDelay(pdMS_TO_TICKS(2000));
+
+		/* Once every 2 seconds advertise the descriptor of every active socket. */
+		if (xSemaphoreTake(self->socket_lock, portMAX_DELAY) != pdTRUE) {
+			continue;
+		}
+		for (size_t i = 0; i < NBUS_SOCKET_COUNT; i++) {
+			if (self->sockets[i].used && self->sockets[i].enabled) {
+				nbus_socket_advertise(self, &self->sockets[i]);
+			}
+		}
+		xSemaphoreGive(self->socket_lock);
 	}
 	vTaskDelete(NULL);
 }
@@ -667,6 +730,7 @@ struct nbus_socket *nbus_socket_allocate(Nbus *self) {
 			memset(self->sockets[i].remote_id, 0, 4);
 			memset(self->sockets[i].remote_id_mask, 0, 4);
 			self->sockets[i].remote_ep = 0;
+			memset(&self->sockets[i].descriptor, 0, sizeof(struct nbus_socket_descriptor));
 
 			self->sockets[i].datagram.vmt = &nbus_socket_vmt;
 			self->sockets[i].datagram.parent = &(self->sockets[i]);
@@ -731,6 +795,18 @@ nbus_ret_t nbus_socket_set_multicast(struct nbus_socket *socket, bool multicast)
 	}
 
 	socket->multicast = multicast;
+
+	return NBUS_RET_OK;
+}
+
+
+nbus_ret_t nbus_socket_set_descriptor(struct nbus_socket *socket, const struct nbus_socket_descriptor *descriptor) {
+	if (u_assert(socket != NULL) ||
+	    u_assert(descriptor != NULL)) {
+		return NBUS_RET_BAD_PARAM;
+	}
+
+	memcpy(&socket->descriptor, descriptor, sizeof(struct nbus_socket_descriptor));
 
 	return NBUS_RET_OK;
 }

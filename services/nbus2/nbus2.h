@@ -25,6 +25,15 @@
 /** Key length in bytes for packet MAC/SIV generation. */
 #define NBUS_PBUF_KM_LEN 16
 
+/** Current version of the descriptor advertisement protocol (the "adv" key). */
+#define NBUS_ADV_VERSION 1
+
+/** Multicast destination ID descriptor advertisements are sent to. */
+#define NBUS_ADV_MULTICAST_ID {0x00, 0x00, 0x01, 0x01}
+
+/** Multicast destination endpoint descriptor advertisements are sent to. */
+#define NBUS_ADV_MULTICAST_EP 0
+
 typedef enum {
 	NBUS_RET_OK = 0,
 	NBUS_RET_FAILED,
@@ -74,6 +83,19 @@ struct nbus_config {
 	uint32_t rx_crypto;
 };
 
+/**
+ * Descriptor advertised periodically for a socket (see nbus_hk_task). Every descriptor key is stored
+ * here and emitted as a CBOR map in the advertisement packet. Only the protocol name is mandatory;
+ * unused optional keys must be NULL.
+ */
+struct nbus_socket_descriptor {
+	/** Protocol name emitted as the mandatory "p" advertisement key. NULL disables advertising. */
+	const char *protocol;
+
+	/** Protocol version emitted as the optional "pv" advertisement key. NULL omits the key. */
+	const char *protocol_version;
+};
+
 typedef struct nbus Nbus;
 struct nbus_socket {
 	bool used;
@@ -94,6 +116,9 @@ struct nbus_socket {
 	uint8_t remote_id[4];
 	uint8_t remote_id_mask[4];
 	uint32_t remote_ep;
+
+	/** Descriptor advertised for this socket. Set via nbus_socket_set_descriptor(). */
+	struct nbus_socket_descriptor descriptor;
 };
 
 enum nbus_pbuf_state {
@@ -186,3 +211,4 @@ nbus_ret_t nbus_socket_release(Nbus *self, struct nbus_socket *socket);
 nbus_ret_t nbus_socket_bind(struct nbus_socket *socket, const uint8_t *id, uint8_t ep);
 nbus_ret_t nbus_socket_connect(struct nbus_socket *socket, const uint8_t *id, uint8_t ep);
 nbus_ret_t nbus_socket_set_multicast(struct nbus_socket *socket, bool multicast);
+nbus_ret_t nbus_socket_set_descriptor(struct nbus_socket *socket, const struct nbus_socket_descriptor *descriptor);
