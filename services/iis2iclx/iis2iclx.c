@@ -240,11 +240,14 @@ iis2iclx_ret_t iis2iclx_free(Iis2Iclx *self) {
 }
 
 
-iis2iclx_ret_t iis2iclx_read(Iis2Iclx *self, int16_t *acc_x, int16_t *acc_y, int16_t *temp) {
+iis2iclx_ret_t iis2iclx_read(Iis2Iclx *self, int16_t *acc_x, int16_t *acc_y, float *temp) {
 
 	*acc_x = read16i(self, IIS2ICLX_REG_OUTX_L_A);
 	*acc_y = read16i(self, IIS2ICLX_REG_OUTY_L_A);
-	*temp = read16i(self, IIS2ICLX_REG_OUT_TEMP_L);
+
+	/* The temperature sensor outputs a signed 16-bit value with a sensitivity of 256 LSB/°C and a
+	 * nominal output of 0 LSB at 25 °C. Convert the raw reading to degrees Celsius. */
+	*temp = (float)read16i(self, IIS2ICLX_REG_OUT_TEMP_L) / 256.0f + 25.0f;
 
 	return IIS2ICLX_RET_OK;
 }

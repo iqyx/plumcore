@@ -35,7 +35,7 @@ typedef struct {
 
 iis2iclx_ret_t iis2iclx_init(Iis2Iclx *self, SpiDev *spidev);
 iis2iclx_ret_t iis2iclx_free(Iis2Iclx *self);
-iis2iclx_ret_t iis2iclx_read(Iis2Iclx *self, int16_t *acc_x, int16_t *acc_y, int16_t *temp);
+iis2iclx_ret_t iis2iclx_read(Iis2Iclx *self, int16_t *acc_x, int16_t *acc_y, float *temp);
 
 /* WaveformSource API */
 //waveform_source_ret_t adxl355_start(Adxl355 *self);
