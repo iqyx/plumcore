@@ -19,6 +19,7 @@
 #include <interfaces/led.h>
 
 #define MODULE_NAME "gpio-led"
+#define GPIO_LED_TASK_STACK_DEPTH 80
 
 
 static gpio_led_ret_t create_task(GpioLed *self);
@@ -92,7 +93,7 @@ static gpio_led_ret_t create_task(GpioLed *self) {
 
 	/* In case we want to stop it later for some reason. */
 	self->task_needed = true;
-	xTaskCreate(task, "gpio-led", configMINIMAL_STACK_SIZE, (void *)self, 1, &(self->task));
+	xTaskCreate(task, "gpio-led", GPIO_LED_TASK_STACK_DEPTH, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		/* Do not log here to preserve API callee stack. */
 		return GPIO_LED_RET_FAILED;
