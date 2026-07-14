@@ -33,6 +33,19 @@
 #include <interfaces/led-sequences.h>
 #include <services/gpio-led/gpio-led.h>
 
+/* For computing nbus2 service identifiers. */
+#include <blake2s.h>
+
+#include <services/nbus2/nbus2.h>
+#include <services/proto-dgstream/proto-dgstream.h>
+#include <services/proto-dgtext/proto-dgtext.h>
+#include <services/nbus-flash/nbus-flash.h>
+#include <services/proto-conf/proto-conf.h>
+#include <services/flash-cbor-mib/flash-cbor-mib.h>
+
+#include <services/stm32-spi/stm32-spi.h>
+#include <services/ncn26010/ncn26010.h>
+
 
 #define MODULE_NAME "port"
 
@@ -106,6 +119,29 @@ void usart1_isr(void) {
 
 #if !defined(CONFIG_APP_BL)
 Stm32Uart nbus2_uart;
+
+/* MIB configuration tree read from the "mib" flash partition (populated by port_flash_init). mib_root
+ * is the synthesized Conf tree served over nbus2 by proto-conf; it stays NULL if no valid MIB is
+ * present. */
+FlashCborMib mib;
+Conf *mib_root;
+
+/* nbus2 on the stacking connector (USART3, framed with proto-dgstream). */
+ProtoDgstream nbus2_dgstream;
+Nbus nbus;
+struct nbus_socket *nbus_flash_socket;
+NbusFlash nbus_flash;
+struct nbus_socket *nbus_conf_socket;
+ProtoConf nbus_conf;
+
+/* A second nbus2 instance on the serial console (USART1, framed as printable text with proto-dgtext). */
+ProtoDgtext console_dgtext;
+Nbus console_nbus;
+struct nbus_socket *console_flash_socket;
+NbusFlash console_flash;
+struct nbus_socket *console_conf_socket;
+ProtoConf console_conf;
+
 static void nbus2_init(void) {
 	RCC->APB1ENR1 |= RCC_APB1ENR1_USART3EN;
 
@@ -124,12 +160,133 @@ static void nbus2_init(void) {
 	NVIC_SetPriority(USART3_IRQn, 7);
 
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&nbus2_uart.stream, "nbus2_stream");
+
+	const uint8_t local_ep = 1;
+	uint8_t local_id[4];
+	blake2s(local_id, sizeof(local_id), "", 0, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("nbus2 service at %02x%02x%02x%02x, endpoint %d"), local_id[0], local_id[1], local_id[2], local_id[3], local_ep);
+
+	/* Descriptors periodically advertised on the flash and configuration sockets. */
+	const struct nbus_socket_descriptor flash_descriptor = {
+		.protocol = "flash",
+		.protocol_version = NBUS_FLASH_INTERFACE_VERSION,
+	};
+	const struct nbus_socket_descriptor conf_descriptor = {
+		.protocol = "conf",
+		.protocol_version = "1.0.0",
+	};
+
+	/* Frame nbus2 packets onto the USART3 byte stream and run nbus2 on top of the resulting Datagram
+	 * interface. The proto-dgstream service handles medium access (framing and the inter-frame gaps);
+	 * nbus2 only deals with the protocol itself. */
+	Datagram *nbus_dgram = NULL;
+	proto_dgstream_init(&nbus2_dgstream, &nbus2_uart.stream);
+	proto_dgstream_get_datagram(&nbus2_dgstream, &nbus_dgram);
+
+	/* Transmit the current ChaCha20+HalfSipHash scheme; accept both schemes on receive. */
+	const struct nbus_config nbus_config = {
+		.dgram = nbus_dgram,
+		.tx_crypto = NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+		.rx_crypto = NBUS_CRYPTO_BLAKE2S_SIV | NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+	};
+	nbus_init(&nbus, &nbus_config);
+	nbus_set_mac_key(&nbus, (uint8_t *)"abcd", 4);
+
+	/* nbus-flash serves any advertised flash partition. Address it at base+1 as in v35v-app. */
+	local_id[3] += 1;
+	nbus_flash_socket = nbus_socket_allocate(&nbus);
+	nbus_socket_bind(nbus_flash_socket, local_id, local_ep);
+	nbus_flash_init(&nbus_flash, &nbus_flash_socket->datagram);
+	nbus_socket_set_descriptor(nbus_flash_socket, &flash_descriptor);
+
+	/* proto-conf serves the MIB configuration tree at base+2. */
+	local_id[3] += 1;
+	nbus_conf_socket = nbus_socket_allocate(&nbus);
+	nbus_socket_bind(nbus_conf_socket, local_id, local_ep);
+	proto_conf_init(&nbus_conf, &nbus_conf_socket->datagram, mib_root);
+	nbus_socket_set_descriptor(nbus_conf_socket, &conf_descriptor);
+
+	/* Expose the same nbus-flash service on the serial console for testing with the host tools.
+	 * Datagrams are framed as printable text lines (proto-dgtext) so they survive the text-only
+	 * console, and a second nbus2 instance runs on top. This link uses BLAKE2s-SIV in both directions
+	 * to match the host-side pynbus2 dgtext+serial transport. */
+	Datagram *console_dgram = NULL;
+	proto_dgtext_init(&console_dgtext, &uart1.stream);
+	proto_dgtext_get_datagram(&console_dgtext, &console_dgram);
+
+	const struct nbus_config console_nbus_config = {
+		.dgram = console_dgram,
+		.tx_crypto = NBUS_CRYPTO_BLAKE2S_SIV,
+		.rx_crypto = NBUS_CRYPTO_BLAKE2S_SIV,
+	};
+	nbus_init(&console_nbus, &console_nbus_config);
+	nbus_set_mac_key(&console_nbus, (uint8_t *)"abcd", 4);
+
+	uint8_t console_id[4];
+	blake2s(console_id, sizeof(console_id), "", 0, UNIQUE_ID_REG, UNIQUE_ID_REG_LEN);
+	console_id[3] += 1;
+	console_flash_socket = nbus_socket_allocate(&console_nbus);
+	nbus_socket_bind(console_flash_socket, console_id, local_ep);
+	nbus_flash_init(&console_flash, &console_flash_socket->datagram);
+	nbus_socket_set_descriptor(console_flash_socket, &flash_descriptor);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("nbus-flash on serial console at %02x%02x%02x%02x, endpoint %d"), console_id[0], console_id[1], console_id[2], console_id[3], local_ep);
+
+	console_id[3] += 1;
+	console_conf_socket = nbus_socket_allocate(&console_nbus);
+	nbus_socket_bind(console_conf_socket, console_id, local_ep);
+	proto_conf_init(&console_conf, &console_conf_socket->datagram, mib_root);
+	nbus_socket_set_descriptor(console_conf_socket, &conf_descriptor);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("proto-conf on serial console at %02x%02x%02x%02x, endpoint %d"), console_id[0], console_id[1], console_id[2], console_id[3], local_ep);
 }
 
 
 void usart3_isr(void);
 void usart3_isr(void) {
 	stm32_uart_interrupt_handler(&nbus2_uart);
+}
+#endif
+
+
+/**********************************************************************************************************************
+ * Ethernet init
+ **********************************************************************************************************************/
+
+#if !defined(CONFIG_APP_BL)
+Stm32SpiBus spi3;
+Stm32SpiDev spi3_ncn;
+Ncn26010 ncn;
+
+static void ethernet_init(void) {
+	/* SPI3 SCK/MISO/MOSI on PC10/PC11/PB5, AF6. */
+	gpioc.pin[10].vmt->set_mode(&(gpioc.pin[10]), MODE_ALTERNATE);
+	gpioc.pin[10].vmt->set_pinmux(&(gpioc.pin[10]), 6);
+	gpioc.pin[11].vmt->set_mode(&(gpioc.pin[11]), MODE_ALTERNATE);
+	gpioc.pin[11].vmt->set_pinmux(&(gpioc.pin[11]), 6);
+	gpiob.pin[5].vmt->set_mode(&(gpiob.pin[5]), MODE_ALTERNATE);
+	gpiob.pin[5].vmt->set_pinmux(&(gpiob.pin[5]), 6);
+
+	/* ETH_CS pin on PB4, idle high (deselected). */
+	gpiob.pin[4].vmt->set(&(gpiob.pin[4]), true);
+	gpiob.pin[4].vmt->set_mode(&(gpiob.pin[4]), MODE_OUTPUT);
+
+	/* ETH_IRQ pin on PB6. */
+	gpiob.pin[6].vmt->set_mode(&(gpiob.pin[6]), MODE_INPUT);
+	gpiob.pin[6].vmt->set_pull(&(gpiob.pin[6]), PULL_UP);
+
+	/* ETH_RST pin on PB7. Pulse the controller reset low before talking to it. */
+	gpiob.pin[7].vmt->set_mode(&(gpiob.pin[7]), MODE_OUTPUT);
+	gpiob.pin[7].vmt->set(&(gpiob.pin[7]), false);
+	vTaskDelay(2);
+	gpiob.pin[7].vmt->set(&(gpiob.pin[7]), true);
+	vTaskDelay(2);
+
+	RCC->APB1ENR1 |= RCC_APB1ENR1_SPI3EN;
+	stm32_spibus_init(&spi3, (void *)SPI3, STM32_SPI_PER_TYPE_SPI);
+	spi3.bus.vmt->set_sck_freq(&spi3.bus, 10e6);
+	spi3.bus.vmt->set_mode(&spi3.bus, 0, 0);
+	stm32_spidev_init(&spi3_ncn, &spi3.bus, &(gpiob.pin[4]));
+
+	ncn26010_init(&ncn, &spi3_ncn.dev);
 }
 #endif
 
@@ -170,6 +327,19 @@ static void port_flash_init(void) {
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_app, "app");
 	flash_vol_static_create(&pv_iflash, "update",     192 * 1024, 64 * 1024,  &lv_update);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_update, "update");
+
+	/* Hand the MIB partition to the flash-cbor-mib service. It detects presence, decodes the CBOR map
+	 * and, on success, advertises the resulting "mib" Conf tree used as the configuration tree. */
+	const struct flash_cbor_mib_conf mib_conf = {
+		.flash = lv_mib,
+		.offset = 0,
+		.max_size = 0,
+		.root_name = "mib",
+	};
+	if (flash_cbor_mib_init(&mib, &mib_conf) == FLASH_CBOR_MIB_RET_OK) {
+		flash_cbor_mib_get_root(&mib, &mib_root);
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)mib_root, "mib");
+	}
 }
 
 
@@ -214,6 +384,7 @@ int32_t port_init(void) {
 
 	#if !defined(CONFIG_APP_BL)
 		nbus2_init();
+		ethernet_init();
 	#endif
 
 	return PORT_INIT_OK;
