@@ -17,6 +17,7 @@
 
 #include <interfaces/gpio.h>
 #include <interfaces/led.h>
+#include <interfaces/pwm.h>
 
 #define MODULE_NAME "gpio-led"
 #define GPIO_LED_TASK_STACK_DEPTH 80
@@ -130,17 +131,35 @@ gpio_led_ret_t gpio_led_invert(GpioLed *self, bool invert) {
 }
 
 
-gpio_led_ret_t gpio_led_set(GpioLed *self, led_color_t color) {
+gpio_led_ret_t gpio_led_set_pwm(GpioLed *self, Pwm *r, Pwm *g, Pwm *b) {
+	self->r_pwm = r;
+	self->g_pwm = g;
+	self->b_pwm = b;
 
-	if (self->r != NULL) {
-		self->r->vmt->set(self->r, self->invert != ((color & 0xff0000u) == 0xff0000u));
+	return GPIO_LED_RET_OK;
+}
+
+
+/* Drive a single color channel. If a PWM channel is configured, the 8 bit color
+ * value is scaled to a fractional duty cycle. Otherwise the GPIO is toggled in a
+ * binary fashion (fully on only for the maximum value). */
+static void set_channel(Gpio *gpio, Pwm *pwm, uint8_t value, bool invert) {
+	if (pwm != NULL) {
+		float duty = value / 255.0f;
+		if (invert) {
+			duty = 1.0f - duty;
+		}
+		pwm->vmt->set_pwm(pwm, duty);
+	} else if (gpio != NULL) {
+		gpio->vmt->set(gpio, invert != (value == 0xff));
 	}
-	if (self->g != NULL) {
-		self->g->vmt->set(self->g, self->invert != ((color & 0x00ff00u) == 0x00ff00u));
-	}
-	if (self->b != NULL) {
-		self->b->vmt->set(self->b, self->invert != ((color & 0x0000ffu) == 0x0000ffu));
-	}
+}
+
+
+gpio_led_ret_t gpio_led_set(GpioLed *self, led_color_t color) {
+	set_channel(self->r, self->r_pwm, (color & 0xff0000u) >> 16, self->invert);
+	set_channel(self->g, self->g_pwm, (color & 0x00ff00u) >> 8, self->invert);
+	set_channel(self->b, self->b_pwm, (color & 0x0000ffu) >> 0, self->invert);
 
 	return GPIO_LED_RET_OK;
 }

@@ -14,6 +14,7 @@
 #include <main.h>
 #include <interfaces/led.h>
 #include <interfaces/gpio.h>
+#include <interfaces/pwm.h>
 
 typedef enum {
 	GPIO_LED_RET_OK = 0,
@@ -25,6 +26,9 @@ typedef struct gpio_led {
 	Gpio *r;
 	Gpio *g;
 	Gpio *b;
+	Pwm *r_pwm;
+	Pwm *g_pwm;
+	Pwm *b_pwm;
 	bool invert;
 
 	TaskHandle_t task;
@@ -38,5 +42,6 @@ typedef struct gpio_led {
 gpio_led_ret_t gpio_led_init(GpioLed *self, Gpio *r, Gpio *g, Gpio *b);
 gpio_led_ret_t gpio_led_free(GpioLed *self);
 gpio_led_ret_t gpio_led_invert(GpioLed *self, bool invert);
+gpio_led_ret_t gpio_led_set_pwm(GpioLed *self, Pwm *r, Pwm *g, Pwm *b);
 gpio_led_ret_t gpio_led_set(GpioLed *self, led_color_t color);
 
