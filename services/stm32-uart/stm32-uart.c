@@ -21,8 +21,10 @@
 	#include <stm32g4xx.h>
 #elif defined(STM32H7)
 	#include <stm32h7xx.h>
+#elif defined(STM32U5)
+	#include <stm32u5xx.h>
 #else
-	#error "stm32-gpio service is not compatible with this MCU family"
+	#error "stm32-uart service is not compatible with this MCU family"
 #endif
 
 
@@ -32,6 +34,14 @@
 
 #if !defined(USART_CR1_FIFOEN)
 #define USART_CR1_FIFOEN (1 << 29)
+#endif
+
+/* The STM32U5 CMSIS headers name the data register field masks without the _Msk suffix. */
+#if !defined(USART_TDR_TDR_Msk)
+#define USART_TDR_TDR_Msk USART_TDR_TDR
+#endif
+#if !defined(USART_RDR_RDR_Msk)
+#define USART_RDR_RDR_Msk USART_RDR_RDR
 #endif
 
 
