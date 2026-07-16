@@ -43,6 +43,10 @@ menu "Low-level platform drivers"
 			bool "STM32 QSPI flash memory driver"
 			default y
 
+		config SERVICE_STM32_OCTOSPI_FLASH
+			bool "STM32 OCTOSPI NOR flash memory driver (QSPI mode)"
+			default n
+
 		config SERVICE_STM32_SPI
 			bool "STM32 SPI bus driver"
 			default y
