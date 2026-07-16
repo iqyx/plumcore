@@ -26,15 +26,24 @@ typedef enum {
 	APP_RET_FAILED,
 } app_ret_t;
 
+/* Measurement channels the application discovers and, if present, publishes and compensates.
+ * A port advertises only the sensors it actually has (eg. the single-axis inc5 exposes just
+ * inc_x), so channels missing from the service locator are silently skipped. */
+#define APP_CHANNEL_COUNT 4
+
 typedef struct {
 	Mq *mq;
 	MqClient *mqc;
 
-	Sensor *inc_x;
+	/* Discovered measurement channels, indexed the same as the static channel table in app.c.
+	 * A NULL entry means the sensor was not advertised by the port. */
+	Sensor *channels[APP_CHANNEL_COUNT];
+
+	/* Board temperature feeding the compensation polynomial (optional). */
 	Sensor *temp_x;
 
-	/* Polynomial offset/gain/temperature compensation of the raw inclination value. The
-	 * compensated result is read back over a dedicated client and logged. */
+	/* Polynomial offset/gain/temperature compensation of the raw measured values. The
+	 * compensated results are read back over a dedicated client and logged. */
 	MqCompensation comp;
 	MqClient *log_mqc;
 

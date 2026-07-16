@@ -18,6 +18,22 @@
 #define MODULE_NAME "app-inc5"
 
 
+/* Measurement channels the application knows about. Each entry maps a sensor advertised by the
+ * port (by its service locator name) to the raw and compensated message queue topics. The
+ * compensation channel is registered under the sensor name so its coefficient subtree is
+ * addressable as compensation/<sensor_name> in the configuration tree. */
+static const struct app_channel_desc {
+	const char *sensor_name;
+	const char *input_topic;
+	const char *output_topic;
+} app_channels[APP_CHANNEL_COUNT] = {
+	{"inc_x", "inc/x", "inc/x/comp"},
+	{"inc_y", "inc/y", "inc/y/comp"},
+	{"acc_x", "acc/x", "acc/x/comp"},
+	{"acc_y", "acc/y", "acc/y/comp"},
+};
+
+
 /**
  * @brief Read a single sensor value and publish it on the message queue
  *
@@ -41,8 +57,17 @@ static void app_task(void *p) {
 	App *self = p;
 
 	while (true) {
-		publish_sensor(self, self->inc_x, "inc/x");
-		publish_sensor(self, self->temp_x, "temp/x");
+		/* Publish every discovered channel and, if present, the compensation temperature.
+		 * The first read blocks until the next measurement cycle; the port then makes all
+		 * sensor values available at once, so the remaining reads return immediately. */
+		for (size_t i = 0; i < APP_CHANNEL_COUNT; i++) {
+			if (self->channels[i] != NULL) {
+				publish_sensor(self, self->channels[i], app_channels[i].input_topic);
+			}
+		}
+		if (self->temp_x != NULL) {
+			publish_sensor(self, self->temp_x, "temp");
+		}
 	}
 	vTaskDelete(NULL);
 }
@@ -146,13 +171,32 @@ static app_ret_t api_init(App *self) {
 }
 
 
-static Sensor *find_sensor(const char *name) {
+/* Look up a sensor by name without logging an error when it is absent. Channels are optional:
+ * a port advertises only the sensors it has. */
+static Sensor *find_sensor_optional(const char *name) {
 	Sensor *s = NULL;
 	if (iservicelocator_query_name_type(locator, name, ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&s) != ISERVICELOCATOR_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot find the required sensor ('%s')"), name);
 		return NULL;
 	}
 	return s;
+}
+
+
+/* Register a compensation channel with identity coefficients (zero offset, unity gain, no
+ * nonlinearity or temperature correction). The coefficients are exposed through the service
+ * configuration tree under the channel (sensor) name. */
+static void add_comp_channel(App *self, const struct app_channel_desc *desc) {
+	struct mq_compensation_channel_conf conf = {
+		.x_ref = 0.0f,
+		.c = {0.0f, 1.0f},
+		.t_ref = MQ_COMPENSATION_DEFAULT_TEMP_C,
+		.tc1 = 0.0f,
+		.tc2 = 0.0f,
+	};
+	snprintf(conf.name, sizeof(conf.name), "%s", desc->sensor_name);
+	snprintf(conf.input_topic, sizeof(conf.input_topic), "%s", desc->input_topic);
+	snprintf(conf.output_topic, sizeof(conf.output_topic), "%s", desc->output_topic);
+	mq_compensation_add_channel(&self->comp, &conf);
 }
 
 
@@ -165,34 +209,36 @@ app_ret_t app_init(App *self) {
 		return APP_RET_FAILED;
 	}
 
-	self->inc_x = find_sensor("inc_x");
-	self->temp_x = find_sensor("temp_x");
-	if (self->inc_x == NULL || self->temp_x == NULL) {
-		return APP_RET_FAILED;
-	}
-
 	self->mqc = self->mq->vmt->open(self->mq);
 	if (self->mqc == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot open message queue client"));
 		return APP_RET_FAILED;
 	}
 
-	/* Set up the compensation service with default identity coefficients (zero offset, unity gain,
-	 * no nonlinearity or temperature correction). The raw inclination is compensated using the
-	 * temperature topic and republished. Coefficients are exposed through the service config tree. */
+	/* Discover the measurement sensors advertised by the port and register a compensation channel
+	 * for each one present. The raw values are compensated against a shared temperature topic and
+	 * republished. Ports expose only the sensors they have (the single-axis inc5 has just inc_x),
+	 * so absent channels are simply skipped. */
 	mq_compensation_init(&self->comp, self->mq);
-	const struct mq_compensation_channel_conf inc_conf = {
-		.name = "inc_x",
-		.input_topic = "inc/x",
-		.output_topic = "inc/x/comp",
-		.x_ref = 0.0f,
-		.c = {0.0f, 1.0f},
-		.t_ref = MQ_COMPENSATION_DEFAULT_TEMP_C,
-		.tc1 = 0.0f,
-		.tc2 = 0.0f,
-	};
-	mq_compensation_add_channel(&self->comp, &inc_conf);
-	mq_compensation_set_temp_topic(&self->comp, "temp/x");
+	size_t found = 0;
+	for (size_t i = 0; i < APP_CHANNEL_COUNT; i++) {
+		self->channels[i] = find_sensor_optional(app_channels[i].sensor_name);
+		if (self->channels[i] == NULL) {
+			continue;
+		}
+		add_comp_channel(self, &app_channels[i]);
+		found++;
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("discovered channel '%s'"), app_channels[i].sensor_name);
+	}
+	if (found == 0) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no measurement sensors found"));
+		return APP_RET_FAILED;
+	}
+
+	/* Optional board temperature feeding the compensation polynomial. */
+	self->temp_x = find_sensor_optional("temp");
+
+	mq_compensation_set_temp_topic(&self->comp, "temp");
 	mq_compensation_start(&self->comp, 1);
 
 	config_init(self);
