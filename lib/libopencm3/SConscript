@@ -5,6 +5,7 @@ Import("objs")
 LOCM3_TARGETS = {
 	'stm32g4': 'lib/stm32/g4',
 	'stm32h7': 'lib/stm32/h4',
+	'stm32u5': 'lib/stm32/u5',
 }
 
 if conf["LIB_LIBOPENCM3"] == "y":
