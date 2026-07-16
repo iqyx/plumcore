@@ -19,4 +19,8 @@ config PORT_NWDAQ_S2_INC2
 		config PORT_FLASH_ADDRESS
 			hex
 			default "0x08000000"
+
+		config PORT_NWDAQ_S2_INC2_MIB_PUBKEY
+			string "Ed25519 public key for MIB verification (base64)"
+			default ""
 	endmenu

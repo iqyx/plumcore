@@ -14,11 +14,13 @@ env.Replace(OOCD_TARGET = "stm32g4x")
 
 env.Append(CFLAGS = [
 	"-DSTM32G4",
+	"-DSTM32G491xx",
 ])
 
 env.Append(CPPPATH = [Dir(".")])
 
-env.Append(LINKFLAGS = [
-	"-Wl,-u_printf_float",
-])
+if conf["APP_BL"] == "n":
+	env.Append(LINKFLAGS = [
+		"-Wl,-u_printf_float",
+	])
 
