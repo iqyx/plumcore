@@ -4,7 +4,7 @@ Import("objs")
 
 if conf["LIB_CMSIS_STM32U5"] == "y":
 
-	env.Git('https://github.com/STMicroelectronics/cmsis-device-u5.git', branch='master')
+	env.Git('https://github.com/STMicroelectronics/cmsis-device-u5.git', branch='main')
 
 	env.Append(CPPPATH = [
 		Dir(env['LIB_DEFAULT_REPO_DIR'] + '/Include'),
