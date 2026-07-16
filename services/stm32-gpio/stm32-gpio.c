@@ -19,6 +19,8 @@
 	#include <stm32g4xx.h>
 #elif defined(STM32H7)
 	#include <stm32h7xx.h>
+#elif defined(STM32U5)
+	#include <stm32u5xx.h>
 #else
 	#error "stm32-gpio service is not compatible with this MCU family"
 #endif
