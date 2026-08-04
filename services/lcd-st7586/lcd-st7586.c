@@ -239,4 +239,25 @@ lcd_st7586_ret_t lcd_st7586_free(LcdSt7586 *self) {
 }
 
 
+lcd_st7586_ret_t lcd_st7586_set_contrast(LcdSt7586 *self, float contrast) {
+	/* Clamp the requested contrast to the valid 0.0 - 1.0 range and map it onto the 10-bit Vop
+	 * (electronic volume) value. */
+	if (contrast < 0.0f) {
+		contrast = 0.0f;
+	}
+	if (contrast > 1.0f) {
+		contrast = 1.0f;
+	}
+	uint16_t vop = (uint16_t)(contrast * 1023.0f);
+
+	/* The contrast is controlled by the Vop voltage, programmed with the 0xC0 "Set Vop" command
+	 * followed by the 10-bit value: Vop[7:0] in the first data byte and Vop[9:8] in the second. */
+	lcd_send_command(self, 0xC0);
+	lcd_send_data(self, vop & 0xff);
+	lcd_send_data(self, (vop >> 8) & 0x03);
+
+	return LCD_ST7586_RET_OK;
+}
+
+
 

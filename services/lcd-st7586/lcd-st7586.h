@@ -34,4 +34,5 @@ typedef struct lcs_st7586 {
 
 lcd_st7586_ret_t lcd_st7586_init(LcdSt7586 *self, SpiDev *spi, Gpio *reset, Gpio *cd);
 lcd_st7586_ret_t lcd_st7586_free(LcdSt7586 *self);
+lcd_st7586_ret_t lcd_st7586_set_contrast(LcdSt7586 *self, float contrast);
 
