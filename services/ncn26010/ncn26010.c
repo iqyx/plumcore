@@ -284,6 +284,18 @@ ncn26010_ret_t ncn26010_link_status(Ncn26010 *self, bool *up, bool *neg_complete
 }
 
 
+ncn26010_ret_t ncn26010_sleep(Ncn26010 *self) {
+	/* Put the 10Base-T1S PHY PMA into its low power mode to cut the idle current consumption. */
+	if (ncn26010_rmw_set(self, NCN26010_T1SPMACTRL, NCN26010_T1SPMACTRL_LOW_POWER_MODE) != NCN26010_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot enter low power mode"));
+		return NCN26010_RET_FAILED;
+	}
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("entered low power mode"));
+	return NCN26010_RET_OK;
+}
+
+
 ncn26010_ret_t ncn26010_send(Ncn26010 *self, const uint8_t *buf, size_t len) {
 	uint32_t status = 0;
 	ncn26010_read(self, NCN26010_BUFSTS, &status);

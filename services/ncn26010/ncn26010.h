@@ -622,6 +622,7 @@ ncn26010_ret_t ncn26010_init(Ncn26010 *self, SpiDev *spi);
 ncn26010_ret_t ncn26010_free(Ncn26010 *self);
 ncn26010_ret_t ncn26010_irq_handler(Ncn26010 *self);
 ncn26010_ret_t ncn26010_link_status(Ncn26010 *self, bool *up, bool *neg_completed);
+ncn26010_ret_t ncn26010_sleep(Ncn26010 *self);
 ncn26010_ret_t ncn26010_send(Ncn26010 *self, const uint8_t *buf, size_t len);
 ncn26010_ret_t ncn26010_recv(Ncn26010 *self, uint8_t *buf, size_t size, size_t *len);
 
