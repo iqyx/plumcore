@@ -41,6 +41,7 @@ typedef struct stm32_spi_dev {
 	SpiDev dev;
 
 	Gpio *cs;
+	bool cs_inverted;
 
 	bool selected;
 } Stm32SpiDev;
@@ -52,4 +53,8 @@ stm32_spi_ret_t stm32_spibus_irq_handler(Stm32SpiBus *self);
 
 stm32_spi_ret_t stm32_spidev_init(Stm32SpiDev *self, SpiBus *bus, Gpio *cs);
 stm32_spi_ret_t stm32_spidev_free(Stm32SpiDev *self);
+
+/* Select the chip-select polarity. By default CS is active low (asserted low, idle high);
+ * setting inverted = true makes it active high (asserted high, idle low). */
+stm32_spi_ret_t stm32_spidev_set_cs_inverted(Stm32SpiDev *self, bool inverted);
 

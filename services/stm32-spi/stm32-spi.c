@@ -19,6 +19,8 @@
 	#include <stm32g4xx.h>
 #elif defined(STM32H7)
 	#include <stm32h7xx.h>
+#elif defined(STM32U5)
+	#include <stm32u5xx.h>
 #else
 	#error "stm32-spi service is not compatible with this MCU family"
 #endif
@@ -48,16 +50,18 @@ static spi_ret_t stm32_spibus_send(SpiBus *spibus, const uint8_t *txbuf, size_t 
 				continue;
 			}
 			(void)*dr;
-		#elif defined(STM32H7)
+		#elif defined(STM32H7) || defined(STM32U5)
 			while (!(base->SR & SPI_SR_TXC)) {
 				continue;
 			}
-			base->TXDR = txbuf[i];
+			volatile uint8_t *txdr = (volatile uint8_t *)&base->TXDR;
+			*txdr = txbuf[i];
 			base->CR1 |= SPI_CR1_CSTART;
 			while (!(base->SR & SPI_SR_RXP)) {
 				continue;
 			}
-			uint8_t read = base->RXDR;
+			volatile uint8_t *rxdr = (volatile uint8_t *)&base->RXDR;
+			uint8_t read = *rxdr;
 			(void)read;
 		#endif
 	}
@@ -81,16 +85,18 @@ static spi_ret_t stm32_spibus_receive(SpiBus *spibus, uint8_t *rxbuf, size_t rxl
 				continue;
 			}
 			rxbuf[i] = *dr;
-		#elif defined(STM32H7)
+		#elif defined(STM32H7) || defined(STM32U5)
 			while (!(base->SR & SPI_SR_TXC)) {
 				continue;
 			}
-			base->TXDR = 0x00;
+			volatile uint8_t *txdr = (volatile uint8_t *)&base->TXDR;
+			*txdr = 0x00;
 			base->CR1 |= SPI_CR1_CSTART;
 			while (!(base->SR & SPI_SR_RXP)) {
 				continue;
 			}
-			rxbuf[i] = base->RXDR;
+			volatile uint8_t *rxdr = (volatile uint8_t *)&base->RXDR;
+			rxbuf[i] = *rxdr;
 		#endif
 	}
 
@@ -102,7 +108,7 @@ static spi_ret_t stm32_spibus_exchange(SpiBus *spibus, const uint8_t *txbuf, uin
 	Stm32SpiBus *self = (Stm32SpiBus *)spibus->parent;
 
 	if (self->per_type == STM32_SPI_PER_TYPE_UART) {
-		#if defined(STM32H7)
+		#if defined(STM32H7) || defined(STM32U5)
 			USART_TypeDef *base = (USART_TypeDef *)self->base;
 			for (size_t i = 0; i < len; i++) {
 				while (!(base->ISR & USART_ISR_TXE_TXFNF)) {
@@ -159,6 +165,25 @@ static spi_ret_t stm32_spibus_exchange(SpiBus *spibus, const uint8_t *txbuf, uin
 			}
 
 			base->CR1 &= ~SPI_CR1_SPE;
+		#elif defined(STM32U5)
+
+			/* Polled full-duplex, byte by byte, matching send()/receive(). The TSIZE/interrupt-driven
+			 * continuous transfer (used on H7 above) loses the first received bit on U5 because of its
+			 * SPE off/on and continuous-clock kickoff, shifting the whole frame; the per-byte CSTART
+			 * path keeps SPE enabled and clocks correctly, and needs no end-of-transfer interrupt. */
+			for (size_t i = 0; i < len; i++) {
+				while (!(base->SR & SPI_SR_TXC)) {
+					continue;
+				}
+				volatile uint8_t *txdr = (volatile uint8_t *)&base->TXDR;
+				*txdr = txbuf[i];
+				base->CR1 |= SPI_CR1_CSTART;
+				while (!(base->SR & SPI_SR_RXP)) {
+					continue;
+				}
+				volatile uint8_t *rxdr = (volatile uint8_t *)&base->RXDR;
+				rxbuf[i] = *rxdr;
+			}
 		#endif
 	}
 
@@ -207,7 +232,7 @@ static spi_ret_t stm32_spibus_set_sck_freq(SpiBus *spibus, uint32_t freq_hz) {
 
 	#if defined(STM32G4)
 		base->CR1 = (base->CR1 & ~SPI_CR1_BR_Msk) | (i << SPI_CR1_BR_Pos);
-	#elif defined(STM32H7)
+	#elif defined(STM32H7) || defined(STM32U5)
 		base->CFG1 = (base->CFG1 & ~SPI_CFG1_MBR_Msk) | (i << SPI_CFG1_MBR_Pos);
 	#endif
 
@@ -227,7 +252,7 @@ static spi_ret_t stm32_spibus_set_mode(SpiBus *spibus, uint8_t cpol, uint8_t cph
 		base->CR1 = (base->CR1 & ~(SPI_CR1_CPOL | SPI_CR1_CPHA))
 		           | (cpol ? SPI_CR1_CPOL : 0)
 		           | (cpha ? SPI_CR1_CPHA : 0);
-	#elif defined(STM32H7)
+	#elif defined(STM32H7) || defined(STM32U5)
 		base->CFG2 = (base->CFG2 & ~(SPI_CFG2_CPOL | SPI_CFG2_CPHA))
 		            | (cpol ? SPI_CFG2_CPOL : 0)
 		            | (cpha ? SPI_CFG2_CPHA : 0);
@@ -256,7 +281,7 @@ static stm32_spi_ret_t stm32_spibus_port_init(Stm32SpiBus *self) {
 
 		/* Initialize UART/USART peripheral in a synchronous mode, acting as a SPI master. */
 		base->CR1 &= ~USART_CR1_UE;
-		#if defined(STM32H7)
+		#if defined(STM32H7) || defined(STM32U5)
 			/* set baudrate here */
 			base->CR1 = USART_CR1_RE | USART_CR1_TE;
 			base->CR2 = USART_CR2_CLKEN | USART_CR2_MSBFIRST | USART_CR2_LBCL;
@@ -281,7 +306,7 @@ static stm32_spi_ret_t stm32_spibus_port_init(Stm32SpiBus *self) {
 			base->CR1 |= SPI_CR1_MSTR;
 			base->CR2 = SPI_CR2_FRXTH | ((8 - 1) << SPI_CR2_DS_Pos);
 			base->CR1 |= SPI_CR1_SPE;
-		#elif defined(STM32H7)
+		#elif defined(STM32H7) || defined(STM32U5)
 			base->CFG1 = (4 << SPI_CFG1_MBR_Pos) | ((8 - 1) << SPI_CFG1_DSIZE_Pos) | ((8 - 1) << SPI_CFG1_CRCSIZE_Pos);
 			base->CR2 = 0;
 			base->CR1 = SPI_CR1_SSI;
@@ -332,7 +357,7 @@ stm32_spi_ret_t stm32_spibus_free(Stm32SpiBus *self) {
 
 
 stm32_spi_ret_t stm32_spibus_irq_handler(Stm32SpiBus *self) {
-	#if defined(STM32H7)
+	#if defined(STM32H7) || defined(STM32U5)
 		SPI_TypeDef *base = (SPI_TypeDef *)self->base;
 
 		if (base->SR & SPI_SR_TXC) {
@@ -391,7 +416,7 @@ static spi_ret_t stm32_spidev_select(SpiDev *spidev) {
 	if (self->bus->vmt->lock(self->bus) != SPI_RET_OK) {
 		return SPI_RET_FAILED;
 	}
-	self->cs->vmt->set(self->cs, false);
+	self->cs->vmt->set(self->cs, self->cs_inverted);
 	self->selected = true;
 
 	return SPI_RET_OK;
@@ -404,7 +429,7 @@ static spi_ret_t stm32_spidev_deselect(SpiDev *spidev) {
 	if (!self->selected) {
 		return SPI_RET_FAILED;
 	}
-	self->cs->vmt->set(self->cs, true);
+	self->cs->vmt->set(self->cs, !self->cs_inverted);
 	self->selected = false;
 	self->bus->vmt->unlock(self->bus);
 
@@ -426,8 +451,9 @@ stm32_spi_ret_t stm32_spidev_init(Stm32SpiDev *self, SpiBus *bus, Gpio *cs) {
 	memset(self, 0, sizeof(Stm32SpiDev));
 	self->bus = bus;
 	self->cs = cs;
+	self->cs_inverted = false;
 	self->cs->vmt->set_mode(self->cs, MODE_OUTPUT);
-	self->cs->vmt->set(self->cs, true);
+	self->cs->vmt->set(self->cs, !self->cs_inverted);
 
 	self->dev.parent = self;
 	self->dev.vmt = &stm32_spidev_vmt;
@@ -440,6 +466,16 @@ stm32_spi_ret_t stm32_spidev_init(Stm32SpiDev *self, SpiBus *bus, Gpio *cs) {
 
 stm32_spi_ret_t stm32_spidev_free(Stm32SpiDev *self) {
 	(void)self;
+	return STM32_SPI_RET_OK;
+}
+
+
+stm32_spi_ret_t stm32_spidev_set_cs_inverted(Stm32SpiDev *self, bool inverted) {
+	self->cs_inverted = inverted;
+	/* Re-assert the idle (deselected) level with the new polarity. */
+	if (!self->selected) {
+		self->cs->vmt->set(self->cs, !self->cs_inverted);
+	}
 	return STM32_SPI_RET_OK;
 }
 
