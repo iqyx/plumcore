@@ -42,5 +42,8 @@ doc/build
 # corresponding lib subdirectory and exclude sources with !src/
 lib/*/src
 
+# ignore microkernel sources
+microkernel/*
+
 # ignore stamps marking library source preparation steps
 lib/*/*.stamp
