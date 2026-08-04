@@ -20,7 +20,7 @@
 #include <interfaces/pwm.h>
 
 #define MODULE_NAME "gpio-led"
-#define GPIO_LED_TASK_STACK_DEPTH 80
+#define GPIO_LED_TASK_STACK_DEPTH 256
 
 
 static gpio_led_ret_t create_task(GpioLed *self);
@@ -63,13 +63,13 @@ static void task(void *p) {
 	while (self->task_needed) {
 		if (self->sequence) {
 			size_t i = 0;
-			for (i = 0; i < sizeof(seq) && self->sequence[i]; i++) {
+			for (i = 0; i < sizeof(seq) / sizeof(seq[0]) - 1 && self->sequence[i]; i++) {
 				seq[i] = self->sequence[i];
 			}
-			seq[i + 1] = LED_SEQ_END;
+			seq[i] = LED_SEQ_END;
 		}
 
-		for (size_t pos = 0; pos < sizeof(seq) && seq[pos]; pos++) {
+		for (size_t pos = 0; pos < sizeof(seq) / sizeof(seq[0]) && seq[pos]; pos++) {
 			if (seq[pos] & LED_SEQ_SET) {
 				gpio_led_set(self, (seq[pos] & 0xffffff00UL) >> 8);
 			}
