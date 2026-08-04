@@ -30,6 +30,13 @@
 
 #define MODULE_NAME "fb-compositor"
 
+/* One input event queued for delivery to a window. */
+struct window_event {
+	enum event_type type;
+	enum event_code code;
+	int32_t value;
+};
+
 
 /***************************************************************************************************
  * Packed framebuffer pixel helpers
@@ -163,6 +170,19 @@ static FbCompositorWindow *window_list_tail(FbCompositor *self) {
 }
 
 
+/* The top-level window: the front-most (highest z) window that is actually on screen. Input events
+ * are routed here only. The list is back-to-front, so the last visible match wins. */
+static FbCompositorWindow *window_list_top(FbCompositor *self) {
+	FbCompositorWindow *top = NULL;
+	for (FbCompositorWindow *win = self->windows; win != NULL; win = win->next) {
+		if (win->visible && win->state != WINDOW_STATE_MINIMIZED) {
+			top = win;
+		}
+	}
+	return top;
+}
+
+
 static void compositor_damage(FbCompositor *self) {
 	if (self->damaged != NULL) {
 		xSemaphoreGive(self->damaged);
@@ -255,6 +275,50 @@ static const struct fb_vmt window_fb_vmt = {
 
 
 /***************************************************************************************************
+ * Window input event interface (events routed to the window by the compositor)
+ ***************************************************************************************************/
+
+static event_ret_t window_event_listen(Event *self, enum event_type *type, enum event_code *code, int32_t *value) {
+	FbCompositorWindow *win = self->parent;
+	struct window_event ev = {0};
+
+	if (xQueueReceive(win->event_queue, &ev, portMAX_DELAY) != pdTRUE) {
+		return EV_RET_FAILED;
+	}
+	if (type != NULL) {
+		*type = ev.type;
+	}
+	if (code != NULL) {
+		*code = ev.code;
+	}
+	if (value != NULL) {
+		*value = ev.value;
+	}
+
+	return EV_RET_OK;
+}
+
+
+static event_ret_t window_event_subscribe(Event *self, enum event_type *type) {
+	FbCompositorWindow *win = self->parent;
+
+	if (type == NULL) {
+		return EV_RET_FAILED;
+	}
+	/* Store the type bitmask; the dispatcher drops events whose type is not requested. */
+	win->event_filter = *type;
+
+	return EV_RET_OK;
+}
+
+
+static const struct event_vmt window_event_vmt = {
+	.listen = window_event_listen,
+	.subscribe = window_event_subscribe,
+};
+
+
+/***************************************************************************************************
  * Window management interface
  ***************************************************************************************************/
 
@@ -270,6 +334,31 @@ static window_ret_t window_mgmt_stat(Window *self, struct window_stat *stat) {
 	stat->z = win->z;
 	stat->visible = win->visible;
 	stat->focused = (win->compositor->focused == win);
+	stat->title = win->title;
+	stat->icon = win->icon;
+	xSemaphoreGive(win->compositor->lock);
+
+	return WINDOW_RET_OK;
+}
+
+
+static window_ret_t window_mgmt_set_title(Window *self, const char *title) {
+	FbCompositorWindow *win = self->parent;
+
+	xSemaphoreTake(win->compositor->lock, portMAX_DELAY);
+	strlcpy(win->title, (title != NULL) ? title : "", sizeof(win->title));
+	xSemaphoreGive(win->compositor->lock);
+
+	return WINDOW_RET_OK;
+}
+
+
+static window_ret_t window_mgmt_set_icon(Window *self, const struct painter_raw_image *icon) {
+	FbCompositorWindow *win = self->parent;
+
+	/* Store the borrowed pointer only, no pixel data is copied. */
+	xSemaphoreTake(win->compositor->lock, portMAX_DELAY);
+	win->icon = icon;
 	xSemaphoreGive(win->compositor->lock);
 
 	return WINDOW_RET_OK;
@@ -457,6 +546,18 @@ static window_ret_t window_mgmt_get_fb(Window *self, Fb **fb) {
 }
 
 
+static window_ret_t window_mgmt_get_event(Window *self, Event **event) {
+	FbCompositorWindow *win = self->parent;
+
+	if (event == NULL) {
+		return WINDOW_RET_FAILED;
+	}
+	*event = &win->event;
+
+	return WINDOW_RET_OK;
+}
+
+
 static const struct window_vmt window_mgmt_vmt = {
 	.stat = window_mgmt_stat,
 	.move = window_mgmt_move,
@@ -466,11 +567,14 @@ static const struct window_vmt window_mgmt_vmt = {
 	.minimize = window_mgmt_minimize,
 	.restore = window_mgmt_restore,
 	.show = window_mgmt_show,
+	.set_title = window_mgmt_set_title,
+	.set_icon = window_mgmt_set_icon,
 	.to_front = window_mgmt_to_front,
 	.to_back = window_mgmt_to_back,
 	.set_z = window_mgmt_set_z,
 	.set_focus = window_mgmt_set_focus,
 	.get_fb = window_mgmt_get_fb,
+	.get_event = window_mgmt_get_event,
 };
 
 
@@ -479,28 +583,32 @@ static const struct window_vmt window_mgmt_vmt = {
  ***************************************************************************************************/
 
 static window_ret_t window_factory_create(WindowFactory *self, const struct window_geometry *geometry,
-                                          void *buf, size_t buf_size, enum fb_mode mode, Window **window) {
+                                          Window **window) {
 	FbCompositor *c = self->parent;
 
-	if (geometry == NULL || buf == NULL || window == NULL) {
+	if (geometry == NULL || window == NULL) {
 		return WINDOW_RET_FAILED;
-	}
-	/* v1: a window must use the same mode as the output and fit its own buffer. */
-	if (mode != c->mode) {
-		return WINDOW_RET_FAILED;
-	}
-	if (fb_buf_size(geometry->w, geometry->h, mode) > buf_size) {
-		return WINDOW_RET_NOMEM;
 	}
 
 	FbCompositorWindow *win = calloc(1, sizeof(FbCompositorWindow));
 	if (win == NULL) {
 		return WINDOW_RET_NOMEM;
 	}
+	win->event_queue = xQueueCreate(FB_COMPOSITOR_EVENT_QUEUE_LEN, sizeof(struct window_event));
+	if (win->event_queue == NULL) {
+		free(win);
+		return WINDOW_RET_NOMEM;
+	}
+	/* v1: a window uses the same mode as the output; size its backing store to the requested geometry. */
+	win->mode = c->mode;
+	win->buf_size = fb_buf_size(geometry->w, geometry->h, win->mode);
+	win->buf = calloc(1, win->buf_size);
+	if (win->buf == NULL) {
+		vQueueDelete(win->event_queue);
+		free(win);
+		return WINDOW_RET_NOMEM;
+	}
 	win->compositor = c;
-	win->buf = buf;
-	win->buf_size = buf_size;
-	win->mode = mode;
 	win->geometry = *geometry;
 	win->saved = *geometry;
 	win->state = WINDOW_STATE_NORMAL;
@@ -510,6 +618,8 @@ static window_ret_t window_factory_create(WindowFactory *self, const struct wind
 	win->fb.vmt = &window_fb_vmt;
 	win->window.parent = win;
 	win->window.vmt = &window_mgmt_vmt;
+	win->event.parent = win;
+	win->event.vmt = &window_event_vmt;
 
 	xSemaphoreTake(c->lock, portMAX_DELAY);
 	/* New windows land on top of the stack. */
@@ -540,6 +650,8 @@ static window_ret_t window_factory_destroy(WindowFactory *self, Window *window) 
 	xSemaphoreGive(c->lock);
 
 	compositor_damage(c);
+	vQueueDelete(win->event_queue);
+	free(win->buf);
 	free(win);
 	return WINDOW_RET_OK;
 }
@@ -558,19 +670,47 @@ static const struct window_factory_vmt window_factory_vmt = {
 /* Blit a single window onto the scratch buffer, clipped to the output rectangle. */
 static void compositor_blit_window(FbCompositor *self, FbCompositorWindow *win) {
 	const struct window_geometry *g = &win->geometry;
+	size_t bpp = (size_t)self->mode;
+
+	/* A run of pixels can be memcpy'd only when source and destination share the pixel mode and the
+	 * run starts on a byte boundary in both buffers and spans whole bytes; that also needs a bit depth
+	 * that tiles a byte cleanly. Anything else (leading/trailing sub-byte pixels, clipped edges, a
+	 * mismatched mode) falls back to the per-pixel copy below. */
+	bool can_bulk = (win->mode == self->mode) && (bpp % 8 == 0 || 8 % bpp == 0);
 
 	for (int32_t sy = 0; sy < (int32_t)g->h; sy++) {
 		int32_t dy = g->y + sy;
 		if (dy < 0 || dy >= (int32_t)self->out_h) {
 			continue;
 		}
-		for (int32_t sx = 0; sx < (int32_t)g->w; sx++) {
+		for (int32_t sx = 0; sx < (int32_t)g->w; ) {
 			int32_t dx = g->x + sx;
 			if (dx < 0 || dx >= (int32_t)self->out_w) {
+				sx++;
 				continue;
 			}
+
+			/* Copy the largest byte-aligned run starting at this pixel in one memcpy. */
+			if (can_bulk) {
+				size_t src_bit = ((size_t)sy * g->w + (size_t)sx) * bpp;
+				size_t dst_bit = ((size_t)dy * self->out_w + (size_t)dx) * bpp;
+				if (src_bit % 8 == 0 && dst_bit % 8 == 0) {
+					int32_t run_px = (int32_t)g->w - sx;
+					if ((int32_t)self->out_w - dx < run_px) {
+						run_px = (int32_t)self->out_w - dx;
+					}
+					size_t run_bytes = ((size_t)run_px * bpp) / 8;
+					if (run_bytes > 0) {
+						memcpy(self->scratch + dst_bit / 8, win->buf + src_bit / 8, run_bytes);
+						sx += (int32_t)(run_bytes * 8 / bpp);
+						continue;
+					}
+				}
+			}
+
 			uint32_t px = fb_get_pixel(win->buf, g->w, win->mode, sx, sy);
 			fb_set_pixel(self->scratch, self->out_w, self->mode, dx, dy, px);
+			sx++;
 		}
 	}
 }
@@ -605,6 +745,20 @@ fb_compositor_ret_t fb_compositor_render(FbCompositor *self) {
 }
 
 
+fb_compositor_ret_t fb_compositor_get_active_window(FbCompositor *self, Window **window) {
+	if (self == NULL || window == NULL) {
+		return FB_COMPOSITOR_RET_NULL;
+	}
+
+	xSemaphoreTake(self->lock, portMAX_DELAY);
+	FbCompositorWindow *top = window_list_top(self);
+	*window = (top != NULL) ? &top->window : NULL;
+	xSemaphoreGive(self->lock);
+
+	return FB_COMPOSITOR_RET_OK;
+}
+
+
 static void fb_compositor_task(void *p) {
 	FbCompositor *self = (FbCompositor *)p;
 
@@ -621,16 +775,53 @@ static void fb_compositor_task(void *p) {
 }
 
 
+/* Pump the input event source and route every event to the current top-level window. The source
+ * listen() blocks indefinitely, so this task cannot be joined on shutdown (see fb_compositor_free). */
+static void fb_compositor_input_task(void *p) {
+	FbCompositor *self = (FbCompositor *)p;
+
+	while (self->can_run) {
+		enum event_type type = EV_TYPE_NONE;
+		enum event_code code = EV_CODE_NONE;
+		int32_t value = 0;
+		if (self->input->vmt->listen(self->input, &type, &code, &value) != EV_RET_OK) {
+			continue;
+		}
+
+		xSemaphoreTake(self->lock, portMAX_DELAY);
+		FbCompositorWindow *top = window_list_top(self);
+		QueueHandle_t queue = (top != NULL) ? top->event_queue : NULL;
+		enum event_type filter = (top != NULL) ? top->event_filter : EV_TYPE_NONE;
+		xSemaphoreGive(self->lock);
+
+		/* filter == 0 (EV_TYPE_NONE) means the window did not narrow its subscription. */
+		if (queue == NULL || (filter != EV_TYPE_NONE && (type & filter) == 0)) {
+			continue;
+		}
+		struct window_event ev = {
+			.type = type,
+			.code = code,
+			.value = value,
+		};
+		/* Drop the event rather than block the pump if the window is not draining its queue. */
+		xQueueSend(queue, &ev, 0);
+	}
+
+	vTaskDelete(NULL);
+}
+
+
 /***************************************************************************************************
  * Service API
  ***************************************************************************************************/
 
-fb_compositor_ret_t fb_compositor_init(FbCompositor *self, Fb *out) {
+fb_compositor_ret_t fb_compositor_init(FbCompositor *self, Fb *out, Event *input) {
 	if (self == NULL || out == NULL) {
 		return FB_COMPOSITOR_RET_NULL;
 	}
 	memset(self, 0, sizeof(FbCompositor));
 	self->out = out;
+	self->input = input;
 	self->factory.parent = self;
 	self->factory.vmt = &window_factory_vmt;
 
@@ -662,6 +853,19 @@ fb_compositor_ret_t fb_compositor_init(FbCompositor *self, Fb *out) {
 	self->can_run = true;
 	if (xTaskCreate(fb_compositor_task, "fb-compositor", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &self->task) != pdPASS) {
 		goto err;
+	}
+
+	/* Route input to the top-level window only when an event source was provided. */
+	if (self->input != NULL) {
+		if (xTaskCreate(fb_compositor_input_task, "fb-compositor-in", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &self->input_task) != pdPASS) {
+			/* The render task is already up; stop it before releasing its resources. */
+			self->can_run = false;
+			compositor_damage(self);
+			while (self->running) {
+				vTaskDelay(pdMS_TO_TICKS(10));
+			}
+			goto err;
+		}
 	}
 
 	/* Render an initial (blank) frame. */
@@ -699,6 +903,8 @@ fb_compositor_ret_t fb_compositor_free(FbCompositor *self) {
 	while (self->running) {
 		vTaskDelay(pdMS_TO_TICKS(10));
 	}
+	/* The input task may still be blocked in the source listen(); it exits on the next event. The
+	 * caller must therefore keep the event source alive until then. */
 
 	if (self->scratch != NULL) {
 		free(self->scratch);

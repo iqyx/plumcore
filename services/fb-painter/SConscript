@@ -1,0 +1,32 @@
+Import("env")
+Import("objs")
+Import("conf")
+
+env.Append(CPPPATH = [
+	Dir("."),
+	Dir("assets"),
+])
+
+if conf["SERVICE_FB_PAINTER"] == "y":
+	objs.append(env.Object(File(Glob("*.c"))))
+
+	# Convert every assets/*.png to a painter_raw_image C array with tools/imtocdata.py, one picture at
+	# a time, appending each fragment to a single generated assets.c. Rebuilt whenever a picture changes.
+	imtocdata = File("#tools/imtocdata.py")
+	pngs = sorted(Glob("assets/*.png"), key=lambda node: node.name)
+
+	convert = ["echo '#include <interfaces/painter.h>' > $TARGET"]
+	convert += ["python3 %s --format g2 %s >> $TARGET" % (imtocdata.path, png.path) for png in pngs]
+	env.Command(File("assets/assets.c"), pngs + [imtocdata], convert)
+
+	# Extract every array definition into a matching extern declaration in assets.h.
+	env.Command(
+		File("assets/assets.h"),
+		File("assets/assets.c"),
+		[
+			"echo '#include <interfaces/painter.h>' > $TARGET",
+			"grep '^const struct painter_raw_image' $SOURCE | sed 's/^/extern /; s/ = {/;/' >> $TARGET",
+		],
+	)
+
+	objs.append(env.Object(File("assets/assets.c")))

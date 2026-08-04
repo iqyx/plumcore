@@ -1,0 +1,3 @@
+config SERVICE_ST67W611
+	bool "STMicroelectronics ST67W611M1 Wi-Fi/BLE combo module driver"
+	default n

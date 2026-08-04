@@ -10,6 +10,7 @@
 
 #include <main.h>
 #include <interfaces/fb.h>
+#include <interfaces/event.h>
 #include <interfaces/window.h>
 
 typedef enum {
@@ -19,17 +20,27 @@ typedef enum {
 	FB_COMPOSITOR_RET_NOMEM,
 } fb_compositor_ret_t;
 
+/* Maximum window title length including the terminating NUL. */
+#define FB_COMPOSITOR_WINDOW_TITLE_LEN 32
+
+/* Depth of each window's input event queue. */
+#define FB_COMPOSITOR_EVENT_QUEUE_LEN 8
+
 typedef struct fb_compositor FbCompositor;
 typedef struct fb_compositor_window FbCompositorWindow;
 
 struct fb_compositor_window {
 	Fb fb;                           /* surface the client draws on (backed by buf) */
 	Window window;                   /* management interface */
+	Event event;                     /* input event source delivered to this window */
 
 	FbCompositor *compositor;
 	FbCompositorWindow *next;        /* intrusive list, sorted by z ascending (back to front) */
 
-	uint8_t *buf;                    /* caller-provided backing store */
+	QueueHandle_t event_queue;       /* events routed to this window, drained by listen */
+	enum event_type event_filter;   /* type bitmask set via subscribe (0 = accept all types) */
+
+	uint8_t *buf;                    /* backing store, owned and allocated by the factory */
 	size_t buf_size;                 /* must hold the window's largest geometry */
 	enum fb_mode mode;               /* mode of the backing store, must match the compositor */
 
@@ -38,6 +49,8 @@ struct fb_compositor_window {
 	enum window_state state;
 	int16_t z;
 	bool visible;
+	char title[FB_COMPOSITOR_WINDOW_TITLE_LEN];
+	const struct painter_raw_image *icon; /* borrowed pointer, not owned */
 };
 
 typedef struct fb_compositor {
@@ -47,6 +60,9 @@ typedef struct fb_compositor {
 	size_t out_w;
 	size_t out_h;
 	enum fb_mode mode;               /* working/composition mode (== out native mode) */
+
+	Event *input;                    /* input event source, may be NULL (no routing) */
+	TaskHandle_t input_task;         /* pumps input and routes to the top-level window */
 
 	uint8_t *scratch;                /* full-screen composing buffer */
 	size_t scratch_size;
@@ -63,10 +79,16 @@ typedef struct fb_compositor {
 } FbCompositor;
 
 
-fb_compositor_ret_t fb_compositor_init(FbCompositor *self, Fb *out);
+/* @p input is the event source routed to the top-level window; pass NULL to disable input routing.
+ * Every window exposes its own Event interface (reachable via the Window get_event method). */
+fb_compositor_ret_t fb_compositor_init(FbCompositor *self, Fb *out, Event *input);
 fb_compositor_ret_t fb_compositor_free(FbCompositor *self);
 fb_compositor_ret_t fb_compositor_set_background(FbCompositor *self, uint8_t color);
 
 /* Force an immediate recompose + flush (the render task does this on damage). Windows are created
  * and destroyed through the WindowFactory interface exposed as the factory member. */
 fb_compositor_ret_t fb_compositor_render(FbCompositor *self);
+
+/* Return the active (front-most visible, input-receiving) window through @p window, or NULL there if
+ * no window is currently on screen. */
+fb_compositor_ret_t fb_compositor_get_active_window(FbCompositor *self, Window **window);

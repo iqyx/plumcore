@@ -27,8 +27,7 @@ static sensor_keypad_ret_t check_state(SensorKeypad *self) {
 		bool new_down = key->value > key->ema + key->threshold;
 		if (new_down != key->down) {
 			key->down = new_down;
-			u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("value = %f, ema = %f"), key->value, key->ema);
-
+			//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("value = %f, ema = %f"), key->value, key->ema);
 
 			struct sensor_keypad_event ev = {
 				.type = key->type ? key->type : EV_TYPE_RAW,
@@ -46,9 +45,10 @@ static sensor_keypad_ret_t check_state(SensorKeypad *self) {
 static sensor_keypad_ret_t recompute_ema(SensorKeypad *self) {
 	for (struct sensor_keypad_key *key = self->keys; key->input != NULL; key++) {
 		if (key->input->vmt->value_f(key->input, &key->value) != SENSOR_RET_OK) {
-			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot read sensor code = %u"), key->code);
+			//u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot read sensor code = %u"), key->code);
 			continue;
 		}
+		//u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("value %f"), key->value);
 		if (key->ema == 0.0f) {
 			key->ema = key->value;
 		} else {

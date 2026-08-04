@@ -47,6 +47,14 @@ menu "Low-level platform drivers"
 			bool "STM32 OCTOSPI NOR flash memory driver (QSPI mode)"
 			default n
 
+		config SERVICE_LP581X_LED
+			bool "Texas Instruments LP5810/LP5812 LED driver"
+			default n
+
+		config SERVICE_LP586X_LED
+			bool "Texas Instruments LP586x LED matrix driver"
+			default n
+
 		config SERVICE_STM32_SPI
 			bool "STM32 SPI bus driver"
 			default y
@@ -252,6 +260,9 @@ menu "High level device drivers"
 	source "services/pcal6408a-gpio/Kconfig"
 	source "services/gpio-keypad/Kconfig"
 	source "services/tdk-accel/Kconfig"
+	source "services/bq25798/Kconfig"
+	source "services/bq27441/Kconfig"
+	source "services/st67w611/Kconfig"
 
 endmenu
 
@@ -473,6 +484,16 @@ menu "User interface services"
 
 	config SERVICE_FB_COMPOSITOR
 		bool "Window compositor on top of a framebuffer device"
+		default n
+
+	config SERVICE_FB_PAINTER
+		bool "2D painter on top of a framebuffer device"
+		default n
+
+	config SERVICE_GUI_WM_FS
+		bool "Full-screen GUI window manager"
+		select SERVICE_FB_COMPOSITOR
+		select SERVICE_FB_PAINTER
 		default n
 
 	config SERVICE_SENSOR_KEYPAD

@@ -1,0 +1,3 @@
+config SERVICE_BQ25798
+	bool "Texas Instruments BQ25798 buck-boost battery charger driver"
+	default n

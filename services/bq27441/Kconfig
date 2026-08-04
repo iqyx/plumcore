@@ -1,0 +1,3 @@
+config SERVICE_BQ27441
+	bool "Texas Instruments BQ27441-G1 battery fuel gauge driver"
+	default n

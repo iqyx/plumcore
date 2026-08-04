@@ -13,6 +13,10 @@
 #include <stddef.h>
 
 #include "fb.h"
+#include "event.h"
+
+/* Only ever referenced by pointer here (see painter.h for the full definition). */
+struct painter_raw_image;
 
 typedef enum {
 	WINDOW_RET_OK = 0,
@@ -40,6 +44,8 @@ struct window_stat {
 	int16_t z;                       /* stacking order, higher = closer to viewer */
 	bool visible;
 	bool focused;                    /* reserved for a future input router */
+	const char *title;               /* borrowed, owned by the window, valid until the next call */
+	const struct painter_raw_image *icon; /* borrowed, set via set_icon, NULL if none */
 };
 
 typedef struct window Window;
@@ -58,6 +64,13 @@ struct window_vmt {
 	window_ret_t (*restore)(Window *self);   /* back to the saved normal geometry */
 	window_ret_t (*show)(Window *self, bool visible);
 
+	/* Set the window title. The string is copied into the window; passing NULL clears the title. */
+	window_ret_t (*set_title)(Window *self, const char *title);
+
+	/* Set the window icon. Only the pointer is stored (no data is copied), so the image must outlive
+	 * the window or be replaced/cleared with NULL before it is freed. */
+	window_ret_t (*set_icon)(Window *self, const struct painter_raw_image *icon);
+
 	/* Stacking. */
 	window_ret_t (*to_front)(Window *self);
 	window_ret_t (*to_back)(Window *self);
@@ -68,6 +81,10 @@ struct window_vmt {
 
 	/* Drawing surface handed to the client that paints this window. */
 	window_ret_t (*get_fb)(Window *self, Fb **fb);
+
+	/* Input event source delivering events routed to this window. Only the top-level window
+	 * actually receives events; a window that is not on top simply blocks on listen. */
+	window_ret_t (*get_event)(Window *self, Event **event);
 };
 
 typedef struct window {
@@ -76,14 +93,14 @@ typedef struct window {
 } Window;
 
 
-/* A factory creating and destroying windows on some output (e.g. a compositor). The caller provides
- * the backing pixel buffer; the factory owns the window object itself and returns its Window
- * management interface, from which the drawing Fb is reachable via get_fb. */
+/* A factory creating and destroying windows on some output (e.g. a compositor). The factory owns the
+ * window object and its backing pixel buffer, which it allocates itself sized to the requested
+ * geometry and in a framebuffer mode of its own choosing. It returns the Window management interface,
+ * from which the drawing Fb (carrying the chosen mode) is reachable via get_fb. */
 typedef struct window_factory WindowFactory;
 
 struct window_factory_vmt {
-	window_ret_t (*create)(WindowFactory *self, const struct window_geometry *geometry,
-	                       void *buf, size_t buf_size, enum fb_mode mode, Window **window);
+	window_ret_t (*create)(WindowFactory *self, const struct window_geometry *geometry, Window **window);
 	window_ret_t (*destroy)(WindowFactory *self, Window *window);
 };
 
