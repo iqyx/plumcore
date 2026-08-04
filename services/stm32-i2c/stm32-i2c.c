@@ -83,13 +83,52 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 	base->CR1 &= ~I2C_CR1_ANFOFF;
 	base->CR1 = (base->CR1 & ~(I2C_CR1_DNF_Msk << I2C_CR1_DNF_Pos)) | (0 << I2C_CR1_DNF_Pos);
 
-	int presc = (SystemCoreClock / 4e6) - 1;
+	/* The prescaler normalizes the internal timer to 4 MHz (250 ns per tick) regardless of the kernel clock, so
+	 * SCLL/SCLH/SDADEL/SCLDEL below are expressed in 250 ns units. At this granularity the fast speeds are coarse,
+	 * but that is the best resolution available while the MCU runs from the 4 MHz oscillator. */
+	uint32_t presc = (SystemCoreClock / 4e6) - 1;
+	uint32_t scll = 0;
+	uint32_t sclh = 0;
+	uint32_t sdadel = 0;
+	uint32_t scldel = 0;
+	switch (self->speed_hz) {
+		case 1000000:
+			/* Fast-mode plus, ~1 MHz. */
+			scll = 1;
+			sclh = 1;
+			sdadel = 0;
+			scldel = 1;
+			break;
+		case 100000:
+			/* Standard mode, ~100 kHz. */
+			scll = 0x13;
+			sclh = 0x0f;
+			sdadel = 2;
+			scldel = 4;
+			break;
+		case 10000:
+			/* Super-slow, ~10 kHz. SCLL/SCLH are 8-bit, so the 100 us period is split into two ~50 us
+			 * halves of 200 ticks (0xc7 + 1) each. Useful for long or weakly pulled-up buses. */
+			scll = 0xc7;
+			sclh = 0xc7;
+			sdadel = 4;
+			scldel = 8;
+			break;
+		case 400000:
+		default:
+			/* Fast mode, ~400 kHz (also used as a safe fallback for unsupported speeds). */
+			scll = 5;
+			sclh = 3;
+			sdadel = 1;
+			scldel = 2;
+			break;
+	}
 	base->TIMINGR =
 		(presc << I2C_TIMINGR_PRESC_Pos) |
-		(9 << I2C_TIMINGR_SCLL_Pos) |
-		(3 << I2C_TIMINGR_SCLH_Pos) |
-		(3 << I2C_TIMINGR_SDADEL_Pos) |
-		(3 << I2C_TIMINGR_SCLDEL_Pos);
+		(scll << I2C_TIMINGR_SCLL_Pos) |
+		(sclh << I2C_TIMINGR_SCLH_Pos) |
+		(sdadel << I2C_TIMINGR_SDADEL_Pos) |
+		(scldel << I2C_TIMINGR_SCLDEL_Pos);
 	base->CR1 &= ~I2C_CR1_NOSTRETCH;
 	base->CR2 &= ~I2C_CR2_ADD10;
 	base->CR1 |= I2C_CR1_PE;
@@ -125,6 +164,9 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 
 	if (xSemaphoreTake(self->bus_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
 		xSemaphoreTake(self->wait_lock, 0);
+		/* Clear a STOPF possibly left set by a previously aborted transfer, so it cannot make the ISR
+		 * report a spurious stop while this transfer waits for TXIS/TC. */
+		base->ICR = I2C_ICR_STOPCF;
 		if (txdata != NULL) {
 			/* Implemented according to Master communication initialization (address phase) in RM0440. */
 			base->CR2 = (base->CR2 & ~I2C_CR2_SADD_Msk) | ((addr & 0x7F) << 1);
@@ -152,8 +194,12 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 			}
 			WAIT_FOR_INT(I2C_CR1_TCIE);
 			if (rxdata == NULL) {
-				/* Only if not repeated start. */
+				/* No repeated start follows: issue a STOP and wait for it to actually complete before
+				 * releasing the bus, so the next transfer never sets START while this STOP is still in
+				 * progress. STOPF is cleared here as nothing else clears it on the success path. */
 				base->CR2 |= I2C_CR2_STOP;
+				WAIT_FOR_INT(I2C_CR1_STOPIE);
+				base->ICR = I2C_ICR_STOPCF;
 			}
 		}
 		if (rxdata != NULL) {
@@ -174,6 +220,8 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 
 			WAIT_FOR_INT(I2C_CR1_TCIE);
 			base->CR2 |= I2C_CR2_STOP;
+			WAIT_FOR_INT(I2C_CR1_STOPIE);
+			base->ICR = I2C_ICR_STOPCF;
 		}
 	} else {
 		/* Try to restart I2C peripheral here. */
@@ -192,7 +240,7 @@ err:
 	/* Common error exit. Disable the transfer interrupts first so the ISR cannot fire while we tear the
 	 * transaction down, then recover the peripheral depending on the failure. Either way the bus lock is
 	 * always released so the bus never stays stuck. */
-	base->CR1 &= ~(I2C_CR1_TXIE | I2C_CR1_NACKIE | I2C_CR1_RXIE | I2C_CR1_TCIE | I2C_CR1_ERRIE);
+	base->CR1 &= ~(I2C_CR1_TXIE | I2C_CR1_NACKIE | I2C_CR1_RXIE | I2C_CR1_TCIE | I2C_CR1_STOPIE | I2C_CR1_ERRIE);
 	if (ret == I2C_BUS_RET_NACK) {
 		/* A NACK is a normal slave response: the state machine is still healthy, so just release the bus
 		 * with a STOP and clear the pending flags. */
@@ -214,10 +262,60 @@ static const struct i2c_bus_vmt stm32_i2c_bus_vmt = {
 };
 
 
+/* Probe a single 7-bit address by starting an address-only write (zero data bytes) with a hardware STOP right
+ * after the address phase (AUTOEND). No data byte is written, so a present slave is never disturbed. The addressed
+ * slave either ACKs the address (NACKF stays clear) or NACKs it; either way the peripheral generates the STOP and
+ * raises STOPF, on which the ISR wakes us. */
+static i2c_bus_ret_t stm32_i2c_probe(Stm32I2c *self, uint8_t addr) {
+	I2C_TypeDef *base = (I2C_TypeDef *)self->base;
+	i2c_bus_ret_t ret = I2C_BUS_RET_OK;
+
+	if (xSemaphoreTake(self->bus_lock, pdMS_TO_TICKS(100)) != pdTRUE) {
+		return I2C_BUS_RET_FAILED;
+	}
+	xSemaphoreTake(self->wait_lock, 0);
+	base->ICR = I2C_ICR_STOPCF | I2C_ICR_NACKCF;
+
+	base->CR2 = (((uint32_t)addr & 0x7F) << 1) | I2C_CR2_AUTOEND | I2C_CR2_START;
+	base->CR1 |= I2C_CR1_STOPIE | I2C_CR1_ERRIE;
+	if (xSemaphoreTake(self->wait_lock, pdMS_TO_TICKS(self->timeout_ms)) != pdTRUE) {
+		/* The expected STOP never completed; the peripheral state machine is wedged, re-initialize it. */
+		base->CR1 &= ~(I2C_CR1_STOPIE | I2C_CR1_ERRIE);
+		stm32_i2c_bus_init(self);
+		xSemaphoreGive(self->bus_lock);
+		return I2C_BUS_RET_FAILED;
+	}
+	if (base->ISR & (I2C_ISR_BERR | I2C_ISR_ARLO | I2C_ISR_OVR)) {
+		ret = I2C_BUS_RET_FAILED;
+		stm32_i2c_bus_init(self);
+	} else if (base->ISR & I2C_ISR_NACKF) {
+		ret = I2C_BUS_RET_NACK;
+	}
+	base->ICR = I2C_ICR_STOPCF | I2C_ICR_NACKCF;
+
+	xSemaphoreGive(self->bus_lock);
+	return ret;
+}
+
+
+/* Scan the whole 7-bit address range and report every address that ACKs its address phase via u_log. Only the
+ * general-purpose range 0x08..0x77 is probed; the reserved addresses outside it are skipped. */
+stm32_i2c_ret_t stm32_i2c_scan(Stm32I2c *self) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("scanning I2C bus..."));
+	for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
+		if (stm32_i2c_probe(self, addr) == I2C_BUS_RET_OK) {
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("device found at address 0x%02x"), addr);
+		}
+	}
+	return STM32_I2C_RET_OK;
+}
+
+
 stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, void *base) {
 	memset(self, 0, sizeof(Stm32I2c));
 	self->base = base;
 	self->timeout_ms = 100;
+	self->speed_hz = 400000;
 
 	self->bus_lock = xSemaphoreCreateMutex();
 	if (self->bus_lock == NULL) {
@@ -234,6 +332,18 @@ stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, void *base) {
 
 	stm32_i2c_bus_init(self);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("bus initialized"));
+
+	return STM32_I2C_RET_OK;
+}
+
+
+/* Change the bus speed at runtime. The new setting is stored and the peripheral is re-initialized so it takes
+ * effect. The bus lock is held for the whole operation so no transfer can run while the peripheral is disabled. */
+stm32_i2c_ret_t stm32_i2c_set_speed(Stm32I2c *self, uint32_t speed_hz) {
+	xSemaphoreTake(self->bus_lock, portMAX_DELAY);
+	self->speed_hz = speed_hz;
+	stm32_i2c_bus_init(self);
+	xSemaphoreGive(self->bus_lock);
 
 	return STM32_I2C_RET_OK;
 }
@@ -270,6 +380,10 @@ stm32_i2c_ret_t stm32_i2c_irq_handler(Stm32I2c *self) {
 	}
 	if (base->ISR & I2C_ISR_TC) {
 		base->CR1 &= ~I2C_CR1_TCIE;
+		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
+	}
+	if (base->ISR & I2C_ISR_STOPF) {
+		base->CR1 &= ~I2C_CR1_STOPIE;
 		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
 	}
 	if (base->ISR & I2C_ISR_RXNE) {

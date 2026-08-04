@@ -25,6 +25,7 @@ typedef struct {
 	I2cBus bus;
 	void *base;
 	uint32_t timeout_ms;
+	uint32_t speed_hz;
 	SemaphoreHandle_t bus_lock;
 	SemaphoreHandle_t wait_lock;
 
@@ -34,6 +35,8 @@ typedef struct {
 stm32_i2c_ret_t stm32_i2c_recovery(Gpio *sda, Gpio *scl);
 stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self);
 stm32_i2c_ret_t stm32_i2c_init(Stm32I2c *self, void *base);
+stm32_i2c_ret_t stm32_i2c_set_speed(Stm32I2c *self, uint32_t speed_hz);
+stm32_i2c_ret_t stm32_i2c_scan(Stm32I2c *self);
 stm32_i2c_ret_t stm32_i2c_free(Stm32I2c *self);
 stm32_i2c_ret_t stm32_i2c_irq_handler(Stm32I2c *self);
 
