@@ -1,0 +1,11 @@
+config APP_HH1
+	bool "nwdaq-main-hh1 battery monitor application"
+
+menu "nwdaq-main-hh1 application configuration"
+	depends on APP_HH1
+
+	config APP_NAME
+		string
+		default "hh1"
+
+endmenu
