@@ -1,0 +1,25 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+objs.append(env.Object(source = [
+	File(Glob("*.c")),
+]))
+
+# target and architecture specific configuration
+env.Replace(LDSCRIPT = File("u575vit6.ld"))
+env.Replace(LIBOCM3 = "opencm3_stm32u5")
+env.Replace(OOCD_INTERFACE = "stlink")
+env.Replace(OOCD_TARGET = "stm32u5x")
+
+env.Append(CFLAGS = [
+	"-DSTM32U5",
+	"-DSTM32U575xx",
+])
+
+env.Append(CPPPATH = [Dir(".")])
+
+if conf["APP_BL"] == "n":
+	env.Append(LINKFLAGS = [
+		"-Wl,-u_printf_float",
+	])

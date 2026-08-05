@@ -1,0 +1,8 @@
+config PORT_PLATFORM_ARM_CM33
+	bool
+
+menu "ARM Cortex M33 platform configuration"
+	depends on PORT_PLATFORM_ARM_CM33
+
+	# Placeholder
+endmenu

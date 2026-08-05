@@ -1,0 +1,39 @@
+#pragma once
+
+#include "config.h"
+
+
+#define configUSE_16_BIT_TICKS 0
+#define configIDLE_SHOULD_YIELD 1
+#define configUSE_TRACE_FACILITY 1
+#define configUSE_MALLOC_FAILED_HOOK 0
+#define configUSE_NEWLIB_REENTRANT 1
+#ifndef configUSE_IDLE_HOOK
+	#define configUSE_IDLE_HOOK 0
+#endif
+#define configUSE_TICK_HOOK 0
+#ifdef __NVIC_PRIO_BITS
+	#define configPRIO_BITS	__NVIC_PRIO_BITS
+#else
+	#define configPRIO_BITS	4
+#endif
+#define configLIBRARY_LOWEST_INTERRUPT_PRIORITY 0xf
+#define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY 5
+#define configKERNEL_INTERRUPT_PRIORITY (configLIBRARY_LOWEST_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
+#define configMAX_SYSCALL_INTERRUPT_PRIORITY (configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
+/* The ARMv8-M port names its exception handlers using the CMSIS convention. Remap
+ * them to the libopencm3 vector table slot names so they override the weak defaults. */
+#define SVC_Handler sv_call_handler
+#define PendSV_Handler pend_sv_handler
+#define SysTick_Handler sys_tick_handler
+#define configASSERT(x) if ((x) == 0) {taskDISABLE_INTERRUPTS(); for (;;);}
+
+/* ARMv8-M (Cortex-M33) port configuration. TrustZone and MPU are disabled, the
+ * firmware runs as a single flat (non-secure) image with the FPU enabled. */
+#define configENABLE_FPU 1
+#define configENABLE_MPU 0
+#define configENABLE_TRUSTZONE 0
+#define configRUN_FREERTOS_SECURE_ONLY 0
+#define configENABLE_MVE 0
+#define configENABLE_PAC 0
+#define configENABLE_BTI 0

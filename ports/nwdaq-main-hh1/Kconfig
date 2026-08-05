@@ -1,0 +1,28 @@
+config PORT_NWDAQ_MAIN_HH1
+	bool "nwdaq-main-hh1 basic port (STM32U575VIT6)"
+	select PORT_PLATFORM_ARM_CM33
+	select SERVICE_STM32_OCTOSPI_FLASH
+	select SERVICE_STM32_TIMER
+	select SERVICE_PWM_BEEPER
+	select SERVICE_ADC_LDC1X1X
+	select SERVICE_SENSOR_KEYPAD
+
+	menu "Configuraton"
+		depends on PORT_NWDAQ_MAIN_HH1
+
+		config PORT_NAME
+			string
+			default "nwdaq-main-hh1"
+
+		config PLATFORM_NAME
+			string
+			default "cortex-m33"
+
+		config MCU_FAMILY
+			string
+			default "stm32u5"
+
+		config PORT_FLASH_ADDRESS
+			hex
+			default "0x08000000"
+	endmenu

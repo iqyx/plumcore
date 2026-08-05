@@ -1,0 +1,31 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+objs.append(env.Object(source = [
+	File("platform.c"),
+	File("heap_useNewlib.c"),
+]))
+
+env.Replace(FREERTOS_PORT = "GCC/ARM_CM33_NTZ/non_secure")
+
+env.Replace(TOOLCHAIN = "arm-none-eabi")
+
+env.Append(CFLAGS = [
+	"-mthumb",
+	"-mcpu=cortex-m33",
+	"-mfloat-abi=hard",
+	"-mfpu=fpv5-sp-d16"
+])
+
+env.Append(LINKFLAGS = [
+	"--static",
+	"-nostartfiles",
+	"--specs=nano.specs",
+	"-T", env["LDSCRIPT"],
+	"-Wl,--gc-sections",
+	"-Wl,-z,max-page-size=0x100",
+])
+
+env.Append(CPPPATH = [Dir(".")])
+env.Append(LIBPATH = [Dir(".")])
