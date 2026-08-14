@@ -1,0 +1,2 @@
+config APPLET_LIVE_DATA
+	bool "Live data applet"

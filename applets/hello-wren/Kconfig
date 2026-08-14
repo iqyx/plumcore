@@ -1,0 +1,3 @@
+config APPLET_HELLO_WREN
+	bool "Hello world test applet (Wren)"
+	select SERVICE_APPLET_RUNNER_WREN

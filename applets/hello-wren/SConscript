@@ -1,0 +1,11 @@
+Import("env")
+Import("objs")
+Import("conf")
+
+if conf["APPLET_HELLO_WREN"] == "y":
+	objs.append(env.WrenApplet(
+		name = "Hello Wren",
+		help = "Simple applet to showcase the functionality, Wren version",
+		icon = "grumpy_cat_data",
+		sources = Glob("*.wren"),
+	))
