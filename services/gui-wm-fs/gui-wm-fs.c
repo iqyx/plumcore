@@ -10,12 +10,11 @@
  * @file
  *
  * A minimal full-screen GUI: it takes over a framebuffer output through an fb-compositor and lays
- * out a fixed desktop of two internal windows. A top status bar (icons and texts, only a text
- * placeholder for now) and a bottom button bar hosting a row of virtual buttons. Input arrives from
- * an Event source and is pumped by an internal task (routing to be implemented).
+ * out a top status bar (icons and texts, only a text placeholder for now). Input arrives from an
+ * Event source and is pumped by an internal task (routing to be implemented).
  *
- * The two bars are ordinary compositor windows painted with the fb-painter service, so application
- * content can later occupy the free area between them.
+ * The status bar is an ordinary compositor window painted with the fb-painter service, so application
+ * content can occupy the free area below it.
  */
 
 #include <stdint.h>
@@ -36,58 +35,12 @@
 
 #include "gui-wm-fs.h"
 
-#include "assets/assets.h"
-
 #define MODULE_NAME "gui-wm-fs"
 
 /* A single short key-click beep: 20 ms at 2700 Hz. */
 #define GUI_WM_FS_BEEPER_SEQ_KEY_CLICK BEEPER_SEQ { \
 	BEEPER_SEQ_BEEP | BEEPER_SEQ_FREQ_HZ(2700) | BEEPER_SEQ_TIME_MS(20), \
 	BEEPER_SEQ_END \
-}
-
-
-/*********************************************************************************************************************
- * Bar windows and painting
- *********************************************************************************************************************/
-
-/* Create a compositor window covering the given geometry (it allocates and owns the backing store)
- * and put a painter on its drawing surface. */
-static gui_wm_fs_ret_t gui_wm_fs_create_bar(GuiWmFs *self, const struct window_geometry *geometry,
-                                            Window **window, FbPainter *painter) {
-	if (self->compositor.factory.vmt->create(&self->compositor.factory, geometry, window) != WINDOW_RET_OK) {
-		return GUI_WM_FS_RET_FAILED;
-	}
-
-	Fb *win_fb = NULL;
-	(*window)->vmt->get_fb(*window, &win_fb);
-	if (fb_painter_init(painter, win_fb) != FB_PAINTER_RET_OK) {
-		return GUI_WM_FS_RET_FAILED;
-	}
-
-	return GUI_WM_FS_RET_OK;
-}
-
-
-/* Paint the bottom button bar: a row of GUI_WM_FS_BUTTONS evenly spaced virtual buttons. */
-static void gui_wm_fs_draw_buttonbar(GuiWmFs *self) {
-	Painter *painter = &self->buttonbar_painter.painter;
-	uint16_t bw = (uint16_t)(self->compositor.out_w / GUI_WM_FS_BUTTONS);
-
-	painter->vmt->begin(painter);
-	painter->vmt->set_pen(painter, 0xffffffff, 1);
-	painter->vmt->set_brush(painter, 0xff000000);
-	painter->vmt->rect(painter, 0, 0, bw, GUI_WM_FS_BUTTONBAR_H);
-	painter->vmt->set_pen(painter, 0xff000000, 1);
-	painter->vmt->rect(painter, 1, 1, bw - 2, GUI_WM_FS_BUTTONBAR_H);
-
-	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, NULL);
-	painter->vmt->set_pen(painter, 0xffffffff, 1);
-	painter->vmt->image(painter, 8, 2, &window_list_small_data, PAINTER_MODE_INVERTED);
-	painter->vmt->text(painter, 32, 5, "F1");
-
-
-	painter->vmt->end(painter);
 }
 
 
@@ -116,8 +69,15 @@ static event_ret_t gui_wm_fs_event_listen(Event *self, enum event_type *type, en
 
 		/* F1 pops up the window list overlay (auto-hides after a few seconds). Handled globally, so
 		 * it is not forwarded to any window. */
-		if (c == EV_KEY_F1 && v != 0 && g->window_list_up) {
+		if (c == EV_KEY_F5 && v != 0 && g->window_list_up) {
 			window_list_show(&g->window_list);
+			continue;
+		}
+
+		/* F2 pops up the applet launcher overlay. Handled globally, so it is not forwarded to any
+		 * window. */
+		if (c == EV_KEY_F6 && v != 0 && g->launcher_up) {
+			gui_launcher_show(&g->launcher);
 			continue;
 		}
 
@@ -193,36 +153,38 @@ gui_wm_fs_ret_t gui_wm_fs_init(GuiWmFs *self, const struct gui_wm_fs_conf *conf)
 	}
 	self->status_bar_up = true;
 
-	/* Full-width button bar anchored to the bottom edge. */
-	struct window_geometry bottom_geometry = {
-		.x = 0,
-		.y = (int16_t)(self->compositor.out_h - GUI_WM_FS_BUTTONBAR_H),
-		.w = (uint16_t)self->compositor.out_w,
-		.h = GUI_WM_FS_BUTTONBAR_H,
-	};
-	if (gui_wm_fs_create_bar(self, &bottom_geometry, &self->buttonbar, &self->buttonbar_painter) != GUI_WM_FS_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create the button bar window"));
-		goto err;
-	}
-	self->buttonbar->vmt->set_title(self->buttonbar, "button bar");
-
-	gui_wm_fs_draw_buttonbar(self);
-	self->buttonbar->vmt->show(self->buttonbar, true);
-
-	/* Window list overlay filling the area between the top and bottom bars. */
+	/* Window list overlay filling the area below the top bar. */
 	if (window_list_init(&self->window_list, &(struct window_list_conf){
 		.compositor = &self->compositor,
 		.geometry = {
 			.x = 0,
 			.y = GUI_WM_FS_TOPBAR_H,
 			.w = (uint16_t)self->compositor.out_w,
-			.h = (uint16_t)(self->compositor.out_h - GUI_WM_FS_TOPBAR_H - GUI_WM_FS_BUTTONBAR_H),
+			.h = (uint16_t)(self->compositor.out_h - GUI_WM_FS_TOPBAR_H),
 		},
 	}) != WINDOW_LIST_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the window list"));
 		goto err;
 	}
 	self->window_list_up = true;
+
+	/* Applet launcher overlay filling the area below the top bar. */
+	if (gui_launcher_init(&self->launcher, &(struct gui_launcher_conf){
+		.compositor = &self->compositor,
+		.geometry = {
+			.x = 0,
+			.y = GUI_WM_FS_TOPBAR_H,
+			.w = (uint16_t)self->compositor.out_w,
+			.h = (uint16_t)(self->compositor.out_h - GUI_WM_FS_TOPBAR_H),
+		},
+	}) != GUI_LAUNCHER_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the applet launcher"));
+		goto err;
+	}
+	self->launcher_up = true;
+
+	/* Bring the launcher up right away so it is the top-level window after startup. */
+	gui_launcher_show(&self->launcher);
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("init ok"));
 	return GUI_WM_FS_RET_OK;
@@ -233,6 +195,10 @@ err:
 
 gui_wm_fs_ret_t gui_wm_fs_free(GuiWmFs *self) {
 	/* Tear the overlays down before the compositor, they destroy their windows through the factory. */
+	if (self->launcher_up) {
+		gui_launcher_free(&self->launcher);
+		self->launcher_up = false;
+	}
 	if (self->window_list_up) {
 		window_list_free(&self->window_list);
 		self->window_list_up = false;
@@ -240,12 +206,6 @@ gui_wm_fs_ret_t gui_wm_fs_free(GuiWmFs *self) {
 	if (self->status_bar_up) {
 		status_bar_free(&self->status_bar);
 		self->status_bar_up = false;
-	}
-
-	if (self->buttonbar != NULL) {
-		fb_painter_free(&self->buttonbar_painter);
-		self->compositor.factory.vmt->destroy(&self->compositor.factory, self->buttonbar);
-		self->buttonbar = NULL;
 	}
 
 	if (self->compositor_up) {

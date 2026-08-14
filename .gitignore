@@ -47,3 +47,6 @@ microkernel/*
 
 # ignore stamps marking library source preparation steps
 lib/*/*.stamp
+
+# ignore .c/.h generated from .wren sources by the Wren applet builder (applets/SConscript)
+applets/*/generated

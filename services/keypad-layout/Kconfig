@@ -1,0 +1,3 @@
+config SERVICE_KEYPAD_LAYOUT
+	bool "Service translating raw keypad events into key/counter events using a layout"
+	default n

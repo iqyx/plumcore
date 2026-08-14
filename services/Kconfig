@@ -259,6 +259,7 @@ menu "High level device drivers"
 	source "services/uart-ow/Kconfig"
 	source "services/pcal6408a-gpio/Kconfig"
 	source "services/gpio-keypad/Kconfig"
+	source "services/keypad-layout/Kconfig"
 	source "services/tdk-accel/Kconfig"
 	source "services/bq25798/Kconfig"
 	source "services/bq27441/Kconfig"
@@ -494,6 +495,24 @@ menu "User interface services"
 		bool "Full-screen GUI window manager"
 		select SERVICE_FB_COMPOSITOR
 		select SERVICE_FB_PAINTER
+		default n
+
+	config SERVICE_GUI_LAUNCHER
+		bool "GUI applet launcher"
+		select SERVICE_FB_COMPOSITOR
+		select SERVICE_FB_PAINTER
+		select SERVICE_APPLET_RUNNER_NATIVE
+		default n
+
+	config SERVICE_APPLET_RUNNER_NATIVE
+		bool "Native (compiled) applet runner"
+		depends on SERVICE_FB_COMPOSITOR
+		default n
+
+	config SERVICE_APPLET_RUNNER_WREN
+		bool "Wren (interpreted) applet runner"
+		depends on SERVICE_FB_COMPOSITOR
+		select LIB_WREN
 		default n
 
 	config SERVICE_SENSOR_KEYPAD

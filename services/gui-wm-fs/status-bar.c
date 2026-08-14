@@ -147,7 +147,6 @@ status_bar_ret_t status_bar_init(StatusBar *self, const struct status_bar_conf *
 		goto err;
 	}
 
-	self->window->vmt->set_title(self->window, "status bar");
 	status_bar_render(self);
 	self->window->vmt->show(self->window, true);
 

@@ -23,15 +23,13 @@
 #include <interfaces/sensor.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
+#include <services/gui-launcher/gui-launcher.h>
 
 #include "status-bar.h"
 #include "window-list.h"
 
-/* Height of the top status bar and the bottom button bar, in pixels, and the number of virtual
- * buttons hosted by the button bar. */
+/* Height of the top status bar, in pixels. */
 #define GUI_WM_FS_TOPBAR_H 18
-#define GUI_WM_FS_BUTTONBAR_H 18
-#define GUI_WM_FS_BUTTONS 4
 
 typedef enum {
 	GUI_WM_FS_RET_OK = 0,
@@ -65,14 +63,13 @@ typedef struct {
 	StatusBar status_bar;
 	bool status_bar_up;
 
-	/* Bottom button bar: a full-width bar hosting GUI_WM_FS_BUTTONS virtual buttons. Its backing store
-	 * is owned by the compositor. */
-	Window *buttonbar;
-	FbPainter buttonbar_painter;
-
 	/* Full-screen window list overlay, shown on demand (F1). */
 	WindowList window_list;
 	bool window_list_up;
+
+	/* Applet launcher overlay, shown on demand (F2). */
+	GuiLauncher launcher;
+	bool launcher_up;
 
 	/* Event source handed to the compositor. Its listen() pumps conf.event in the compositor input
 	 * task's context, consumes global keys and forwards the rest to the top-level window. */

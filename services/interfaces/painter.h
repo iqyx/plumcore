@@ -78,6 +78,13 @@ struct painter_vmt {
 	/* Draw a text string with its top-left corner at (x, y) using the current font and pen color. */
 	painter_ret_t (*text)(Painter *self, int16_t x, int16_t y, const char *text);
 
+	/* Measure the string the text method would draw with the current font and style without drawing
+	 * anything, ie. drawing at (x, y) covers [x, x + w) x [y, y + h). The width is the horizontal
+	 * extent of the drawn glyphs (no trailing advance gap), the height is the glyph cell height of
+	 * the font and does not depend on the string. Either output pointer may be NULL if the caller is
+	 * not interested in that dimension. */
+	painter_ret_t (*text_size)(Painter *self, const char *text, uint16_t *w, uint16_t *h);
+
 	/* Blit an uncompressed raster image with its top-left corner at (x, y). The image is converted
 	 * from its own mode to the framebuffer's native mode and clipped to the framebuffer. */
 	painter_ret_t (*image)(Painter *self, int16_t x, int16_t y, const struct painter_raw_image *image, enum painter_mode mode);

@@ -40,6 +40,11 @@ struct fb_compositor_window {
 	QueueHandle_t event_queue;       /* events routed to this window, drained by listen */
 	enum event_type event_filter;   /* type bitmask set via subscribe (0 = accept all types) */
 
+	/* Paint session lock: claimed on the first fb write, released on flush. The compositor takes it
+	 * around a window's blit so it never reads a half-drawn frame. See window_fb_write/flush. */
+	SemaphoreHandle_t paint_lock;
+	bool painting;                   /* true while this window's client holds paint_lock */
+
 	uint8_t *buf;                    /* backing store, owned and allocated by the factory */
 	size_t buf_size;                 /* must hold the window's largest geometry */
 	enum fb_mode mode;               /* mode of the backing store, must match the compositor */

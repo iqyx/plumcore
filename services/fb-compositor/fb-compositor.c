@@ -229,9 +229,15 @@ static fb_ret_t window_fb_write(Fb *self, size_t seek, const void *buf, size_t l
 		return FB_RET_FAILED;
 	}
 
-	xSemaphoreTake(win->compositor->lock, portMAX_DELAY);
+	/* The first write of a paint session claims the window's paint lock, which blocks out an in-progress
+	 * compose and keeps the compositor from reading this buffer until the client presents the finished
+	 * frame with flush. Only the single task painting this window touches the painting flag, so the
+	 * check-and-take needs no further guard. Writes 2..N of the session already hold the lock and skip it. */
+	if (!win->painting) {
+		xSemaphoreTake(win->paint_lock, portMAX_DELAY);
+		win->painting = true;
+	}
 	memcpy(win->buf + seek, buf, len);
-	xSemaphoreGive(win->compositor->lock);
 
 	return FB_RET_OK;
 }
@@ -248,9 +254,11 @@ static fb_ret_t window_fb_read(Fb *self, size_t seek, void *buf, size_t len, enu
 		return FB_RET_FAILED;
 	}
 
-	xSemaphoreTake(win->compositor->lock, portMAX_DELAY);
+	/* Reads come only from the painting client task itself (read-modify-write for sub-byte modes), which
+	 * may already hold the paint lock; re-taking the non-recursive mutex would deadlock, so reads take no
+	 * lock. They are consistent because the only writer of this buffer is that same task, and a concurrent
+	 * compose only ever reads it too. */
 	memcpy(buf, win->buf + seek, len);
-	xSemaphoreGive(win->compositor->lock);
 
 	return FB_RET_OK;
 }
@@ -259,7 +267,13 @@ static fb_ret_t window_fb_read(Fb *self, size_t seek, void *buf, size_t len, enu
 static fb_ret_t window_fb_flush(Fb *self) {
 	FbCompositorWindow *win = self->parent;
 
-	/* Presenting a window just requests a recompose of the whole screen. */
+	/* Presenting the finished frame ends the paint session: release the paint lock so the compositor may
+	 * read this window again, then request a recompose of the whole screen. The flag guards against a
+	 * flush with no preceding write, which must not give a mutex this task does not own. */
+	if (win->painting) {
+		win->painting = false;
+		xSemaphoreGive(win->paint_lock);
+	}
 	compositor_damage(win->compositor);
 
 	return FB_RET_OK;
@@ -608,11 +622,19 @@ static window_ret_t window_factory_create(WindowFactory *self, const struct wind
 		free(win);
 		return WINDOW_RET_NOMEM;
 	}
+	win->paint_lock = xSemaphoreCreateMutex();
+	if (win->paint_lock == NULL) {
+		free(win->buf);
+		vQueueDelete(win->event_queue);
+		free(win);
+		return WINDOW_RET_NOMEM;
+	}
 	win->compositor = c;
 	win->geometry = *geometry;
 	win->saved = *geometry;
 	win->state = WINDOW_STATE_NORMAL;
-	win->visible = true;
+	/* New windows start hidden; the client shows them explicitly once their content is ready. */
+	win->visible = false;
 
 	win->fb.parent = win;
 	win->fb.vmt = &window_fb_vmt;
@@ -650,6 +672,7 @@ static window_ret_t window_factory_destroy(WindowFactory *self, Window *window) 
 	xSemaphoreGive(c->lock);
 
 	compositor_damage(c);
+	vSemaphoreDelete(win->paint_lock);
 	vQueueDelete(win->event_queue);
 	free(win->buf);
 	free(win);
@@ -723,6 +746,28 @@ fb_compositor_ret_t fb_compositor_render(FbCompositor *self) {
 
 	xSemaphoreTake(self->lock, portMAX_DELAY);
 
+	/* Claim every visible window's paint lock up front and hold them across the whole compose, so no client
+	 * can overwrite a buffer while we read it. The takes are non-blocking on purpose: a window mid paint
+	 * session may itself be blocked on self->lock (e.g. a window stat query issued between its first write
+	 * and its flush), so blocking on its paint lock while we hold self->lock would deadlock. If any window
+	 * is mid-paint we back out and leave the last fully composed frame on screen; that window's flush
+	 * re-triggers damage, so we recompose once it is quiescent. */
+	for (FbCompositorWindow *win = self->windows; win != NULL; win = win->next) {
+		if (!win->visible || win->state == WINDOW_STATE_MINIMIZED) {
+			continue;
+		}
+		if (xSemaphoreTake(win->paint_lock, 0) != pdTRUE) {
+			/* Release the locks already taken on the windows ahead of this one, then defer. */
+			for (FbCompositorWindow *w = self->windows; w != win; w = w->next) {
+				if (w->visible && w->state != WINDOW_STATE_MINIMIZED) {
+					xSemaphoreGive(w->paint_lock);
+				}
+			}
+			xSemaphoreGive(self->lock);
+			return FB_COMPOSITOR_RET_OK;
+		}
+	}
+
 	fb_fill(self->scratch, self->out_w, self->out_h, self->mode, self->bg_color);
 
 	/* Painter's algorithm: compose from the back (lowest z) to the front (highest z). */
@@ -734,6 +779,14 @@ fb_compositor_ret_t fb_compositor_render(FbCompositor *self) {
 	}
 
 	self->out->vmt->write(self->out, 0, self->scratch, self->scratch_size, self->mode);
+
+	/* Release every paint lock we took above. */
+	for (FbCompositorWindow *win = self->windows; win != NULL; win = win->next) {
+		if (!win->visible || win->state == WINDOW_STATE_MINIMIZED) {
+			continue;
+		}
+		xSemaphoreGive(win->paint_lock);
+	}
 
 	xSemaphoreGive(self->lock);
 

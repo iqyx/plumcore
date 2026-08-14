@@ -214,6 +214,11 @@ static void window_list_capture(WindowList *self) {
 		if (self->window_count >= WINDOW_LIST_MAX) {
 			break;
 		}
+		/* Only visible windows with a title set are listed (untitled windows such as the status and
+		 * button bars are internal and stay hidden from the list). */
+		if (!w->visible || w->title[0] == '\0') {
+			continue;
+		}
 		self->windows[self->window_count] = &w->window;
 		self->window_count++;
 	}

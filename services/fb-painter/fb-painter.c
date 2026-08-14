@@ -360,6 +360,47 @@ static painter_ret_t painter_text(Painter *self, int16_t x, int16_t y, const cha
 }
 
 
+static painter_ret_t painter_text_size(Painter *self, const char *text, uint16_t *w, uint16_t *h) {
+	FbPainter *p = self->parent;
+
+	if (!p->active) {
+		return PAINTER_RET_NOTARGET;
+	}
+	if (text == NULL) {
+		return PAINTER_RET_FAILED;
+	}
+
+	const struct painter_font *font = (p->font != NULL) ? (const struct painter_font *)p->font : &painter_default_font;
+	const struct small_char *glyphs = font_glyphs(font, p->font_style);
+
+	/* Walk the string exactly like painter_text does, advancing the cursor by the glyph advance and
+	 * tracking how far to the right the glyph pixels themselves reach. The trailing advance gap of
+	 * the last glyph is not part of the drawn extent. */
+	uint32_t cx = 0;
+	uint32_t extent = 0;
+	for (const char *s = text; *s != '\0'; s++) {
+		uint8_t c = (uint8_t)*s;
+		if (c < 32 || c > font->max_char) {
+			continue;
+		}
+		const struct small_char *g = &glyphs[c - 32];
+		if ((cx + g->width) > extent) {
+			extent = cx + g->width;
+		}
+		cx += g->advance;
+	}
+
+	if (w != NULL) {
+		*w = (uint16_t)extent;
+	}
+	if (h != NULL) {
+		*h = 8;
+	}
+
+	return PAINTER_RET_OK;
+}
+
+
 /* Fast path for a filled rectangle spanning the whole framebuffer width. Every scanline it covers is
  * fully defined by the rectangle (nothing outside to preserve), and only two distinct scanlines ever
  * occur: an all-pen border row (top/bottom pw rows) and a pen-edges + brush middle row. Each is built
@@ -517,6 +558,7 @@ static const struct painter_vmt fb_painter_vmt = {
 	.set_font = painter_set_font,
 	.rect = painter_rect,
 	.text = painter_text,
+	.text_size = painter_text_size,
 	.image = painter_image,
 };
 
@@ -524,6 +566,168 @@ static const struct painter_vmt fb_painter_vmt = {
 /***************************************************************************************************
  * Service API
  ***************************************************************************************************/
+
+fb_painter_ret_t fb_painter_crop_text(FbPainter *self, char *text, uint16_t w) {
+	if (self == NULL || text == NULL) {
+		return FB_PAINTER_RET_NULL;
+	}
+
+	uint16_t tw = 0;
+	if (painter_text_size(&self->painter, text, &tw, NULL) != PAINTER_RET_OK) {
+		return FB_PAINTER_RET_FAILED;
+	}
+	if (tw <= w) {
+		return FB_PAINTER_RET_OK;
+	}
+
+	/* Too wide: the ellipsis overwrites the tail of the string instead of being appended to it, so
+	 * the result never grows and the buffer cannot overflow. Shorten the kept prefix one character
+	 * at a time until the prefix with the ellipsis fits. */
+	size_t len = strlen(text);
+	size_t ellipsis = (len < 3) ? len : 3;
+	size_t keep = len - ellipsis;
+	while (true) {
+		memset(text + keep, '.', ellipsis);
+		text[keep + ellipsis] = '\0';
+		if (painter_text_size(&self->painter, text, &tw, NULL) != PAINTER_RET_OK) {
+			return FB_PAINTER_RET_FAILED;
+		}
+		if (tw <= w) {
+			return FB_PAINTER_RET_OK;
+		}
+		if (keep == 0) {
+			break;
+		}
+		keep--;
+	}
+
+	/* Not even the ellipsis alone fits in the requested width. */
+	text[0] = '\0';
+
+	return FB_PAINTER_RET_OK;
+}
+
+
+/* Check if the text between start and end (exclusive) fits the requested width. The buffer is
+ * terminated at end for the measurement and restored afterwards. */
+static bool wrap_fits(FbPainter *self, char *start, char *end, uint16_t w) {
+	char saved = *end;
+	*end = '\0';
+	uint16_t tw = 0;
+	painter_ret_t ret = painter_text_size(&self->painter, start, &tw, NULL);
+	*end = saved;
+
+	return (ret == PAINTER_RET_OK) && (tw <= w);
+}
+
+
+/* Break the line at the "at" position and move the rest of the text, with its leading spaces removed,
+ * right behind the break. The text is only ever shifted towards the beginning, it never grows. */
+static void wrap_break_line(char *at, char *rest) {
+	while (*rest == ' ') {
+		rest++;
+	}
+	*at = '\n';
+	if ((at + 1) != rest) {
+		memmove(at + 1, rest, strlen(rest) + 1);
+	}
+}
+
+
+fb_painter_ret_t fb_painter_wrap_text(FbPainter *self, char *text, uint16_t w, uint16_t h, uint16_t *lines) {
+	if (self == NULL || text == NULL) {
+		return FB_PAINTER_RET_NULL;
+	}
+
+	/* All lines have the height of the font, hence the line count the requested height allows is
+	 * known upfront. */
+	uint16_t line_h = 0;
+	if (painter_text_size(&self->painter, "", NULL, &line_h) != PAINTER_RET_OK || line_h == 0) {
+		return FB_PAINTER_RET_FAILED;
+	}
+	uint16_t max_lines = h / line_h;
+	uint16_t line_count = 0;
+
+	if (max_lines == 0) {
+		text[0] = '\0';
+		if (lines != NULL) {
+			*lines = 0;
+		}
+		return FB_PAINTER_RET_OK;
+	}
+
+	char *rest = text;
+	while (*rest == ' ') {
+		rest++;
+	}
+	if (rest != text) {
+		memmove(text, rest, strlen(rest) + 1);
+	}
+
+	char *line = text;
+	char *last_line = text;
+	while (*line != '\0' && line_count < max_lines) {
+		last_line = line;
+
+		/* Append whole words to the line for as long as they fit the requested width. */
+		char *end = line;
+		char *word_end = line;
+		while (*word_end != '\0') {
+			char *next = word_end;
+			while (*next == ' ') {
+				next++;
+			}
+			while (*next != '\0' && *next != ' ') {
+				next++;
+			}
+			if (next == word_end || !wrap_fits(self, line, next, w)) {
+				break;
+			}
+			end = next;
+			word_end = next;
+		}
+		line_count++;
+
+		if (end == line) {
+			/* Not even the first word of the line fits. Crop it, sacrificing a single character
+			 * to make room for the line break, and continue with the rest on the next line. */
+			while (*word_end != '\0' && *word_end != ' ') {
+				word_end++;
+			}
+			char *cut = word_end - 1;
+			char saved = *cut;
+			*cut = '\0';
+			fb_painter_crop_text(self, line, w);
+			end = line + strlen(line);
+			*cut = saved;
+		} else {
+			word_end = end;
+		}
+
+		if (*word_end == '\0') {
+			/* The last word was processed, no line break is needed. */
+			*end = '\0';
+			line = end;
+			break;
+		}
+		wrap_break_line(end, word_end);
+		line = end + 1;
+	}
+
+	if (*line != '\0') {
+		/* Out of vertical room. Give the rest of the text back to the last line and crop it to
+		 * width, so the ellipsis shows that something was left out. */
+		*(line - 1) = ' ';
+		fb_painter_crop_text(self, last_line, w);
+	}
+
+	if (lines != NULL) {
+		*lines = line_count;
+	}
+
+	return FB_PAINTER_RET_OK;
+}
+
 
 fb_painter_ret_t fb_painter_init(FbPainter *self, Fb *fb) {
 	if (self == NULL || fb == NULL) {
