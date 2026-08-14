@@ -34,11 +34,17 @@
 #include <services/gpio-led/gpio-led.h>
 #include <services/stm32-timer/stm32-timer.h>
 #include <services/pwm-beeper/pwm-beeper.h>
-#include <services/adc-ldc1x1x/ldc1x1x.h>
-#include <services/sensor-keypad/sensor-keypad.h>
+#include <services/pcal6408a-gpio/pcal6408a-gpio.h>
+#include <services/gpio-keypad/gpio-keypad.h>
+#include <services/keypad-layout/keypad-layout.h>
 #include <interfaces/led-sequences.h>
 #include <interfaces/beeper-sequences.h>
 #include <interfaces/event.h>
+#include <interfaces/applet.h>
+#include <applets/hello-world/hello-world.h>
+#include <applets/hello-wren/generated/hello-wren.h>
+#include <applets/settings/settings.h>
+#include <applets/live-data/live-data.h>
 
 
 #define MODULE_NAME "port"
@@ -596,65 +602,66 @@ static void port_setup_fuel_gauge(void) {
 
 
 /**********************************************************************************************************************
- * Inductive sensing keypad using two LDC1314 on I2C1
+ * Keypad using a PCAL6408A GPIO expander on I2C1
  **********************************************************************************************************************/
 
-/* Higher threshold means a less sensitive button. */
-#define KEYPAD_BTN_THRESHOLD 30
+Pcal6408A keypad_gpio;
+GpioKeypad keypad;
+KeypadLayout keypad_layout;
 
-Ldc1x1x ldc1, ldc2;
-SensorKeypad keypad;
-
-/* Channel-to-key assignment is provisional and will be corrected against the real hardware later. "OK" has no
- * dedicated event code, so it is mapped to EV_KEY_ENTER. */
-struct sensor_keypad_key keypad_keys[] = {
-	{ .input = &(ldc1.out[0]), .type = EV_TYPE_KEY, .code = EV_KEY_ESC,   .threshold = KEYPAD_BTN_THRESHOLD },
-	{ .input = &(ldc1.out[1]), .type = EV_TYPE_KEY, .code = EV_KEY_F1,    .threshold = KEYPAD_BTN_THRESHOLD },
-	{ .input = &(ldc1.out[2]), .type = EV_TYPE_KEY, .code = EV_KEY_F2,    .threshold = KEYPAD_BTN_THRESHOLD },
-	{ .input = &(ldc1.out[3]), .type = EV_TYPE_KEY, .code = EV_KEY_LEFT,  .threshold = KEYPAD_BTN_THRESHOLD },
-	{ .input = &(ldc2.out[0]), .type = EV_TYPE_KEY, .code = EV_KEY_ENTER, .threshold = KEYPAD_BTN_THRESHOLD },
-	{ .input = &(ldc2.out[1]), .type = EV_TYPE_KEY, .code = EV_KEY_F3,    .threshold = KEYPAD_BTN_THRESHOLD },
-	{ .input = &(ldc2.out[2]), .type = EV_TYPE_KEY, .code = EV_KEY_F4,    .threshold = KEYPAD_BTN_THRESHOLD },
-	{ .input = &(ldc2.out[3]), .type = EV_TYPE_KEY, .code = EV_KEY_RIGHT, .threshold = KEYPAD_BTN_THRESHOLD },
+/* The gpio-keypad driver only reports raw per-pin presses (EV_RAW_x, one per expander pin). The buttons short
+ * the expander input to ground, hence the inputs are pulled up and the sense is inverted. */
+struct gpio_keypad_key keypad_keys[] = {
+	{ .input = &(keypad_gpio.pin[0]), .type = EV_TYPE_RAW, .code = EV_RAW_0, .invert = true },
+	{ .input = &(keypad_gpio.pin[1]), .type = EV_TYPE_RAW, .code = EV_RAW_1, .invert = true },
+	{ .input = &(keypad_gpio.pin[2]), .type = EV_TYPE_RAW, .code = EV_RAW_2, .invert = true },
+	{ .input = &(keypad_gpio.pin[3]), .type = EV_TYPE_RAW, .code = EV_RAW_3, .invert = true },
+	{ .input = &(keypad_gpio.pin[4]), .type = EV_TYPE_RAW, .code = EV_RAW_4, .invert = true },
+	{ .input = &(keypad_gpio.pin[5]), .type = EV_TYPE_RAW, .code = EV_RAW_5, .invert = true },
+	{ .input = &(keypad_gpio.pin[6]), .type = EV_TYPE_RAW, .code = EV_RAW_6, .invert = true },
+	{ .input = &(keypad_gpio.pin[7]), .type = EV_TYPE_RAW, .code = EV_RAW_7, .invert = true },
 	{ .input = NULL }
 };
 
-static const struct ldc1x1x_conf ldc_conf[2] = {
-	{
-		.i2c = &i2c1.bus,
-		.addr = 0x2a,
-		.rcount = {0x001a, 0x001a, 0x001a, 0x001a},
-		.settlecount = {0x0013, 0x0013, 0x0013, 0x0013},
-		.clock_dividers = {0x1001, 0x1001, 0x1001, 0x1001},
-		.drive_current = {0xd000, 0xd000, 0xd000, 0xd000},
-		.mux_config = 0xc20d,
-		.config = 0x1400,
-	}, {
-		.i2c = &i2c1.bus,
-		.addr = 0x2b,
-		.rcount = {0x001a, 0x001a, 0x001a, 0x001a},
-		.settlecount = {0x0013, 0x0013, 0x0013, 0x0013},
-		.clock_dividers = {0x1001, 0x1001, 0x1001, 0x1001},
-		.drive_current = {0xd000, 0xd000, 0xd000, 0xd000},
-		.mux_config = 0xc007,
-		.config = 0x1400,
-	}
+/* Layout mapping the raw keypad presses to logical key events. Pin-to-key assignment is provisional and will be
+ * corrected against the real hardware later. "OK" has no dedicated event code, so it is mapped to EV_KEY_ENTER. */
+const struct keypad_layout_item keypad_layout_map[] = {
+	{ .in_code = EV_RAW_0, .out_code = EV_KEY_F3 },
+	{ .in_code = EV_RAW_1, .out_code = EV_KEY_F4 },
+	{ .in_code = EV_RAW_2, .out_code = EV_KEY_RIGHT },
+	{ .in_code = EV_RAW_2, .out_code = EV_REL_X, .counter = 1 },
+	{ .in_code = EV_RAW_3, .out_code = EV_KEY_ENTER },
+	{ .in_code = EV_RAW_4, .out_code = EV_KEY_LEFT },
+	{ .in_code = EV_RAW_4, .out_code = EV_REL_X, .counter = -1 },
+	{ .in_code = EV_RAW_5, .out_code = EV_KEY_ESC },
+	{ .in_code = EV_RAW_6, .out_code = EV_KEY_F1, .out_code_long = EV_KEY_F5 },
+	{ .in_code = EV_RAW_7, .out_code = EV_KEY_F2, .out_code_long = EV_KEY_F6 },
+	{ .in_code = EV_CODE_NONE }
 };
 
 
 static void port_setup_keypad(void) {
-	if (ldc1x1x_init(&ldc1, &(ldc_conf[0])) != LDC1X1X_RET_OK) {
+	if (pcal6408a_gpio_init(&keypad_gpio, &i2c1.bus) != PCAL6408A_GPIO_RET_OK) {
 		return;
 	}
-	ldc1x1x_enable(&ldc1);
 
-	if (ldc1x1x_init(&ldc2, &(ldc_conf[1])) != LDC1X1X_RET_OK) {
-		return;
+	/* All eight expander pins are wired to the keypad buttons. */
+	for (size_t i = 0; i < 8; i++) {
+		keypad_gpio.pin[i].vmt->set_mode(&(keypad_gpio.pin[i]), MODE_INPUT);
+		keypad_gpio.pin[i].vmt->set_pull(&(keypad_gpio.pin[i]), PULL_UP);
 	}
-	ldc1x1x_enable(&ldc2);
 
-	sensor_keypad_init(&keypad, keypad_keys);
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_EVENT, (Interface *)&keypad.event, "keypad");
+	/* The gpio-keypad produces raw events; the keypad-layout service translates them into the key events
+	 * consumed downstream and is the one advertised as the "keypad" event source. */
+	gpio_keypad_init(&keypad, keypad_keys);
+
+	const struct keypad_layout_conf keypad_layout_conf = {
+		.source = &keypad.event,
+		.layout = keypad_layout_map,
+		.long_press_ms = 1000,
+	};
+	keypad_layout_init(&keypad_layout, &keypad_layout_conf);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_EVENT, (Interface *)&keypad_layout.event, "keypad");
 }
 
 
@@ -687,6 +694,40 @@ static void port_setup_beeper(void) {
 }
 
 
+static void port_setup_applets(void) {
+#if defined(CONFIG_APPLET_HELLO_WORLD)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
+#endif
+#if defined(CONFIG_APPLET_SETTINGS)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&settings, "settings");
+#endif
+#if defined(CONFIG_APPLET_HELLO_WORLD)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
+#endif
+#if defined(CONFIG_APPLET_SETTINGS)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&settings, "settings");
+#endif
+#if defined(CONFIG_APPLET_HELLO_WORLD)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
+#endif
+#if defined(CONFIG_APPLET_SETTINGS)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&settings, "settings");
+#endif
+#if defined(CONFIG_APPLET_HELLO_WORLD)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
+#endif
+#if defined(CONFIG_APPLET_SETTINGS)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&settings, "settings");
+#endif
+#if defined(CONFIG_APPLET_LIVE_DATA)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&live_data, "live-data");
+#endif
+#if defined(CONFIG_APPLET_HELLO_WREN)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_wren, "hello-wren");
+#endif
+}
+
+
 int32_t port_init(void) {
 	stm32_gpio_init(&gpioa, (void *)GPIOA_BASE);
 	stm32_gpio_init(&gpiob, (void *)GPIOB_BASE);
@@ -708,6 +749,7 @@ int32_t port_init(void) {
 	port_setup_flash();
 	port_setup_keypad();
 	port_setup_beeper();
+	port_setup_applets();
 
 	return PORT_INIT_OK;
 }
