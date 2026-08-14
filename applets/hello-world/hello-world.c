@@ -14,6 +14,12 @@
 #include <main.h>
 #include <interfaces/applet.h>
 
+/* The applet icon lives among the fb-painter assets, which are only compiled when the fb-painter
+ * service is enabled. */
+#if defined(CONFIG_SERVICE_FB_PAINTER)
+#include <services/fb-painter/assets/assets.h>
+#endif
+
 #define MODULE_NAME "hello-world"
 
 
@@ -28,8 +34,12 @@ static applet_ret_t hello_world_main(Applet *self, struct applet_args *args) {
 
 
 const Applet hello_world = {
-	.executable.compiled = {
+	.executable.native = {
 		.main = hello_world_main
 	},
-	.name = "Hello world"
+	.name = "Hello world",
+	.help = "Simple applet to showcase the functionality, compiled version",
+	#if defined(CONFIG_SERVICE_FB_PAINTER)
+		.icon = &grumpy_cat_data,
+	#endif
 };

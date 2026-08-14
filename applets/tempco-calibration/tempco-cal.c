@@ -107,7 +107,7 @@ static applet_ret_t tempco_calibration_main(Applet *self, struct applet_args *ar
 
 
 const Applet tempco_calibration = {
-	.executable.compiled = {
+	.executable.native = {
 		.main = tempco_calibration_main
 	},
 	.name = "tempco-calibration",

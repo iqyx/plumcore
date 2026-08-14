@@ -117,7 +117,7 @@ Add some C source to a ``tempco-cal.c`` file:
 	}
 
 	const Applet tempco_calibration = {
-		.executable.compiled = {
+		.executable.native = {
 			.main = tempco_calibration_main
 		},
 		.name = "tempco-calibration",

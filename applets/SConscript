@@ -7,10 +7,108 @@ env.Append(CPPPATH = [
 	Dir("."),
 ])
 
+
+# Escape a single line of text for use inside a C string literal (backslashes and double quotes only;
+# Wren sources are plain ASCII, so nothing else needs escaping).
+def _wren_c_escape(text):
+	return text.replace("\\", "\\\\").replace("\"", "\\\"")
+
+
+# Render the embedded Wren source as the body of a C string-literal initialiser: one literal per source
+# line (so the generated .c stays readable and diffable), prefixed with a comment naming each .wren file.
+def _wren_source_literal(symbol, wren_files):
+	lines = ["static const char %s_source[] =" % symbol]
+	emitted = False
+	for wf in wren_files:
+		with open(wf.get_abspath(), "r") as f:
+			content = f.read()
+		lines.append("\t/* %s */" % os.path.basename(str(wf)))
+		for line in content.splitlines():
+			lines.append("\t\"%s\\n\"" % _wren_c_escape(line))
+			emitted = True
+	if not emitted:
+		lines.append("\t\"\"")
+	return "\n".join(lines) + ";\n"
+
+
+# SCons action generating the .c/.h pair for a Wren applet. Everything the applet needs is captured in
+# the closure by wren_applet() below; the .wren files are embedded verbatim into the generated .c as a C
+# string literal, so building needs no compiler #embed support.
+def _wren_applet_action(target, source, env, name, help, icon, symbol, base):
+	cpath = [str(t) for t in target if str(t).endswith(".c")][0]
+	hpath = [str(t) for t in target if str(t).endswith(".h")][0]
+	wren_files = [s for s in source if str(s).endswith(".wren")]
+
+	os.makedirs(os.path.dirname(cpath), exist_ok=True)
+
+	with open(hpath, "w") as f:
+		f.write("#pragma once\n\n")
+		f.write("#include <interfaces/applet.h>\n\n")
+		f.write("extern const Applet %s;\n" % symbol)
+
+	# main.h first (it pulls in config.h): the icon guard below needs the CONFIG_* macros defined,
+	# otherwise the icon silently compiles out.
+	c = "#include <main.h>\n"
+	c += "#include <interfaces/applet.h>\n"
+	c += "#include \"%s.h\"\n" % base
+	if icon is not None:
+		# The icon lives among the fb-painter assets, only compiled when the fb-painter service is on.
+		c += "\n#if defined(CONFIG_SERVICE_FB_PAINTER)\n"
+		c += "#include <services/fb-painter/assets/assets.h>\n"
+		c += "#endif\n"
+	c += "\n"
+	c += _wren_source_literal(symbol, wren_files)
+	c += "\n\n"
+	c += "const Applet %s = {\n" % symbol
+	c += "\t.type = APPLET_TYPE_WREN,\n"
+	c += "\t.executable.wren = {\n"
+	c += "\t\t.source = %s_source,\n" % symbol
+	c += "\t},\n"
+	c += "\t.name = \"%s\",\n" % _wren_c_escape(name)
+	c += "\t.help = \"%s\",\n" % _wren_c_escape(help)
+	if icon is not None:
+		c += "#if defined(CONFIG_SERVICE_FB_PAINTER)\n"
+		c += "\t.icon = &%s,\n" % icon
+		c += "#endif\n"
+	c += "};\n"
+	with open(cpath, "w") as f:
+		f.write(c)
+
+
+# env.WrenApplet(name, help, icon, sources): generate and compile a Wren applet from its .wren source(s).
+# The applet's C symbol and generated file names are derived from the applet directory (e.g. hello-wren/
+# yields hello-wren.c/.h defining `hello_wren`), matching what the ports include and reference. `icon` is
+# the C symbol of an fb-painter asset (or None), `sources` the .wren files (defaults to *.wren). Returns
+# the compiled object node for the caller to append to objs.
+def wren_applet(env, name, help, icon=None, sources=None):
+	base = env.Dir(".").srcnode().name
+	symbol = base.replace("-", "_")
+	# The generated .c/.h live in a generated/ subdirectory so a single applets/*/generated rule in
+	# .gitignore keeps them out of the tree (and marks Wren applet dirs apart from hand-written ones).
+	cfile = os.path.join("generated", base + ".c")
+	hfile = os.path.join("generated", base + ".h")
+
+	if sources is None:
+		sources = env.Glob("*.wren")
+
+	# A Value node carrying the metadata so a change to name/help/icon re-triggers generation, not only a
+	# change to the .wren files.
+	meta = env.Value("wren-applet:%r" % ((name, help, icon, symbol),))
+
+	def action(target, source, env, name=name, help=help, icon=icon, symbol=symbol, base=base):
+		_wren_applet_action(target, source, env, name, help, icon, symbol, base)
+
+	nodes = env.Command([cfile, hfile], list(sources) + [meta], action)
+	cnode = [n for n in nodes if str(n).endswith(".c")][0]
+	return env.Object(cnode)
+
+
+env.AddMethod(wren_applet, "WrenApplet")
+
+
 for d in next(os.walk("."))[1]:
 	f = os.path.join(d, "SConscript")
 	if os.path.isfile(f):
 		SConscript(f)
 
 Return("objs")
-
