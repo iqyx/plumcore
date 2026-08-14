@@ -26,6 +26,8 @@ typedef struct pcal6408a_gpio {
 	uint8_t reg_ipr;
 	uint8_t reg_opr;
 	uint8_t reg_cr;
+	uint8_t reg_pupd_en;
+	uint8_t reg_pupd_sel;
 
 } Pcal6408A;
 

@@ -114,9 +114,29 @@ static gpio_ret_t gpio_set_pinmux(Gpio *gpio, uint32_t mux) {
 
 
 static gpio_ret_t gpio_set_pull(Gpio *gpio, enum gpio_pull pull) {
-	(void)gpio;
-	(void)pull;
-	return GPIO_RET_FAILED;
+	Pcal6408A *self = gpio->parent;
+	int pin = gpio - &(self->pin[0]);
+
+	/* Register 0x44 selects the pull direction (1 = up, 0 = down), register 0x43 enables it. */
+	switch (pull) {
+		case PULL_UP:
+			self->reg_pupd_sel |= (1 << pin);
+			self->reg_pupd_en |= (1 << pin);
+			break;
+		case PULL_DOWN:
+			self->reg_pupd_sel &= ~(1 << pin);
+			self->reg_pupd_en |= (1 << pin);
+			break;
+		default:
+			self->reg_pupd_en &= ~(1 << pin);
+			break;
+	}
+	if (pcal6408a_gpio_write8(self, 0x44, self->reg_pupd_sel) != PCAL6408A_GPIO_RET_OK ||
+	    pcal6408a_gpio_write8(self, 0x43, self->reg_pupd_en) != PCAL6408A_GPIO_RET_OK) {
+		return GPIO_RET_FAILED;
+	}
+
+	return GPIO_RET_OK;
 }
 
 
@@ -158,6 +178,8 @@ pcal6408a_gpio_ret_t pcal6408a_gpio_init(Pcal6408A *self, I2cBus *i2c) {
 	/* Match the expander reset values. */
 	self->reg_opr = 0xff;
 	self->reg_cr = 0xff;
+	self->reg_pupd_en = 0x00;
+	self->reg_pupd_sel = 0xff;
 
 	uint8_t val1;
 	uint8_t val2;
@@ -175,8 +197,7 @@ pcal6408a_gpio_ret_t pcal6408a_gpio_init(Pcal6408A *self, I2cBus *i2c) {
 	return PCAL6408A_GPIO_RET_OK;
 err:
 	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("init/probe failed"));
-	return PCAL6408A_GPIO_RET_OK;
-
+	return PCAL6408A_GPIO_RET_FAILED;
 }
 
 
