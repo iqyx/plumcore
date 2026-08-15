@@ -166,27 +166,40 @@ static mq_ret_t plog_router_mq_client_receive(MqClient *self, char *topic, size_
 
 
 static mq_ret_t deliver_to_client(struct plog_router_mq_client *to, const char *topic, const struct ndarray *array, const struct timespec *ts) {
-	/* Only a single delivery can be made at a time. Lock the msg mutex.
-	 * Attempt delivery for a configurable time. */
-	if (xSemaphoreTake(to->msg_mutex, portMAX_DELAY) == pdTRUE) {
-		/* Let the client know we have a message to deliver. */
-		struct plog_router_msg_send msg_send = {
-			.topic = topic,
-			.array = array,
-			.ts = ts
-		};
-		xQueueSend(to->send_lock, &msg_send, portMAX_DELAY);
-
-		struct plog_router_msg_recv msg_recv = {0};
-		if (xQueueReceive(to->recv_lock, &msg_recv, portMAX_DELAY) == pdTRUE) {
-			/** @todo handle the return value. */
-		}
-
-		/* Message was delivered successfully, let the others in. */
-		xSemaphoreGive(to->msg_mutex);
-		return MQ_RET_OK;
+	/* Deliveries to a single client are serialised by its message mutex. */
+	if (xSemaphoreTake(to->msg_mutex, portMAX_DELAY) != pdTRUE) {
+		return MQ_RET_TIMEOUT;
 	}
-	return MQ_RET_TIMEOUT;
+
+	/* Hand the message to the client's receive() call. The send queue has a single slot and we hold the
+	 * mutex, so it is guaranteed empty here and the send never blocks. */
+	struct plog_router_msg_send msg_send = {
+		.topic = topic,
+		.array = array,
+		.ts = ts
+	};
+	xQueueSend(to->send_lock, &msg_send, 0);
+
+	/* Wait, but only for a bounded time, until the receiver acknowledges that it has copied the message
+	 * out. Blocking forever here is what let a client whose receiver had already stopped (a torn-down
+	 * applet not yet closed) wedge the publisher permanently. */
+	struct plog_router_msg_recv msg_recv = {0};
+	mq_ret_t ret = MQ_RET_OK;
+	if (xQueueReceive(to->recv_lock, &msg_recv, pdMS_TO_TICKS(PLOG_ROUTER_DELIVER_TIMEOUT_MS)) != pdTRUE) {
+		/* No acknowledgement in time. msg_send points at the caller's stack, so it must never be read
+		 * after we return: reclaim our own message before the receiver can pick it up. If the reclaim
+		 * fails the receiver already dequeued it and is therefore alive and mid-copy, so wait a bounded
+		 * grace for its acknowledgement to be sure it is done touching the caller's data. */
+		struct plog_router_msg_send drain = {0};
+		if (xQueueReceive(to->send_lock, &drain, 0) != pdTRUE) {
+			xQueueReceive(to->recv_lock, &msg_recv, pdMS_TO_TICKS(PLOG_ROUTER_DELIVER_TIMEOUT_MS));
+		}
+		ret = MQ_RET_TIMEOUT;
+	}
+
+	/* Delivery finished (or gave up), let the next one in. */
+	xSemaphoreGive(to->msg_mutex);
+	return ret;
 }
 
 
@@ -211,15 +224,20 @@ static mq_ret_t plog_router_mq_client_publish(MqClient *self, const char *topic,
 	Mq *mq = self->parent;
 	PlogRouter *plog = (PlogRouter *)mq->parent;
 
+	/* Hold the client-list mutex for the whole traversal so a concurrent open()/close() cannot add a
+	 * client or free one out from under us. next is snapshotted before each delivery for the same reason. */
+	xSemaphoreTake(plog->clients_mutex, portMAX_DELAY);
 	struct plog_router_mq_client *c = plog->first_client;
-	while (c) {
+	while (c != NULL) {
+		struct plog_router_mq_client *next = (struct plog_router_mq_client *)c->client.next;
 		/* Never deliver a message back to the publishing client. Delivery is synchronous and
 		 * the publishing task would deadlock waiting to receive from itself. */
 		if (&c->client != self && plog_router_client_matches(c, topic)) {
 			deliver_to_client(c, topic, array, ts);
 		}
-		c = (struct plog_router_mq_client *)c->client.next;
+		c = next;
 	}
+	xSemaphoreGive(plog->clients_mutex);
 
 	return MQ_RET_OK;
 }
@@ -229,12 +247,31 @@ static mq_ret_t plog_router_mq_client_close(MqClient *self) {
 	if (u_assert(self != NULL)) {
 		return MQ_RET_FAILED;
 	}
-
-	/** @todo not implemented */
 	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
-	for (size_t i = 0; i < PLOG_ROUTER_FILTERS_MAX; i++) {
-		c->topic_filters[i][0] = '\0';
+	PlogRouter *plog = (PlogRouter *)((Mq *)self->parent)->parent;
+
+	/* Unlink the client from the list so no further deliveries can reach it. Because a publisher holds
+	 * the list mutex for its whole traversal, once we own it here no publisher still references this
+	 * client, so the resources freed below can no longer be touched by anyone. */
+	xSemaphoreTake(plog->clients_mutex, portMAX_DELAY);
+	if (plog->first_client == c) {
+		plog->first_client = (struct plog_router_mq_client *)c->client.next;
+	} else {
+		struct plog_router_mq_client *prev = plog->first_client;
+		while (prev != NULL && (struct plog_router_mq_client *)prev->client.next != c) {
+			prev = (struct plog_router_mq_client *)prev->client.next;
+		}
+		if (prev != NULL) {
+			prev->client.next = c->client.next;
+		}
 	}
+	xSemaphoreGive(plog->clients_mutex);
+
+	/* Release the client's resources. */
+	vQueueDelete(c->send_lock);
+	vQueueDelete(c->recv_lock);
+	vSemaphoreDelete(c->msg_mutex);
+	free(c);
 
 	return MQ_RET_OK;
 }
@@ -288,13 +325,13 @@ static MqClient *plog_router_open(Mq *self) {
 	}
 	c->rx_timeout_ms = PLOG_ROUTER_RX_TIMEOUT_MS_DEFAULT;
 
-	/* And finally initialize the MqClient interface and add the client to the list. */
+	/* And finally initialize the MqClient interface and add the client to the head of the list. */
 	mq_client_init(&c->client, self);
-	/** @todo add to the list, lock */
-	c->client.next = (MqClient *)plog->first_client;
 	c->client.vmt = &mq_client_vmt;
+	xSemaphoreTake(plog->clients_mutex, portMAX_DELAY);
+	c->client.next = (MqClient *)plog->first_client;
 	plog->first_client = c;
-	/** @todo unlock */
+	xSemaphoreGive(plog->clients_mutex);
 	return &c->client;
 
 err:
@@ -316,6 +353,11 @@ plog_router_ret_t plog_router_init(PlogRouter *self) {
 	}
 
 	memset(self, 0, sizeof(PlogRouter));
+
+	self->clients_mutex = xSemaphoreCreateMutex();
+	if (self->clients_mutex == NULL) {
+		goto ret;
+	}
 
 	if (mq_init(&self->mq) != MQ_RET_OK) {
 		goto ret;
@@ -340,6 +382,11 @@ plog_router_ret_t plog_router_free(PlogRouter *self) {
 	}
 
 	mq_free(&self->mq);
+
+	if (self->clients_mutex != NULL) {
+		vSemaphoreDelete(self->clients_mutex);
+		self->clients_mutex = NULL;
+	}
 
 	self->initialized = false;
 	return PLOG_ROUTER_RET_OK;

@@ -21,6 +21,10 @@
 #define PLOG_ROUTER_TOPIC_LEN_MAX 64
 #define PLOG_ROUTER_FILTERS_MAX 8
 #define PLOG_ROUTER_RX_TIMEOUT_MS_DEFAULT 500
+/* Upper bound on how long a delivery waits for the receiving client to acknowledge a message. It
+ * caps the time a publisher can be blocked by a client whose receiver has stopped but which has not
+ * been closed yet, so such a client can never wedge the publisher permanently. */
+#define PLOG_ROUTER_DELIVER_TIMEOUT_MS 1000
 
 typedef enum {
 	PLOG_ROUTER_RET_OK = 0,
@@ -63,6 +67,9 @@ typedef struct {
 	Mq mq;
 
 	struct plog_router_mq_client *first_client;
+	/* Guards the client list against concurrent open()/close() and is held for the whole publish
+	 * traversal, so a client can never be freed while a publisher still references it. */
+	SemaphoreHandle_t clients_mutex;
 
 	bool initialized;
 	bool debug;
