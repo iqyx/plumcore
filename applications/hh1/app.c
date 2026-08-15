@@ -158,6 +158,59 @@ static app_ret_t app_setup_ui(App *self) {
 }
 
 
+#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
+/* Bring up nbus2 on the backplane stream and start pulling measured values from the measurement
+ * card's nbus-mq-poll service into the local message queue. */
+static app_ret_t app_setup_backplane(App *self) {
+	Stream *nbus_stream = NULL;
+	if (iservicelocator_query_name_type(locator, "nbus", ISERVICELOCATOR_TYPE_STREAM, (Interface **)&nbus_stream) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no nbus stream, backplane not available"));
+		return APP_RET_FAILED;
+	}
+
+	self->mq = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_MQ, 0, (Interface **)&self->mq) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no message queue found"));
+		return APP_RET_FAILED;
+	}
+
+	/* Frame nbus2 datagrams onto the backplane byte stream. The crypto scheme and MAC key must match
+	 * the measurement card so the two peers interoperate. */
+	Datagram *nbus_dgram = NULL;
+	proto_dgstream_init(&self->nbus_dgstream, nbus_stream);
+	proto_dgstream_get_datagram(&self->nbus_dgstream, &nbus_dgram);
+
+	const struct nbus_config nbus_config = {
+		.dgram = nbus_dgram,
+		.tx_crypto = NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+		.rx_crypto = NBUS_CRYPTO_BLAKE2S_SIV | NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+	};
+	nbus_init(&self->nbus, &nbus_config);
+	nbus_set_mac_key(&self->nbus, (uint8_t *)"abcd", 4);
+
+	/* Bind a local socket and connect it to the measurement card's nbus-mq-poll endpoint at
+	 * SID 00000012, ep 1. */
+	const uint8_t local_id[4] = {0x00, 0x00, 0x00, 0x20};
+	const uint8_t poll_id[4] = {0x00, 0x00, 0x00, 0x12};
+	self->nbus_mq_socket = nbus_socket_allocate(&self->nbus);
+	nbus_socket_bind(self->nbus_mq_socket, local_id, 1);
+	nbus_socket_connect(self->nbus_mq_socket, poll_id, 1);
+
+	const struct nbus_mq_client_conf mq_client_conf = {
+		.mq = self->mq,
+		.d = &self->nbus_mq_socket->datagram,
+		.poll_interval_ms = 100,
+		.topic_prefix = "ff14",
+	};
+	nbus_mq_client_init(&self->nbus_mq, &mq_client_conf);
+	nbus_mq_client_start(&self->nbus_mq);
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("nbus-mq-client polling %02x%02x%02x%02x ep %d"), poll_id[0], poll_id[1], poll_id[2], poll_id[3], 1);
+	return APP_RET_OK;
+}
+#endif
+
+
 app_ret_t app_init(App *self) {
 	memset(self, 0, sizeof(App));
 
@@ -202,6 +255,11 @@ app_ret_t app_init(App *self) {
 	} else {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("LCD framebuffer not found"));
 	}
+
+	#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
+		/* Pull the measurement card's values in over the backplane. */
+		app_setup_backplane(self);
+	#endif
 
 	xTaskCreate(app_task, "app", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {

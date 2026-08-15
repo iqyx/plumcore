@@ -22,6 +22,12 @@
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 #include <services/gui-wm-fs/gui-wm-fs.h>
+#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
+	#include <interfaces/mq.h>
+	#include <services/nbus2/nbus2.h>
+	#include <services/proto-dgstream/proto-dgstream.h>
+	#include <services/nbus-mq-client/nbus-mq-client.h>
+#endif
 
 typedef enum {
 	APP_RET_OK = 0,
@@ -55,6 +61,18 @@ typedef struct {
 
 	/* Full-screen GUI window manager running on top of the LCD (owns the compositor and its bars). */
 	GuiWmFs gui;
+
+	#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
+		/* Message queue the measurement card's values are republished into. */
+		Mq *mq;
+
+		/* nbus2 stack on the backplane stream and the poll client pulling values from the
+		 * measurement card's nbus-mq-poll service. */
+		ProtoDgstream nbus_dgstream;
+		Nbus nbus;
+		struct nbus_socket *nbus_mq_socket;
+		NbusMqClient nbus_mq;
+	#endif
 } App;
 
 

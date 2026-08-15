@@ -15,6 +15,7 @@
 #include <interfaces/applet.h>
 #include <interfaces/event.h>
 #include <interfaces/fb.h>
+#include <interfaces/mq.h>
 #include <interfaces/painter.h>
 #include <interfaces/sensor.h>
 #include <interfaces/servicelocator.h>
@@ -42,7 +43,18 @@
 #define LIVE_DATA_DETAIL_PAD 8
 
 /* Period at which the polling task refreshes the cached sensor values, in milliseconds. */
-#define LIVE_DATA_POLL_INTERVAL_MS 1000
+#define LIVE_DATA_POLL_INTERVAL_MS 100
+
+/* Maximum length of an MQ topic string kept as a live value's name, including the terminator. */
+#define LIVE_DATA_MAX_TOPIC_LEN 48
+
+/* The MQ listener wakes at least this often to notice a stop request while blocked on receive. */
+#define LIVE_DATA_MQ_RX_TIMEOUT_MS 500
+
+/* Size of the receive buffer backing the MQ listener's ndarray, in bytes. Large enough for the small
+ * scalar messages the applet cares about; longer arrays are received truncated and only the first
+ * element is used. */
+#define LIVE_DATA_MQ_BUF_BYTES 128
 
 /* The applet presents its data through several tabs selected with the F1..F4 keys. The list, detail and
  * graph tabs are known; the fourth is a placeholder until its purpose is decided. */
@@ -62,12 +74,15 @@ static const char *live_data_tab_labels[LIVE_DATA_TAB_COUNT] = {
 	[LIVE_DATA_TAB_TBD] = "?",
 };
 
-/* A single discovered sensor together with its most recently polled value. The name is kept as returned
- * by the service locator (the pointer is stable for the sensor's lifetime); the value is cached by the
- * polling task so redraws never query the sensor interface. */
+/* A single live value shown in the list: either a Sensor discovered through the service locator or a
+ * topic seen on the message queue (sensor == NULL). For a sensor the name is kept as returned by the
+ * locator (the pointer is stable for the sensor's lifetime) and the value is cached by the polling task;
+ * for an MQ topic the name points at the owned topic buffer and the value is cached by the MQ listener.
+ * Either way redraws only read the cached value, never the sensor interface. */
 struct live_data_sensor {
-	Sensor *sensor;
+	Sensor *sensor;                  /* discovered sensor, or NULL for an MQ topic */
 	const char *name;
+	char topic[LIVE_DATA_MAX_TOPIC_LEN]; /* owned storage the name points at for MQ topics */
 	float value;
 	bool valid;                      /* false until the first successful read */
 };
@@ -91,6 +106,17 @@ typedef struct live_data_applet {
 	TaskHandle_t poll_task;
 	volatile bool poll_can_run;      /* cleared to ask the task to stop */
 	volatile bool poll_running;      /* set while the task is alive */
+
+	/* Message queue discovered through the service locator, the subscriber opened on it and the buffer
+	 * incoming messages are received into. All NULL/unused when no queue is available. */
+	Mq *mq;
+	MqClient *mqc;
+	NdArray mq_buf;
+
+	/* Background task subscribing to every topic and mirroring published values into the sensor list. */
+	TaskHandle_t mq_task;
+	volatile bool mq_can_run;        /* cleared to ask the task to stop */
+	volatile bool mq_running;        /* set while the task is alive */
 } LiveDataApplet;
 
 
@@ -227,10 +253,10 @@ static void live_data_draw_list(LiveDataApplet *self) {
 		fb_painter_crop_text(&self->painter, value, value_w);
 		painter->vmt->text(painter, value_x, (int16_t)(y + 1), value);
 
-		/* Unit abbreviation from the sensor info. */
+		/* Unit abbreviation from the sensor info; MQ topics carry no unit. */
 		char unit[12];
-		strncpy(unit, (s->sensor->info != NULL && s->sensor->info->unit != NULL) ? s->sensor->info->unit : "",
-		        sizeof(unit) - 1);
+		strncpy(unit, (s->sensor != NULL && s->sensor->info != NULL && s->sensor->info->unit != NULL) ?
+		        s->sensor->info->unit : "", sizeof(unit) - 1);
 		unit[sizeof(unit) - 1] = '\0';
 		fb_painter_crop_text(&self->painter, unit, unit_w);
 		painter->vmt->text(painter, unit_x, (int16_t)(y + 1), unit);
@@ -385,8 +411,10 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 		strcpy(value, "---");
 	}
 
-	/* Measure the unit first (bold font) so the digits can be sized to leave room for it on the right. */
-	const char *unit = (s->sensor->info != NULL && s->sensor->info->unit != NULL) ? s->sensor->info->unit : "";
+	/* Measure the unit first (bold font) so the digits can be sized to leave room for it on the right. MQ
+	 * topics carry no unit. */
+	const char *unit = (s->sensor != NULL && s->sensor->info != NULL && s->sensor->info->unit != NULL) ?
+	                   s->sensor->info->unit : "";
 	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, NULL);
 	uint16_t unit_w = 0;
 	uint16_t unit_h = 0;
@@ -477,6 +505,10 @@ static void live_data_poll_task(void *p) {
 	while (self->poll_can_run) {
 		for (size_t i = 0; i < self->sensor_count; i++) {
 			struct live_data_sensor *s = &self->sensors[i];
+			/* MQ topics keep the value cached by the listener task; only real sensors are polled. */
+			if (s->sensor == NULL) {
+				continue;
+			}
 			float v = 0.0f;
 			if (s->sensor->vmt->value_f != NULL && s->sensor->vmt->value_f(s->sensor, &v) == SENSOR_RET_OK) {
 				s->value = v;
@@ -493,6 +525,146 @@ static void live_data_poll_task(void *p) {
 	}
 	self->poll_running = false;
 	vTaskDelete(NULL);
+}
+
+
+/* Read the first element of a received ndarray as a float, converting from whatever numeric dtype the
+ * publisher used. Returns false for an empty or non-numeric array. */
+static bool live_data_ndarray_to_float(const NdArray *a, float *out) {
+	if (a->buf == NULL || a->asize == 0) {
+		return false;
+	}
+	switch (a->dtype) {
+		case DTYPE_INT8:
+			*out = (float)((int8_t *)a->buf)[0];
+			return true;
+		case DTYPE_BYTE:
+		case DTYPE_UINT8:
+			*out = (float)((uint8_t *)a->buf)[0];
+			return true;
+		case DTYPE_INT16:
+			*out = (float)((int16_t *)a->buf)[0];
+			return true;
+		case DTYPE_UINT16:
+			*out = (float)((uint16_t *)a->buf)[0];
+			return true;
+		case DTYPE_INT32:
+			*out = (float)((int32_t *)a->buf)[0];
+			return true;
+		case DTYPE_UINT32:
+			*out = (float)((uint32_t *)a->buf)[0];
+			return true;
+		case DTYPE_INT64:
+			*out = (float)((int64_t *)a->buf)[0];
+			return true;
+		case DTYPE_UINT64:
+			*out = (float)((uint64_t *)a->buf)[0];
+			return true;
+		case DTYPE_FLOAT:
+			*out = ((float *)a->buf)[0];
+			return true;
+		case DTYPE_DOUBLE:
+			*out = (float)((double *)a->buf)[0];
+			return true;
+		default:
+			return false;
+	}
+}
+
+
+/* Record a value received under topic into the sensor list: refresh the cached value of the matching MQ
+ * entry, or append a new one when the topic is not yet known and the list still has room. Sensor entries
+ * are never matched, so a topic sharing a sensor's name still gets its own row. A newly appended entry is
+ * fully populated before sensor_count is bumped so the poll task and the drawing code, which only iterate
+ * up to sensor_count, never observe a half-built row. Called only from the MQ listener task. */
+static void live_data_record_mq_value(LiveDataApplet *self, const char *topic, float value) {
+	for (size_t i = 0; i < self->sensor_count; i++) {
+		struct live_data_sensor *s = &self->sensors[i];
+		if (s->sensor == NULL && !strcmp(s->name, topic)) {
+			s->value = value;
+			s->valid = true;
+			return;
+		}
+	}
+	if (self->sensor_count >= LIVE_DATA_MAX_SENSORS) {
+		return;
+	}
+	struct live_data_sensor *s = &self->sensors[self->sensor_count];
+	s->sensor = NULL;
+	snprintf(s->topic, sizeof(s->topic), "%s", topic);
+	s->name = s->topic;
+	s->value = value;
+	s->valid = true;
+	self->sensor_count++;
+}
+
+
+/* MQ listener task: subscribe to every topic and block waiting for values. Each received value refreshes
+ * the cached reading of its topic in the sensor list, adding a new row for a previously unseen topic while
+ * the list has room. Those cached values are what the list and detail tabs show for MQ topics (the poll
+ * task never queries them); the periodic poll-task redraw is what brings them on screen. Runs until asked
+ * to stop by live_data_free. */
+static void live_data_mq_task(void *p) {
+	LiveDataApplet *self = (LiveDataApplet *)p;
+
+	self->mq_running = true;
+
+	/* Wake often enough to notice a stop request even when no messages arrive, and receive everything. */
+	self->mqc->vmt->set_timeout(self->mqc, LIVE_DATA_MQ_RX_TIMEOUT_MS);
+	self->mqc->vmt->subscribe(self->mqc, "#");
+
+	while (self->mq_can_run) {
+		struct timespec ts = {0};
+		char topic[LIVE_DATA_MAX_TOPIC_LEN] = {0};
+		self->mq_buf.asize = 0;
+		mq_ret_t ret = self->mqc->vmt->receive(self->mqc, topic, sizeof(topic), &self->mq_buf, &ts);
+		if (ret != MQ_RET_OK && ret != MQ_RET_OK_TRUNCATED) {
+			continue;
+		}
+		float value = 0.0f;
+		if (!live_data_ndarray_to_float(&self->mq_buf, &value)) {
+			continue;
+		}
+		live_data_record_mq_value(self, topic, value);
+	}
+	self->mq_running = false;
+	vTaskDelete(NULL);
+}
+
+
+/* Discover a message queue through the service locator and start the listener task that mirrors its
+ * published values into the sensor list. A missing queue is not an error: the applet then shows only the
+ * sensors it discovered. On any failure after a queue was found the partially acquired resources are
+ * released so the caller can ignore the result. */
+static applet_ret_t live_data_start_mq(LiveDataApplet *self) {
+	self->mq = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_MQ, 0, (Interface **)&self->mq) !=
+	    ISERVICELOCATOR_RET_OK) {
+		return APPLET_RET_OK;
+	}
+
+	self->mqc = self->mq->vmt->open(self->mq);
+	if (self->mqc == NULL) {
+		return APPLET_RET_FAILED;
+	}
+	if (ndarray_init_empty(&self->mq_buf, DTYPE_DOUBLE, LIVE_DATA_MQ_BUF_BYTES / sizeof(double)) !=
+	    NDARRAY_RET_OK) {
+		self->mqc->vmt->close(self->mqc);
+		self->mqc = NULL;
+		return APPLET_RET_FAILED;
+	}
+
+	self->mq_can_run = true;
+	if (xTaskCreate(live_data_mq_task, "live-data-mq", configMINIMAL_STACK_SIZE + 512, (void *)self, 1,
+	    &self->mq_task) != pdPASS) {
+		self->mq_can_run = false;
+		ndarray_free(&self->mq_buf);
+		self->mqc->vmt->close(self->mqc);
+		self->mqc = NULL;
+		return APPLET_RET_FAILED;
+	}
+
+	return APPLET_RET_OK;
 }
 
 
@@ -545,15 +717,26 @@ static applet_ret_t live_data_init(LiveDataApplet *self, struct applet_args *arg
 		return APPLET_RET_FAILED;
 	}
 
+	/* Best-effort: mirror message-queue topics into the list too. A missing queue leaves the applet
+	 * showing only the discovered sensors, and any partial failure cleans up after itself. */
+	live_data_start_mq(self);
+
 	return APPLET_RET_OK;
 }
 
 
-/* Release everything live_data_init acquired: stop the polling task, then free the painter. */
+/* Release everything live_data_init acquired: stop the background tasks, close the MQ subscriber and free
+ * its buffer, then free the painter. */
 static void live_data_free(LiveDataApplet *self) {
 	self->poll_can_run = false;
-	while (self->poll_running) {
+	self->mq_can_run = false;
+	while (self->poll_running || self->mq_running) {
 		vTaskDelay(pdMS_TO_TICKS(100));
+	}
+	if (self->mqc != NULL) {
+		self->mqc->vmt->close(self->mqc);
+		self->mqc = NULL;
+		ndarray_free(&self->mq_buf);
 	}
 	fb_painter_free(&self->painter);
 }
@@ -670,7 +853,7 @@ const Applet live_data = {
 	},
 	.name = "Live data",
 	.help = "Display live measurement data",
-	.stack_size = 512,
+	.stack_size = 1536,
 	#if defined(CONFIG_SERVICE_FB_PAINTER)
 		.icon = &graph_data,
 	#endif

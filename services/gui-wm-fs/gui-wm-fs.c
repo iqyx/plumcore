@@ -64,7 +64,7 @@ static event_ret_t gui_wm_fs_event_listen(Event *self, enum event_type *type, en
 
 		/* Give a single short beep on every key press (not on release). */
 		if (v != 0 && g->conf.beeper != NULL) {
-			//g->conf.beeper->vmt->sequence(g->conf.beeper, GUI_WM_FS_BEEPER_SEQ_KEY_CLICK);
+			g->conf.beeper->vmt->sequence(g->conf.beeper, GUI_WM_FS_BEEPER_SEQ_KEY_CLICK);
 		}
 
 		/* F1 pops up the window list overlay (auto-hides after a few seconds). Handled globally, so

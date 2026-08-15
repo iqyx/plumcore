@@ -1,9 +1,24 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
- * NBUS message queue bridge service - polling interface
+ * NBUS2 message queue poll bridge service
  *
- * Copyright (c) 2023, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
+ */
+
+/**
+ * @file
+ *
+ * Bridges the message queue to an nbus2 endpoint using a poll model. Values received on the
+ * configured topic are serialised into CBOR and accumulated into fixed-size batches. A remote host
+ * periodically sends a poll request datagram; the service answers each request with the oldest
+ * ready batch (or an empty CBOR map when nothing is pending).
+ *
+ * Each batch is a CBOR map { "h": <device name>, "d": [ {"ts","to","v"}, ... ] } carrying a header
+ * with the device name and an array of the serialised messages.
+ *
+ * The reception side and the request-servicing side run as two independent tasks communicating
+ * through a small ring of batch buffers.
  */
 
 #include <stdint.h>
@@ -12,99 +27,98 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include <main.h>
+#include "config.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "u_log.h"
+#include "u_assert.h"
 
-#include "blake2.h"
-#include "nbus-mq.h"
+#include <cbor.h>
+#include <interfaces/mq.h>
+#include <interfaces/datagram.h>
+#include <types/ndarray.h>
 
-/** @todo remove! */
-#include "cli/cli-identity.h"
+#include "nbus-mq-poll.h"
 
-#define MODULE_NAME "nbus-mq"
+#define MODULE_NAME "nbus-mq-poll"
 
 
-static nbus_mq_ret_t prepare_buffer(NbusMq *self, struct nbus_mq_msg_buffer *buf) {
-	buf->state = NBUS_MQ_MB_STATE_ACTIVE;
+/**********************************************************************************************************************
+ * Batch buffer management
+ **********************************************************************************************************************/
+
+static nbus_mq_poll_ret_t prepare_buffer(NbusMqPoll *self, struct nbus_mq_poll_msg_buffer *buf) {
+	buf->state = NBUS_MQ_POLL_MB_STATE_ACTIVE;
 	buf->len = 0;
 
-	/* Encode header. */
+	/* Encode the batch header: the device name under "h", then open the "d" values array. */
 	uint8_t cbor[128];
 	CborEncoder encoder;
 	cbor_encoder_init(&encoder, cbor, sizeof(cbor), 0);
 	cbor_encode_text_stringz(&encoder, "h");
-	cbor_encode_text_stringz(&encoder, identity_device_name);
+	cbor_encode_text_stringz(&encoder, self->conf.device_name);
 	cbor_encode_text_stringz(&encoder, "d");
 	size_t cbor_len = cbor_encoder_get_buffer_size(&encoder, cbor);
 
-	/* Start a top level CBOR map */
+	/* Start the top level CBOR map. */
 	buf->data[buf->len++] = 0xbf;
 
 	memcpy(buf->data + buf->len, cbor, cbor_len);
 	buf->len += cbor_len;
 
-	/* Start a CBOR array */
+	/* Start the values CBOR array. */
 	buf->data[buf->len++] = 0x9f;
-	return NBUS_MQ_RET_OK;
+	return NBUS_MQ_POLL_RET_OK;
 }
 
 
-static nbus_mq_ret_t close_buffer(NbusMq *self, struct nbus_mq_msg_buffer *buf) {
-	/* Close the array container. */
+static nbus_mq_poll_ret_t close_buffer(NbusMqPoll *self, struct nbus_mq_poll_msg_buffer *buf) {
+	(void)self;
+
+	/* Close the values array container. */
 	buf->data[buf->len++] = 0xff;
 
-	/* Close the map container. */
+	/* Close the top level map container. */
 	buf->data[buf->len++] = 0xff;
 
-	buf->state = NBUS_MQ_MB_STATE_FULL;
-	return NBUS_MQ_RET_OK;
+	buf->state = NBUS_MQ_POLL_MB_STATE_FULL;
+	return NBUS_MQ_POLL_RET_OK;
 }
 
 
-static struct nbus_mq_msg_buffer *get_active_buffer(NbusMq *self) {
-	struct nbus_mq_msg_buffer *b = NULL;
+static struct nbus_mq_poll_msg_buffer *get_active_buffer(NbusMqPoll *self) {
+	/* Reuse the currently active buffer if there is one. */
+	for (size_t i = 0; i < NBUS_MQ_POLL_MSG_BUFFERS; i++) {
+		if (self->msg_buffers[i].state == NBUS_MQ_POLL_MB_STATE_ACTIVE) {
+			return &self->msg_buffers[i];
+		}
+	}
 
-	/** @todo lock here */
-	for (size_t i = 0; i < NBUS_MQ_MSG_BUFFERS; i++) {
-		/* Select the active buffer. */
-		if (self->msg_buffers[i].state == NBUS_MQ_MB_STATE_ACTIVE) {
-			b = &(self->msg_buffers[i]);
-			break;
+	/* Otherwise grab an empty buffer and prepare it. */
+	for (size_t i = 0; i < NBUS_MQ_POLL_MSG_BUFFERS; i++) {
+		if (self->msg_buffers[i].state == NBUS_MQ_POLL_MB_STATE_EMPTY) {
+			prepare_buffer(self, &self->msg_buffers[i]);
+			return &self->msg_buffers[i];
 		}
 	}
-	if (b == NULL) {
-		/* Whoa, no active buffer. Search for an empty buffer and prepare it. */
-		for (size_t i = 0; i < NBUS_MQ_MSG_BUFFERS; i++) {
-			if (self->msg_buffers[i].state == NBUS_MQ_MB_STATE_EMPTY) {
-				b = &(self->msg_buffers[i]);
-				prepare_buffer(self, b);
-				break;
-			}
-		}
-	}
-	/* Note we may return NULL if no buffer can be allocated. */
-	/** @todo unlock here */
-	return b;
+
+	/* All buffers are full and waiting to be polled. */
+	return NULL;
 }
 
 
-static struct nbus_mq_msg_buffer *get_ready_buffer(NbusMq *self) {
-	struct nbus_mq_msg_buffer *b = NULL;
-
-	for (size_t i = 0; i < NBUS_MQ_MSG_BUFFERS; i++) {
-		if (self->msg_buffers[i].state == NBUS_MQ_MB_STATE_FULL) {
-			b = &(self->msg_buffers[i]);
-			break;
+static struct nbus_mq_poll_msg_buffer *get_ready_buffer(NbusMqPoll *self) {
+	for (size_t i = 0; i < NBUS_MQ_POLL_MSG_BUFFERS; i++) {
+		if (self->msg_buffers[i].state == NBUS_MQ_POLL_MB_STATE_FULL) {
+			return &self->msg_buffers[i];
 		}
 	}
-
-	return b;
+	return NULL;
 }
 
 
-static nbus_mq_ret_t save_msg_to_buffer(NbusMq *self, const char *topic, NdArray *ndarray, struct timespec *ts) {
-
-	/* Encode CBOR here */
-	/** @todo meh! */
+static nbus_mq_poll_ret_t save_msg_to_buffer(NbusMqPoll *self, const char *topic, const NdArray *ndarray, const struct timespec *ts) {
+	/* Serialise the message (timestamp, topic, value) into a standalone CBOR map. */
 	uint8_t cbor[128];
 	CborEncoder encoder;
 	cbor_encoder_init(&encoder, cbor, sizeof(cbor), 0);
@@ -123,49 +137,44 @@ static nbus_mq_ret_t save_msg_to_buffer(NbusMq *self, const char *topic, NdArray
 	}
 	size_t cbor_len = cbor_encoder_get_buffer_size(&encoder, cbor);
 
-	struct nbus_mq_msg_buffer *b = get_active_buffer(self);
+	struct nbus_mq_poll_msg_buffer *b = get_active_buffer(self);
 	if (b == NULL) {
-		/* Ok nope, no buffer to save the message to */
-		return NBUS_MQ_RET_FAILED;
+		return NBUS_MQ_POLL_RET_FAILED;
 	}
-	/* Always keep 2bytes for finishing both array and map and 2 bytes for start/finish of the current value map. */
-	if ((2 + cbor_len + 2 + b->len) > NBUS_MQ_MSG_BUFFER_SIZE) {
-		/* We had some buffer but unfortunately there was not enough space.
-		 * Try to find a new one. */
+
+	/* Keep 2 bytes to close the array and map, plus 2 bytes for the value map delimiters. When the
+	 * current batch cannot hold the value, close it and start a fresh one. */
+	if ((2 + cbor_len + 2 + b->len) > NBUS_MQ_POLL_MSG_BUFFER_SIZE) {
 		close_buffer(self, b);
 		b = get_active_buffer(self);
 	}
 	if (b == NULL) {
-		/* Still nothing, no new buffer can be found (all full). */
-		return NBUS_MQ_RET_FAILED;
+		return NBUS_MQ_POLL_RET_FAILED;
 	}
 
-	/* Start a map. */
+	/* Wrap the serialised value in its own map inside the values array. */
 	b->data[b->len++] = 0xbf;
-
 	memcpy(b->data + b->len, cbor, cbor_len);
 	b->len += cbor_len;
-
-	/* Finish the map. */
 	b->data[b->len++] = 0xff;
 
-	// u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("added len %u to buf %p, cur len %u"), cbor_len, b, b->len);
-
-
-	/** @todo continue here */
-	return NBUS_MQ_RET_OK;
+	return NBUS_MQ_POLL_RET_OK;
 }
 
 
+/**********************************************************************************************************************
+ * Message queue reception task
+ **********************************************************************************************************************/
+
 static void rx_task(void *p) {
-	NbusMq *self = p;
+	NbusMqPoll *self = p;
 
 	self->rx_can_run = true;
 	self->rx_running = true;
 	while (self->rx_can_run) {
 		struct timespec ts = {0};
-		char topic[NBUS_MQ_MAX_TOPIC_LEN] = {0};
-		if (self->mqc->vmt->receive(self->mqc, topic, NBUS_MQ_MAX_TOPIC_LEN, &self->rx_buf, &ts) == MQ_RET_OK) {
+		char topic[NBUS_MQ_POLL_MAX_TOPIC_LEN] = {0};
+		if (self->mqc->vmt->receive(self->mqc, topic, NBUS_MQ_POLL_MAX_TOPIC_LEN, &self->rx_buf, &ts) == MQ_RET_OK) {
 			save_msg_to_buffer(self, topic, &self->rx_buf, &ts);
 		}
 	}
@@ -175,96 +184,136 @@ static void rx_task(void *p) {
 }
 
 
-static void nbus_task(void *p) {
-	NbusMq *self = p;
+/**********************************************************************************************************************
+ * NBUS poll request servicing task
+ **********************************************************************************************************************/
 
-	while (true) {
-		nbus_endpoint_t ep = 0;
-		size_t len = 0;
-		nbus_ret_t ret = nbus_channel_receive(&self->channel, &ep, &self->nbus_buf, NBUS_MQ_NBUS_BUF_LEN, &len, 1000);
-		/* Respond on endpoint 1 and send the most recent and ready buffer. */
-		if (ret == NBUS_RET_OK && ep == 1) {
-			struct nbus_mq_msg_buffer *b = get_ready_buffer(self);
-			if (b != NULL) {
-				nbus_channel_send(&self->channel, ep, b->data, b->len);
-				b->state = NBUS_MQ_MB_STATE_EMPTY;
-			} else {
-				/* Send an empty map to indicate we have nothing to send. */
-				nbus_channel_send(&self->channel, ep, "\xbf\xff", 2);
-			}
+static void nbus_task(void *p) {
+	NbusMqPoll *self = p;
+
+	self->nbus_can_run = true;
+	self->nbus_running = true;
+	while (self->nbus_can_run) {
+		size_t len = NBUS_MQ_POLL_NBUS_BUF_LEN;
+		struct datagram_msg rxmsg = {0};
+		if (self->conf.d->vmt->read(self->conf.d, self->nbus_buf, &len, &rxmsg) != DATAGRAM_RET_OK) {
+			continue;
+		}
+
+		/* A poll request arrived. Answer it to the requester's address. */
+		struct datagram_msg txmsg = {0};
+		txmsg.addr_size = 4;
+		txmsg.dst_port = rxmsg.src_port;
+		memcpy(txmsg.dst_addr, rxmsg.src_addr, 4);
+
+		/* Send the oldest ready batch and release it, or an empty map when nothing is pending. */
+		struct nbus_mq_poll_msg_buffer *b = get_ready_buffer(self);
+		if (b != NULL) {
+			self->conf.d->vmt->write(self->conf.d, b->data, b->len, &txmsg);
+			b->state = NBUS_MQ_POLL_MB_STATE_EMPTY;
+		} else {
+			self->conf.d->vmt->write(self->conf.d, "\xbf\xff", 2, &txmsg);
 		}
 	}
+	self->nbus_running = false;
 
 	vTaskDelete(NULL);
 }
 
 
-nbus_mq_ret_t nbus_mq_init(NbusMq *self, Mq *mq, NbusChannel *parent, const char *name) {
-	memset(self, 0, sizeof(NbusMq));
+/**********************************************************************************************************************
+ * Service lifecycle
+ **********************************************************************************************************************/
 
-	self->mq = mq;
+nbus_mq_poll_ret_t nbus_mq_poll_init(NbusMqPoll *self, const struct nbus_mq_poll_conf *conf) {
+	if (u_assert(self != NULL) ||
+	    u_assert(conf != NULL)) {
+		return NBUS_MQ_POLL_RET_NULL;
+	}
+	memset(self, 0, sizeof(NbusMqPoll));
+	memcpy(&self->conf, conf, sizeof(struct nbus_mq_poll_conf));
 
-	nbus_channel_init(&self->channel, name);
-	nbus_channel_set_parent(&self->channel, parent);
-	nbus_channel_set_interface(&self->channel, "mq", "1.0.0");
-	nbus_add_channel(parent->nbus, &self->channel);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("init ok"));
+	return NBUS_MQ_POLL_RET_OK;
+}
 
-	xTaskCreate(nbus_task, "nbus-mq", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->nbus_task));
-	if (self->nbus_task == NULL) {
-		return NBUS_RET_FAILED;
+
+nbus_mq_poll_ret_t nbus_mq_poll_free(NbusMqPoll *self) {
+	if (u_assert(self != NULL)) {
+		return NBUS_MQ_POLL_RET_FAILED;
 	}
 
-	return NBUS_MQ_RET_OK;
+	return NBUS_MQ_POLL_RET_OK;
 }
 
 
-nbus_mq_ret_t nbus_mq_free(NbusMq *self) {
-	(void)self;
-	/** @todo stop the nbus task */
-	return NBUS_MQ_RET_OK;
-}
+nbus_mq_poll_ret_t nbus_mq_poll_start(NbusMqPoll *self) {
+	if (u_assert(self != NULL) ||
+	    u_assert(self->conf.mq != NULL) ||
+	    u_assert(self->conf.d != NULL) ||
+	    u_assert(self->conf.topic != NULL) ||
+	    u_assert(self->conf.device_name != NULL)) {
+		return NBUS_MQ_POLL_RET_FAILED;
+	}
 
+	strlcpy(self->topic, self->conf.topic, NBUS_MQ_POLL_MAX_TOPIC_LEN);
 
-nbus_mq_ret_t nbus_mq_start(NbusMq *self, const char *topic) {
-	self->mqc = self->mq->vmt->open(self->mq);
+	/* Open a message queue client to receive the subscribed values. */
+	self->mqc = self->conf.mq->vmt->open(self->conf.mq);
 	if (self->mqc == NULL) {
 		goto err;
 	}
-	self->mqc->vmt->subscribe(self->mqc, topic);
+	self->mqc->vmt->subscribe(self->mqc, self->topic);
 
-	/** @todo how to allocate the ndarray to hold received messages? */
-	if (ndarray_init_empty(&self->rx_buf, DTYPE_UINT8, NBUS_MQ_MSG_BUFFER_SIZE) != NDARRAY_RET_OK) {
+	/* Receive scratch buffer for a single incoming value. */
+	if (ndarray_init_empty(&self->rx_buf, DTYPE_UINT8, NBUS_MQ_POLL_MSG_BUFFER_SIZE) != NDARRAY_RET_OK) {
 		goto err;
 	}
 
-	xTaskCreate(rx_task, "nbus-mq-rx", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->rx_task));
+	xTaskCreate(nbus_task, "nbus-mq-poll", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &(self->nbus_task));
+	if (self->nbus_task == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create nbus task"));
+		goto err;
+	}
+
+	xTaskCreate(rx_task, "nbus-mq-poll-rx", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->rx_task));
 	if (self->rx_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create receiving task"));
 		goto err;
 	}
 
-	return NBUS_MQ_RET_OK;
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("started, subscribed to '%s'"), self->topic);
+	return NBUS_MQ_POLL_RET_OK;
 err:
 	/* Not fully started, stop everything. */
-	nbus_mq_stop(self);
-	return NBUS_MQ_RET_FAILED;
+	nbus_mq_poll_stop(self);
+	return NBUS_MQ_POLL_RET_FAILED;
 }
 
 
-nbus_mq_ret_t nbus_mq_stop(NbusMq *self) {
+nbus_mq_poll_ret_t nbus_mq_poll_stop(NbusMqPoll *self) {
+	if (u_assert(self != NULL)) {
+		return NBUS_MQ_POLL_RET_FAILED;
+	}
 
+	/* Stop the reception task. */
 	self->rx_can_run = false;
 	while (self->rx_running) {
 		vTaskDelay(100);
 	}
 
-	if (self->mqc) {
+	/* Stop the NBUS servicing task. */
+	self->nbus_can_run = false;
+	while (self->nbus_running) {
+		vTaskDelay(100);
+	}
+
+	if (self->mqc != NULL) {
 		self->mqc->vmt->close(self->mqc);
 	}
 
 	ndarray_free(&self->rx_buf);
 
-	return NBUS_MQ_RET_OK;
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("stopped"));
+	return NBUS_MQ_POLL_RET_OK;
 }
-
-

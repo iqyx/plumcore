@@ -255,6 +255,7 @@ static void keypad_layout_rx_task(void *p) {
 		if (self->conf.source->vmt->listen(self->conf.source, &ev.type, &ev.code, &ev.value) != EV_RET_OK) {
 			continue;
 		}
+
 		xQueueSend(self->input_queue, &ev, portMAX_DELAY);
 	}
 	self->rx_running = false;

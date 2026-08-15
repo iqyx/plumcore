@@ -139,6 +139,48 @@ void uart4_isr(void) {
 
 
 /**********************************************************************************************************************
+ * nbus2 backplane stream on USART1
+ **********************************************************************************************************************/
+
+/* USART1 carries the nbus2 protocol on the backplane connecting to the measurement card. The port only
+ * sets up the USART and advertises its byte stream; the application discovers the stream and builds the
+ * nbus2 stack (framing, MAC and the protocols) on top of it. */
+Stm32Uart uart1;
+
+Gpio *nbus2_shdn_gpio = &(gpiod.pin[14]);
+
+static void port_setup_nbus2(void) {
+	RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+
+	/* The nbus2 transceiver shutdown on PD14 is active high; drive it low to enable the transceiver. */
+	nbus2_shdn_gpio->vmt->set_mode(nbus2_shdn_gpio, MODE_OUTPUT);
+	nbus2_shdn_gpio->vmt->set(nbus2_shdn_gpio, false);
+
+	/* USART1 TX on PA9, RX on PA10, AF7. */
+	gpioa.pin[9].vmt->set_mode(&(gpioa.pin[9]), MODE_ALTERNATE);
+	gpioa.pin[9].vmt->set_pinmux(&(gpioa.pin[9]), 7);
+	gpioa.pin[10].vmt->set_mode(&(gpioa.pin[10]), MODE_ALTERNATE);
+	gpioa.pin[10].vmt->set_pinmux(&(gpioa.pin[10]), 7);
+
+	stm32_uart_init(&uart1, (void *)USART1);
+	stm32_uart_set_rto(&uart1, true);
+	uart1.uart.vmt->set_bitrate(&uart1.uart, 1000000);
+
+	NVIC_EnableIRQ(USART1_IRQn);
+	NVIC_SetPriority(USART1_IRQn, 7);
+
+	/* Advertise the raw backplane stream. The application frames nbus2 datagrams onto it. */
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&uart1.stream, "nbus");
+}
+
+
+void usart1_isr(void);
+void usart1_isr(void) {
+	stm32_uart_interrupt_handler(&uart1);
+}
+
+
+/**********************************************************************************************************************
  * OCTOSPI NOR flash initialisation
  **********************************************************************************************************************/
 
@@ -736,6 +778,7 @@ int32_t port_init(void) {
 	stm32_gpio_init(&gpioe, (void *)GPIOE_BASE);
 
 	port_setup_console();
+	port_setup_nbus2();
 	port_setup_i2c();
 	port_setup_pm_i2c();
 	port_setup_leds();

@@ -37,7 +37,7 @@ static gpio_keypad_ret_t check_state(GpioKeypad *self) {
 				key->counter = 0;
 				key->down = new_down;
 
-				//~ u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("type = %d, code = %d, value = %d"), key->type, key->code, key->down ? 1 : 0);
+				~ u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("type = %d, code = %d, value = %d"), key->type, key->code, key->down ? 1 : 0);
 				struct gpio_keypad_event ev = {
 					.type = key->type ? key->type : EV_TYPE_RAW,
 					.code = key->code,
@@ -111,18 +111,13 @@ gpio_keypad_ret_t gpio_keypad_init(GpioKeypad *self, struct gpio_keypad_key *key
 	memset(self, 0, sizeof(GpioKeypad));
 	self->keys = keys;
 
-	for (struct gpio_keypad_key *key = self->keys; key->input != NULL; key++) {
-		key->input->vmt->set_mode(key->input, MODE_INPUT);
-		key->input->vmt->set_pull(key->input, PULL_NONE);
-	}
-
 	self->event_queue = xQueueCreate(GPIO_KEYPAD_EVENT_QUEUE_SIZE, sizeof(struct gpio_keypad_event));
 	if (self->event_queue == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot allocate event queue"));
 		goto err;
 	}
 
-	xTaskCreate(keypad_task, "gpio-keypad", configMINIMAL_STACK_SIZE + 192, (void *)self, 1, &(self->keypad_task));
+	xTaskCreate(keypad_task, "gpio-keypad", configMINIMAL_STACK_SIZE + 192, (void *)self, 2, &(self->keypad_task));
 	if (self->keypad_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		goto err;
