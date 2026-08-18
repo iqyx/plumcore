@@ -28,6 +28,9 @@
 
 #define MODULE_NAME "stm32-i2c"
 
+/* Ports mux the I2C kernel clock to HSI16, a fixed 16 MHz source on all supported families. */
+#define I2C_KERNEL_CLOCK_HZ 16000000UL
+
 
 /* Recover an I2C bus that is stuck because a slave still drives SDA low, holding an unfinished transaction from
  * before a firmware reset (no power cycle nor reset line). The pins are bit-banged as open-drain outputs: up to
@@ -83,10 +86,12 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 	base->CR1 &= ~I2C_CR1_ANFOFF;
 	base->CR1 = (base->CR1 & ~(I2C_CR1_DNF_Msk << I2C_CR1_DNF_Pos)) | (0 << I2C_CR1_DNF_Pos);
 
-	/* The prescaler normalizes the internal timer to 4 MHz (250 ns per tick) regardless of the kernel clock, so
+	/* The I2C peripheral is clocked from HSI16 (16 MHz) on every port, so its timing is independent of the core
+	 * clock: the SYSCLK may be raised well above the 4-bit PRESC field's reach without affecting the bus. The
+	 * prescaler normalizes the 16 MHz kernel clock to a 4 MHz internal timer (250 ns per tick), so
 	 * SCLL/SCLH/SDADEL/SCLDEL below are expressed in 250 ns units. At this granularity the fast speeds are coarse,
-	 * but that is the best resolution available while the MCU runs from the 4 MHz oscillator. */
-	uint32_t presc = (SystemCoreClock / 4e6) - 1;
+	 * but that is the best resolution available at this kernel clock. */
+	uint32_t presc = (I2C_KERNEL_CLOCK_HZ / 4e6) - 1;
 	uint32_t scll = 0;
 	uint32_t sclh = 0;
 	uint32_t sdadel = 0;
