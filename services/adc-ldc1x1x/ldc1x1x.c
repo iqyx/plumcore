@@ -170,6 +170,7 @@ ldc1x1x_ret_t ldc1x1x_init(Ldc1x1x *self, const struct ldc1x1x_conf *conf) {
 	/* Probe the device: read the manufacturer and device ID registers. Both families report the same
 	 * manufacturer ID (0x5449, "TI"), while the device ID distinguishes the 12-bit from the 28-bit parts
 	 * and doubles as the register layout selector used later when reading samples. */
+	ldc1x1x_select(self);
 	uint16_t manuf_id = 0;
 	uint16_t device_id = 0;
 	if (ldc_read(self, 0x7e, &manuf_id) != LDC1X1X_RET_OK ||
