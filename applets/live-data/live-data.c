@@ -15,17 +15,15 @@
 #include <interfaces/applet.h>
 #include <interfaces/event.h>
 #include <interfaces/fb.h>
+#include <interfaces/led.h>
 #include <interfaces/mq.h>
 #include <interfaces/painter.h>
 #include <interfaces/sensor.h>
 #include <interfaces/servicelocator.h>
 #include <services/fb-painter/fb-painter.h>
 
-/* The applet icon lives among the fb-painter assets, which are only compiled when the fb-painter
- * service is enabled. */
-#if defined(CONFIG_SERVICE_FB_PAINTER)
+/* The applet requires the fb-painter service (see its Kconfig depends), so its assets are always available. */
 #include <services/fb-painter/assets/assets.h>
-#endif
 
 #define MODULE_NAME "live-data"
 
@@ -38,12 +36,18 @@
 #define LIVE_DATA_SCROLLBAR_W 8
 #define LIVE_DATA_MAX_SENSORS 32
 
+/* Number of top LEDs (led0..led11) the applet discovers through the service locator. */
+#define LIVE_DATA_MAX_LEDS 12
+
+/* Side of the check_small image drawn in the rightmost list column marking a sensor as selected, in pixels. */
+#define LIVE_DATA_SEL_BOX 10
+
 /* Thickness of a seven-segment stroke and the vertical padding of the big value on the detail tab. */
 #define LIVE_DATA_SEG_THICK 4
 #define LIVE_DATA_DETAIL_PAD 8
 
 /* Period at which the polling task refreshes the cached sensor values, in milliseconds. */
-#define LIVE_DATA_POLL_INTERVAL_MS 100
+#define LIVE_DATA_POLL_INTERVAL_MS 200
 
 /* Maximum length of an MQ topic string kept as a live value's name, including the terminator. */
 #define LIVE_DATA_MAX_TOPIC_LEN 48
@@ -85,6 +89,7 @@ struct live_data_sensor {
 	char topic[LIVE_DATA_MAX_TOPIC_LEN]; /* owned storage the name points at for MQ topics */
 	float value;
 	bool valid;                      /* false until the first successful read */
+	bool selected;                   /* toggled by ENTER, shown as a filled box in the list tab */
 };
 
 typedef struct live_data_applet {
@@ -101,6 +106,10 @@ typedef struct live_data_applet {
 	size_t sensor_count;
 	size_t selected;                 /* index of the highlighted sensor in the list tab */
 	size_t list_top;                 /* index of the first sensor row visible in the list tab */
+
+	/* Top LEDs (led0..led11) discovered through the service locator, captured once at init. */
+	Led *led[LIVE_DATA_MAX_LEDS];
+	size_t led_count;
 
 	/* Background task refreshing the cached sensor values once a second. */
 	TaskHandle_t poll_task;
@@ -200,6 +209,22 @@ static void live_data_draw_scrollbar(LiveDataApplet *self) {
 }
 
 
+/* Format a sensor value into buf with up to three decimal places, dropping any trailing zeros and a trailing
+ * decimal point so a whole number renders without a fractional part (e.g. 1.500 -> "1.5", 2.000 -> "2"). */
+static void live_data_format_value(char *buf, size_t size, float value) {
+	snprintf(buf, size, "%.3f", value);
+	if (strchr(buf, '.') != NULL) {
+		char *end = buf + strlen(buf) - 1;
+		while (end > buf && *end == '0') {
+			*end-- = '\0';
+		}
+		if (*end == '.') {
+			*end = '\0';
+		}
+	}
+}
+
+
 /* Draw the sensor list into the content area: one row per sensor with the Name, Value and Unit columns,
  * scrolled to self->list_top. The selected row is inverted (a white rectangle with black text), the others
  * are white text on the black background. A scroll bar is drawn along the right edge. The caller must have
@@ -208,13 +233,17 @@ static void live_data_draw_list(LiveDataApplet *self) {
 	Painter *painter = &self->painter.painter;
 	uint16_t list_w = (uint16_t)(self->w - LIVE_DATA_SCROLLBAR_W);
 
+	/* Rightmost column: the selection box, with the text columns laid out in the space left of it. */
+	int16_t sel_x = (int16_t)(list_w - LIVE_DATA_SEL_BOX - 2);
+	uint16_t text_w = (uint16_t)(sel_x - 2);
+
 	/* Columns: the name takes the left half, the value the next 30% and the unit the rightmost 20%. */
 	int16_t name_x = 2;
-	int16_t value_x = (int16_t)(list_w * 50 / 100);
-	int16_t unit_x = (int16_t)(list_w * 80 / 100);
+	int16_t value_x = (int16_t)(text_w * 50 / 100);
+	int16_t unit_x = (int16_t)(text_w * 80 / 100);
 	uint16_t name_w = (uint16_t)(value_x - name_x - 2);
 	uint16_t value_w = (uint16_t)(unit_x - value_x - 2);
-	uint16_t unit_w = (uint16_t)(list_w - unit_x - 2);
+	uint16_t unit_w = (uint16_t)(sel_x - unit_x - 2);
 
 	painter->vmt->set_font(painter, PAINTER_FONT_NORMAL, NULL);
 
@@ -246,7 +275,7 @@ static void live_data_draw_list(LiveDataApplet *self) {
 		/* Cached value, shown as three dashes until the first successful read. */
 		char value[16];
 		if (s->valid) {
-			snprintf(value, sizeof(value), "%.3f", s->value);
+			live_data_format_value(value, sizeof(value), s->value);
 		} else {
 			strcpy(value, "---");
 		}
@@ -260,6 +289,15 @@ static void live_data_draw_list(LiveDataApplet *self) {
 		unit[sizeof(unit) - 1] = '\0';
 		fb_painter_crop_text(&self->painter, unit, unit_w);
 		painter->vmt->text(painter, unit_x, (int16_t)(y + 1), unit);
+
+		/* Selection mark in the rightmost column, centred in the row: the check_small image drawn only for a
+		 * selected sensor. The source image is stored inverted, so it is blitted inverted on the normal black
+		 * background and straight through on the highlighted white row to flip colour along with the row. */
+		if (s->selected) {
+			int16_t box_y = (int16_t)(y + (LIVE_DATA_ROW_H - LIVE_DATA_SEL_BOX) / 2);
+			painter->vmt->image(painter, sel_x, box_y, &check_small_data,
+			                    selected ? PAINTER_MODE_NORMAL : PAINTER_MODE_INVERTED);
+		}
 	}
 
 	live_data_draw_scrollbar(self);
@@ -303,13 +341,28 @@ static uint8_t live_data_digit_segments(char c) {
 }
 
 
+/* Stroke thickness for a seven-segment glyph of cell width w: a quarter of the width so the strokes shrink
+ * to 3 or 2 pixels for small digits (which stay legible only with thin strokes), capped at LIVE_DATA_SEG_THICK
+ * for large ones and never below 2. */
+static uint16_t live_data_seg_thick(uint16_t w) {
+	uint16_t t = (uint16_t)(w / 4);
+	if (t > LIVE_DATA_SEG_THICK) {
+		t = LIVE_DATA_SEG_THICK;
+	}
+	if (t < 2) {
+		t = 2;
+	}
+	return t;
+}
+
+
 /* Draw one seven-segment glyph (a digit 0..9 or a dash) as white rectangles inside the w x h box with its
- * top-left corner at (x, y). Every segment is LIVE_DATA_SEG_THICK pixels thick; the horizontal segments are
+ * top-left corner at (x, y). The segment thickness scales with the digit width; the horizontal segments are
  * inset by the thickness at both ends so the corners read as a real seven-segment display. The caller must
  * have an active painter frame. */
 static void live_data_draw_digit(Painter *painter, char c, int16_t x, int16_t y, uint16_t w, uint16_t h) {
 	uint8_t seg = live_data_digit_segments(c);
-	uint16_t t = LIVE_DATA_SEG_THICK;
+	uint16_t t = live_data_seg_thick(w);
 	int16_t half = (int16_t)((h - t) / 2);   /* y offset of the middle segment */
 	uint16_t hseg_w = (uint16_t)(w - 2 * t); /* horizontal segment length */
 	uint16_t vseg_h = (uint16_t)(half - t);  /* vertical segment length in each half */
@@ -377,8 +430,9 @@ static void live_data_draw_digits(Painter *painter, const char *s, int16_t x, in
 		if (*p == '.') {
 			/* Decimal point: a small square sitting on the glyph baseline. */
 			uint16_t dot = (uint16_t)(w / 4);
-			if (dot < LIVE_DATA_SEG_THICK) {
-				dot = LIVE_DATA_SEG_THICK;
+			uint16_t min_dot = live_data_seg_thick(w);
+			if (dot < min_dot) {
+				dot = min_dot;
 			}
 			painter->vmt->set_pen(painter, 0xffffffff, 0);
 			painter->vmt->set_brush(painter, 0xffffffff);
@@ -391,22 +445,17 @@ static void live_data_draw_digits(Painter *painter, const char *s, int16_t x, in
 }
 
 
-/* Draw the detail tab for the currently selected sensor: the current value as big seven-segment digits
- * centred in the content area with its unit just to the right. The sensor name is shown in the window title
- * rather than on the canvas. The caller must have an active painter frame. */
-static void live_data_draw_detail(LiveDataApplet *self) {
+/* Draw one sensor's detail view into the cell at (cx, cy) of size cw x ch: the current value as big
+ * seven-segment digits centred in the cell with its unit just to the right. The caller must have an active
+ * painter frame. */
+static void live_data_draw_detail_cell(LiveDataApplet *self, struct live_data_sensor *s, int16_t cx,
+                                       int16_t cy, uint16_t cw, uint16_t ch, bool show_name) {
 	Painter *painter = &self->painter.painter;
-
-	if (self->sensor_count == 0) {
-		return;
-	}
-	struct live_data_sensor *s = &self->sensors[self->selected];
-	uint16_t area_h = live_data_content_h(self);
 
 	/* The current value as big seven-segment digits, shown as three dashes until the first successful read. */
 	char value[16];
 	if (s->valid) {
-		snprintf(value, sizeof(value), "%.3f", s->value);
+		live_data_format_value(value, sizeof(value), s->value);
 	} else {
 		strcpy(value, "---");
 	}
@@ -420,12 +469,12 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 	uint16_t unit_h = 0;
 	painter->vmt->text_size(painter, unit, &unit_w, &unit_h);
 
-	/* Fill the content height leaving LIVE_DATA_DETAIL_PAD above and below; digits are half as wide as they
+	/* Fill the cell height leaving LIVE_DATA_DETAIL_PAD above and below; digits are half as wide as they
 	 * are tall. If the value would not fit the width remaining after the unit, scale the digits down to fit
 	 * while keeping the aspect ratio. */
 	uint16_t reserve = (unit_w > 0) ? (uint16_t)(unit_w + 4) : 0;
-	uint16_t avail = (uint16_t)(self->w - 2 * LIVE_DATA_DETAIL_PAD - reserve);
-	uint16_t digit_h = (uint16_t)(area_h - 2 * LIVE_DATA_DETAIL_PAD);
+	uint16_t avail = (uint16_t)(cw - 2 * LIVE_DATA_DETAIL_PAD - reserve);
+	uint16_t digit_h = (uint16_t)(ch - 2 * LIVE_DATA_DETAIL_PAD);
 	uint16_t digit_w = (uint16_t)(digit_h / 2);
 	uint16_t spacing = (uint16_t)(digit_w / 6);
 	uint16_t total = live_data_digits_width(value, digit_w, spacing);
@@ -436,15 +485,130 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 		total = live_data_digits_width(value, digit_w, spacing);
 	}
 
-	/* Centre the value + unit group horizontally, and the digits vertically in the content area. */
-	int16_t value_x = (int16_t)((self->w - (total + reserve)) / 2);
-	int16_t value_y = (int16_t)((area_h - digit_h) / 2);
+	/* Centre the value + unit group horizontally, and the digits vertically within the cell. */
+	int16_t value_x = (int16_t)(cx + (cw - (total + reserve)) / 2);
+	int16_t value_y = (int16_t)(cy + (ch - digit_h) / 2);
 	live_data_draw_digits(painter, value, value_x, value_y, digit_w, digit_h, spacing);
 
 	/* Unit to the right of the value, in the bold font (still selected from the measurement above), sitting
 	 * on the digits' baseline. */
 	painter->vmt->set_pen(painter, 0xffffffff, 1);
 	painter->vmt->text(painter, (int16_t)(value_x + total + 4), (int16_t)(value_y + digit_h - unit_h), unit);
+
+	/* When the area is split across several sensors, label each cell with its sensor name in the top-left
+	 * corner using the normal font, cropped to the cell width. */
+	if (show_name) {
+		char name[32];
+		strncpy(name, (s->name != NULL) ? s->name : "", sizeof(name) - 1);
+		name[sizeof(name) - 1] = '\0';
+		painter->vmt->set_font(painter, PAINTER_FONT_NORMAL, NULL);
+		fb_painter_crop_text(&self->painter, name, (uint16_t)(cw - 4));
+		painter->vmt->set_pen(painter, 0xffffffff, 1);
+		painter->vmt->text(painter, (int16_t)(cx + 2), (int16_t)(cy + 1), name);
+	}
+}
+
+
+/* Fill sel[] with the indices of up to max selected sensors, i.e. those with their box ticked in the list.
+ * When none are ticked the highlighted sensor stands in as a single entry. Returns the number written, which
+ * is zero only when there are no sensors at all. */
+static size_t live_data_selected_list(LiveDataApplet *self, size_t *sel, size_t max) {
+	size_t n = 0;
+	for (size_t i = 0; i < self->sensor_count && n < max; i++) {
+		if (self->sensors[i].selected) {
+			sel[n++] = i;
+		}
+	}
+	if (n == 0 && self->sensor_count > 0) {
+		sel[0] = self->selected;
+		n = 1;
+	}
+	return n;
+}
+
+
+/* Drive the top LEDs from the currently selected sensors: three LEDs per selected sensor (up to four sensors,
+ * twelve LEDs) addressed as left, middle and right. As a simple test, a value below 4000000 lights the trio's
+ * left LED blue, a value above 6000000 its right LED red, and anything in between its middle LED green; the
+ * rest of the trio stays dark. The final colour of every LED is computed first and then written once, so a
+ * LED keeping its colour is never briefly turned off (which would show as a blink). Called from the redraw so
+ * the LEDs track the display. */
+static void live_data_update_leds(LiveDataApplet *self) {
+	if (self->led_count == 0) {
+		return;
+	}
+
+	/* Target colour of every LED, defaulting to off; trios not backing a selected sensor stay dark. */
+	led_color_t color[LIVE_DATA_MAX_LEDS];
+	for (size_t i = 0; i < self->led_count; i++) {
+		color[i] = LED_COLOR_RGB(0, 0, 0);
+	}
+
+	size_t sel[4];
+	size_t n = live_data_selected_list(self, sel, 4);
+	for (size_t k = 0; k < n; k++) {
+		struct live_data_sensor *s = &self->sensors[sel[k]];
+		size_t base = k * 3;
+		if (!s->valid || base + 2 >= self->led_count) {
+			continue;
+		}
+		if (s->value < 4000000.0f) {
+			color[base] = LED_COLOR_RGB(0, 0, 255);
+		} else if (s->value > 6000000.0f) {
+			color[base + 2] = LED_COLOR_RGB(255, 0, 0);
+		} else {
+			color[base + 1] = LED_COLOR_RGB(0, 255, 0);
+		}
+	}
+
+	for (size_t i = 0; i < self->led_count; i++) {
+		self->led[i]->vmt->set(self->led[i], color[i]);
+	}
+}
+
+
+/* Draw the detail tab, one cell per selected sensor. The selected sensors are those with their box ticked in
+ * the list, capped at four; when none are ticked the highlighted sensor stands in as a single selection. The
+ * content area is split by that count: the whole area for one, two stacked rows for two, and a 2x2 grid for
+ * three or four (any selection beyond the fourth is ignored). The caller must have an active painter frame. */
+static void live_data_draw_detail(LiveDataApplet *self) {
+	Painter *painter = &self->painter.painter;
+
+	if (self->sensor_count == 0) {
+		return;
+	}
+
+	/* Collect up to four selected sensors; fall back to the highlighted one when nothing is ticked. */
+	size_t sel[4];
+	size_t n = live_data_selected_list(self, sel, 4);
+
+	/* One column for one or two sensors, two for three or four; one row for a single sensor, two otherwise. */
+	uint16_t cols = (n >= 3) ? 2 : 1;
+	uint16_t rows = (n >= 2) ? 2 : 1;
+	uint16_t area_h = live_data_content_h(self);
+	uint16_t cell_w = (uint16_t)(self->w / cols);
+	uint16_t cell_h = (uint16_t)(area_h / rows);
+
+	/* Thin white dividers between the cells so the split areas read apart. */
+	painter->vmt->set_pen(painter, 0xffffffff, 0);
+	painter->vmt->set_brush(painter, 0xffffffff);
+	if (cols > 1) {
+		painter->vmt->rect(painter, (int16_t)cell_w, 0, 1, area_h);
+	}
+	if (rows > 1) {
+		painter->vmt->rect(painter, 0, (int16_t)cell_h, self->w, 1);
+	}
+
+	for (size_t k = 0; k < n; k++) {
+		uint16_t col = (uint16_t)(k % cols);
+		uint16_t row = (uint16_t)(k / cols);
+		int16_t cx = (int16_t)(col * cell_w);
+		int16_t cy = (int16_t)(row * cell_h);
+		/* The last column/row takes the remaining space so rounding never leaves a gap on the edge. */
+		uint16_t cw = (col == cols - 1) ? (uint16_t)(self->w - cx) : cell_w;
+		uint16_t ch = (row == rows - 1) ? (uint16_t)(area_h - cy) : cell_h;
+		live_data_draw_detail_cell(self, &self->sensors[sel[k]], cx, cy, cw, ch, n > 1);
+	}
 }
 
 
@@ -474,6 +638,9 @@ static void live_data_redraw(LiveDataApplet *self) {
 	live_data_draw_tabs(self);
 
 	painter->vmt->end(painter);
+
+	/* Mirror the selected sensors onto the top LEDs so they track whatever the display shows. */
+	live_data_update_leds(self);
 }
 
 
@@ -492,6 +659,20 @@ static void live_data_capture_sensors(LiveDataApplet *self) {
 		self->sensors[self->sensor_count].value = 0.0f;
 		self->sensors[self->sensor_count].valid = false;
 		self->sensor_count++;
+	}
+}
+
+
+/* Snapshot the top LEDs advertised through the service locator (led0..led11) into self->led, up to
+ * LIVE_DATA_MAX_LEDS. A port that advertises no LEDs simply leaves the array empty. */
+static void live_data_capture_leds(LiveDataApplet *self) {
+	self->led_count = 0;
+	Led *led = NULL;
+	for (size_t i = 0; self->led_count < LIVE_DATA_MAX_LEDS &&
+	     iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_LED, i, (Interface **)&led) ==
+	     ISERVICELOCATOR_RET_OK; i++) {
+		self->led[self->led_count] = led;
+		self->led_count++;
 	}
 }
 
@@ -668,15 +849,32 @@ static applet_ret_t live_data_start_mq(LiveDataApplet *self) {
 }
 
 
-/* Set the window title to "Live data - <selected sensor name>", reflecting the current selection. Does
- * nothing when the applet has no window (no compositor) or no sensors. */
+/* Number of sensors with their selection box ticked in the list. */
+static size_t live_data_selected_count(LiveDataApplet *self) {
+	size_t n = 0;
+	for (size_t i = 0; i < self->sensor_count; i++) {
+		if (self->sensors[i].selected) {
+			n++;
+		}
+	}
+	return n;
+}
+
+
+/* Set the window title to "Live data - <highlighted sensor name>", reflecting the current selection. When
+ * the detail tab shows several selected sensors at once no single name applies, so the title is just
+ * "Live data". Does nothing when the applet has no window (no compositor) or no sensors. */
 static void live_data_update_title(LiveDataApplet *self) {
 	if (self->window == NULL || self->sensor_count == 0) {
 		return;
 	}
-	const char *name = self->sensors[self->selected].name;
 	char title[48];
-	snprintf(title, sizeof(title), "Live data - %s", (name != NULL) ? name : "");
+	if (self->tab == LIVE_DATA_TAB_DETAIL && live_data_selected_count(self) > 1) {
+		snprintf(title, sizeof(title), "Live data");
+	} else {
+		const char *name = self->sensors[self->selected].name;
+		snprintf(title, sizeof(title), "Live data - %s", (name != NULL) ? name : "");
+	}
 	self->window->vmt->set_title(self->window, title);
 }
 
@@ -707,6 +905,7 @@ static applet_ret_t live_data_init(LiveDataApplet *self, struct applet_args *arg
 	}
 
 	live_data_capture_sensors(self);
+	live_data_capture_leds(self);
 	live_data_update_title(self);
 
 	self->poll_can_run = true;
@@ -732,6 +931,10 @@ static void live_data_free(LiveDataApplet *self) {
 	self->mq_can_run = false;
 	while (self->poll_running || self->mq_running) {
 		vTaskDelay(pdMS_TO_TICKS(100));
+	}
+	/* The tasks have stopped, so nothing will re-light the LEDs: turn them all off as we leave. */
+	for (size_t i = 0; i < self->led_count; i++) {
+		self->led[i]->vmt->set(self->led[i], LED_COLOR_RGB(0, 0, 0));
 	}
 	if (self->mqc != NULL) {
 		self->mqc->vmt->close(self->mqc);
@@ -801,6 +1004,15 @@ static bool live_data_process_event(LiveDataApplet *self) {
 		return false;
 	}
 
+	/* ENTER toggles the selected flag of the highlighted sensor and repaints the list to show the change. */
+	if (code == EV_KEY_ENTER) {
+		if (self->tab == LIVE_DATA_TAB_LIST && self->sensor_count > 0) {
+			self->sensors[self->selected].selected = !self->sensors[self->selected].selected;
+			live_data_redraw(self);
+		}
+		return true;
+	}
+
 	enum live_data_tab tab = self->tab;
 	switch (code) {
 		case EV_KEY_F1:
@@ -820,6 +1032,7 @@ static bool live_data_process_event(LiveDataApplet *self) {
 	}
 	if (tab != self->tab) {
 		self->tab = tab;
+		live_data_update_title(self);
 		live_data_redraw(self);
 	}
 	return true;
@@ -854,7 +1067,5 @@ const Applet live_data = {
 	.name = "Live data",
 	.help = "Display live measurement data",
 	.stack_size = 1536,
-	#if defined(CONFIG_SERVICE_FB_PAINTER)
-		.icon = &graph_data,
-	#endif
+	.icon = &graph_data,
 };

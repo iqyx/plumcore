@@ -1,2 +1,3 @@
 config APPLET_LIVE_DATA
 	bool "Live data applet"
+	depends on SERVICE_FB_PAINTER
