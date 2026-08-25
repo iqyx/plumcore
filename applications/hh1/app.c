@@ -182,7 +182,7 @@ static app_ret_t app_setup_backplane(App *self) {
 
 	const struct nbus_config nbus_config = {
 		.dgram = nbus_dgram,
-		.tx_crypto = NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+		.tx_crypto = NBUS_CRYPTO_BLAKE2S_SIV,
 		.rx_crypto = NBUS_CRYPTO_BLAKE2S_SIV | NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
 	};
 	nbus_init(&self->nbus, &nbus_config);
@@ -199,7 +199,7 @@ static app_ret_t app_setup_backplane(App *self) {
 	const struct nbus_mq_client_conf mq_client_conf = {
 		.mq = self->mq,
 		.d = &self->nbus_mq_socket->datagram,
-		.poll_interval_ms = 100,
+		.poll_interval_ms = 50,
 		.topic_prefix = "ff14",
 	};
 	nbus_mq_client_init(&self->nbus_mq, &mq_client_conf);
