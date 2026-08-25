@@ -65,12 +65,18 @@ Stm32OctospiFlash octospi_flash;
 
 
 int32_t port_early_init(void) {
-	/* Run the system clock straight from the 16 MHz HSE crystal, bypassing the PLL entirely. This is the
-	 * simplest possible clock tree: no PLL configuration, no reference dividers, just HSE as SYSCLK. Before
-	 * raising the frequency from the 4 MHz MSIS reset clock, add a flash wait state (1 WS covers 16 MHz in
-	 * any of the reset voltage scaling ranges). */
-	FLASH->ACR = (FLASH->ACR & ~FLASH_ACR_LATENCY) | FLASH_ACR_LATENCY_1WS;
-	while ((FLASH->ACR & FLASH_ACR_LATENCY) != FLASH_ACR_LATENCY_1WS) {
+	/* Run the system clock at the STM32U575 maximum of 160 MHz off PLL1, fed by the 16 MHz HSE crystal.
+	 * Reaching 160 MHz needs voltage scaling range 1 with the EPOD booster enabled and 4 flash wait states.
+	 * PLL1 divides the 16 MHz HSE by M=1, multiplies by N=10 for a 160 MHz VCO and divides by R=1, so the
+	 * SYSCLK is exactly 160 MHz. The AHB/APB prescalers stay at their /1 reset value: 160 MHz is within the
+	 * bus limits, so no peripheral clock adjustment is required. */
+
+	/* The PWR registers live behind an RCC clock gate; enable it before touching the voltage scaling. */
+	RCC->AHB3ENR |= RCC_AHB3ENR_PWREN;
+
+	/* Select voltage scaling range 1 (VOS = 0b11), the only range that allows 160 MHz. */
+	PWR->VOSR = (PWR->VOSR & ~PWR_VOSR_VOS) | PWR_VOSR_VOS_0 | PWR_VOSR_VOS_1;
+	while ((PWR->VOSR & PWR_VOSR_VOSRDY) == 0) {
 		;
 	}
 
@@ -79,12 +85,49 @@ int32_t port_early_init(void) {
 		;
 	}
 
-	RCC->CFGR1 = (RCC->CFGR1 & ~RCC_CFGR1_SW) | RCC_CFGR1_SW_1;
-	while ((RCC->CFGR1 & RCC_CFGR1_SWS) != RCC_CFGR1_SWS_1) {
+	/* Keep HSI16 running as a fixed 16 MHz kernel clock for the I2C buses, decoupling their timing from the
+	 * SYSCLK: the I2C timing prescaler is only 4 bits wide and cannot divide a fast SYSCLK down far enough. */
+	RCC->CR |= RCC_CR_HSION;
+	while ((RCC->CR & RCC_CR_HSIRDY) == 0) {
+		;
+	}
+	RCC->CCIPR1 = (RCC->CCIPR1 & ~(RCC_CCIPR1_I2C1SEL | RCC_CCIPR1_I2C2SEL)) |
+	              RCC_CCIPR1_I2C1SEL_1 | RCC_CCIPR1_I2C2SEL_1;
+
+	/* PLL1: HSE source, input range 8..16 MHz, EPOD booster prescaler /1 (M=1 keeps the 16 MHz reference),
+	 * and enable the R output that feeds SYSCLK. */
+	RCC->PLL1CFGR = RCC_PLL1CFGR_PLL1SRC_0 | RCC_PLL1CFGR_PLL1SRC_1 |
+	                RCC_PLL1CFGR_PLL1RGE_0 |
+	                RCC_PLL1CFGR_PLL1REN;
+
+	/* The EPOD booster is clocked from the PLL1 input divider configured above; enable it and wait until the
+	 * boosted core supply is ready. It is mandatory above 55 MHz in range 1. */
+	PWR->VOSR |= PWR_VOSR_BOOSTEN;
+	while ((PWR->VOSR & PWR_VOSR_BOOSTRDY) == 0) {
 		;
 	}
 
-	SystemCoreClock = 16e6;
+	/* Raise the flash latency to 4 wait states (128 < HCLK <= 160 MHz in range 1) before the clock speeds up. */
+	FLASH->ACR = (FLASH->ACR & ~FLASH_ACR_LATENCY) | FLASH_ACR_LATENCY_4WS;
+	while ((FLASH->ACR & FLASH_ACR_LATENCY) != FLASH_ACR_LATENCY_4WS) {
+		;
+	}
+
+	/* N and R are encoded as value-1: N=10 -> field 9, R=1 -> field 0. */
+	RCC->PLL1DIVR = ((10 - 1) << RCC_PLL1DIVR_PLL1N_Pos) | ((1 - 1) << RCC_PLL1DIVR_PLL1R_Pos);
+
+	RCC->CR |= RCC_CR_PLL1ON;
+	while ((RCC->CR & RCC_CR_PLL1RDY) == 0) {
+		;
+	}
+
+	/* Switch SYSCLK to PLL1R (SW = 0b11). */
+	RCC->CFGR1 = (RCC->CFGR1 & ~RCC_CFGR1_SW) | RCC_CFGR1_SW_0 | RCC_CFGR1_SW_1;
+	while ((RCC->CFGR1 & RCC_CFGR1_SWS) != (RCC_CFGR1_SWS_0 | RCC_CFGR1_SWS_1)) {
+		;
+	}
+
+	SystemCoreClock = 160e6;
 
 	/* Enable full access to the FPU (CP10/CP11) before any floating point code runs. */
 	SCB->CPACR |= (0xf << 20);
@@ -397,12 +440,28 @@ static void port_setup_leds(void) {
 	}
 
 	for (size_t i = 0; i < 36; i++) {
-		lp586x_set_max_current(&lp5862, i, 0.25f);
+		lp586x_set_max_current(&lp5862, i, 0.5f);
 	}
 
 	for (size_t i = 0; i < 12; i++) {
 		top_led_setup(&top_led[i], i * 3);
-		top_led[i].led.vmt->set(&(top_led[i].led), LED_COLOR_RGB(15, 0, 15));
+		top_led[i].led.vmt->set(&(top_led[i].led), LED_COLOR_RGB(0, 0, 0));
+	}
+
+	/* Advertised order maps led0..led11 to physical LEDs through this table. Adjust the ordering by hand. */
+	GpioLed *const top_led_advert[12] = {
+		&top_led[8], &top_led[7], &top_led[6],
+		&top_led[9], &top_led[10], &top_led[11],
+		&top_led[5], &top_led[4], &top_led[3],
+		&top_led[0], &top_led[1], &top_led[2],
+	};
+
+	/* Advertise the twelve top LEDs as led0..led11. The locator keeps the name pointer, so the names live in
+	 * a static buffer that outlives this function. */
+	static char top_led_name[12][8];
+	for (size_t i = 0; i < 12; i++) {
+		snprintf(top_led_name[i], sizeof(top_led_name[i]), "led%u", (unsigned)i);
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&top_led_advert[i]->led, top_led_name[i]);
 	}
 
 	//top_led[1].led.vmt->set(&(top_led[1].led), LED_COLOR_RGB(0, 255, 31));
@@ -432,7 +491,7 @@ static void port_setup_lcd(void) {
 
 		Pwm *pwm = NULL;
 		lp581x_get_pwm(&lp5810, i, &pwm);
-		pwm->vmt->set_pwm(pwm, 0.25f);
+		pwm->vmt->set_pwm(pwm, 0.50f);
 	}
 }
 
@@ -467,7 +526,7 @@ static void port_setup_display(void) {
 	/* Configure and run the SPI bus and the LCD chip-select device. */
 	RCC->APB1ENR1 |= RCC_APB1ENR1_SPI2EN;
 	stm32_spibus_init(&spi2, (void *)SPI2, STM32_SPI_PER_TYPE_SPI);
-	spi2.bus.vmt->set_sck_freq(&spi2.bus, 16e6);
+	spi2.bus.vmt->set_sck_freq(&spi2.bus, 32e6);
 	spi2.bus.vmt->set_mode(&spi2.bus, 0, 0);
 	stm32_spidev_init(&spi2_lcd, &spi2.bus, lcd_cs);
 
