@@ -46,7 +46,7 @@ static ldc1x1x_ret_t ldc1x1x_select(Ldc1x1x *self) {
 	if (self->conf.preselect_cmd != NULL) {
 		self->conf.i2c->vmt->transfer(self->conf.i2c, self->conf.preselect_cmd_addr,
 			self->conf.preselect_cmd, self->conf.preselect_cmd_len, NULL, 0);
-		vTaskDelay(1);
+		vTaskDelay(2);
 	}
 	return LDC1X1X_RET_OK;
 }
@@ -124,6 +124,11 @@ static sensor_ret_t ldc1x1x_sensor_value_f(Sensor *sensor, float *value) {
 						*value = (float)(((uint32_t)(msb & 0x0fff) << 16) | lsb);
 					} else {
 						*value = msb & 0x0fff;
+					}
+
+					if (*value == 0.0f) {
+						xSemaphoreGive(self->select_lock);
+						return SENSOR_RET_FAILED;
 					}
 
 					if (err != 0) {
