@@ -2,9 +2,11 @@
 
 import sys
 import os
+import logging
 from colorama import init as colorama_init, Fore, Back, Style
 import argparse
 import cbor2
+import datetime
 from tqdm import tqdm
 
 # Allow running straight from the source tree without installing pynbus2.
@@ -19,6 +21,36 @@ import pynbus2
 DEFAULT_BLOCK_SIZE = 128
 
 
+LOG_FORMAT = f"""[{Style.BRIGHT}{Fore.WHITE}%(asctime)s{Style.NORMAL}] {Fore.BLUE}{Style.BRIGHT}%(levelname)-10s{Fore.YELLOW}{Style.NORMAL}%(module)s:%(name)s: {Style.RESET_ALL}%(message)s"""
+
+
+class CustomLogFormatter(logging.Formatter):
+
+	color_codes = {
+		'DEBUG': Style.BRIGHT + Fore.GREEN,
+		'INFO': Style.BRIGHT + Fore.BLUE,
+		'WARNING': Style.BRIGHT + Fore.YELLOW,
+		'ERROR': Style.BRIGHT + Fore.RED,
+		'CRITICAL': Style.BRIGHT + Fore.MAGENTA,
+	}
+
+	def format(self, record):
+		levelname = CustomLogFormatter.color_codes.get(record.levelname, '') + f'{record.levelname:10}'
+		asctime = datetime.datetime.fromtimestamp(record.created).isoformat()
+		return f'[{Style.DIM}{Fore.WHITE}{asctime}{Style.NORMAL}] {levelname}{Style.RESET_ALL} {Fore.YELLOW}{Style.NORMAL}{record.module}:{record.name}:{Style.RESET_ALL} {record.getMessage()}'
+
+
+def init_logging():
+	colorama_init()
+
+	l = logging.INFO
+	if args.debug:
+		l = logging.DEBUG
+
+	logging.basicConfig(level=l)
+	logging.getLogger().handlers[0].setFormatter(CustomLogFormatter())
+
+
 def init_args():
 	parser = argparse.ArgumentParser(
 		description="plumCore proto-flash over nbus2 upload/download tool",
@@ -26,6 +58,7 @@ def init_args():
 		formatter_class=argparse.RawDescriptionHelpFormatter
 	)
 
+	parser.add_argument('--debug', action='store_true', help='DEBUG level logging')
 	parser.add_argument('uri', type=str, help='nbus2 connection URI carrying the destination, e.g. udp6:///<sid>/<ep>')
 	parser.add_argument('-l', '--list', action='store_true', help='list flash partitions')
 	parser.add_argument('-r', '--reset', action='store_true', help='reset the device')
@@ -39,6 +72,9 @@ def init_args():
 	return parser.parse_args()
 
 
+log = logging.getLogger('proto-nbus-flash')
+
+
 class NbusClient:
 	"""CBOR request/response over a pynbus2 socket."""
 
@@ -46,12 +82,16 @@ class NbusClient:
 		self._sock = sock
 
 	def call(self, req: dict):
-		reply = self._sock.request(cbor2.dumps(req), timeout=0.10, retries=20)
+		# Use a generous per-attempt timeout so a slow device reply does not time out and trigger a
+		# retransmit, which would desync the simple request/response exchange.
+		reply = self._sock.request(cbor2.dumps(req), timeout=0.5, retries=20)
 		if reply is None:
+			log.debug('command %r: no reply', req.get('c'))
 			return None
 		try:
 			return cbor2.loads(reply)
-		except Exception:
+		except Exception as e:
+			log.error('command %r: undecodable reply (%d bytes): %s', req.get('c'), len(reply), e)
 			return None
 
 
@@ -92,7 +132,19 @@ class FlashClient:
 
 	def _read(self, addr, data_len):
 		r = self._n.call({'c': 'read', 'sid': self._sid, 'addr': addr, 'len': data_len})
-		return r.get('d', b'')
+		if r is None:
+			log.error('read at 0x%08x: no reply after retries', addr)
+			return b''
+		# A read reply must carry the data field. Anything else is a desynced response - most likely a
+		# stale reply to an earlier command (e.g. a write ack {"ret":"ok"}) picked up out of order.
+		if 'd' not in r:
+			log.error('read at 0x%08x: reply without data (keys=%s, err=%r)',
+			          addr, sorted(r.keys()), r.get('err'))
+			return b''
+		d = r.get('d', b'')
+		if len(d) != data_len:
+			log.warning('read at 0x%08x: requested %d bytes, got %d', addr, data_len, len(d))
+		return d
 
 	def _erase(self, addr, data_len):
 		r = self._n.call({'c': 'erase', 'sid': self._sid, 'addr': addr, 'len': data_len})
@@ -163,6 +215,28 @@ class FlashClient:
 
 		self._close()
 
+	def _diagnose_block(self, addr, expected, got, blocks):
+		"""Classify why a read-back block differs from what was uploaded, for a readable failure line.
+
+		@p blocks maps a block address to the bytes that were uploaded there, so a mismatching block can
+		be tested against its neighbours: a block that carries another block's contents is a desynced or
+		duplicated read, not corrupted flash."""
+		if len(got) != len(expected):
+			return f'short/long read ({len(got)} of {len(expected)} bytes)'
+		if len(got) == 0:
+			return 'empty read (no data field in reply)'
+		# A whole-block swap points at a reply/response desync rather than a bad flash cell.
+		for other_addr, other in blocks.items():
+			if other_addr != addr and got == other:
+				delta = (other_addr - addr) // len(expected)
+				return f'holds block {other_addr:#010x} instead ({delta:+d} blocks away): desynced read'
+		if got == b'\xff' * len(got):
+			return 'all 0xff: block reads as erased (write lost, or read hit the wrong address)'
+		diffs = sum(1 for a, b in zip(expected, got) if a != b)
+		first = next(i for i, (a, b) in enumerate(zip(expected, got)) if a != b)
+		return (f'{diffs}/{len(got)} bytes differ, first at +0x{first:02x} '
+		        f'(expected 0x{expected[first]:02x}, got 0x{got[first]:02x})')
+
 	def verify(self, vol, fname):
 		with open(fname, 'rb') as f:
 			original = f.read()
@@ -170,29 +244,39 @@ class FlashClient:
 		page_size = self._page
 		read_size = ((len(original) + page_size - 1) // page_size) * page_size
 
+		# The uploaded image is the file padded to a whole number of blocks with 0xff (see upload()).
+		# Comparing whole padded blocks keeps read and expectation aligned and lets a mismatching block
+		# be matched against its neighbours to tell a desynced read from real corruption.
+		image = original + b'\xff' * (read_size - len(original))
+		blocks = {addr: image[addr:addr + page_size] for addr in range(0, read_size, page_size)}
+
 		self._open(vol)
-		d = b''
+		mismatches = []
 		with tqdm(desc='Verify', total=read_size, ncols=120, unit='B', unit_scale=True, unit_divisor=1024) as progress_bar:
-			for i in range(0, read_size, page_size):
-				d += self._read(i, page_size)
+			for addr in range(0, read_size, page_size):
+				got = self._read(addr, page_size)
+				if got != blocks[addr]:
+					reason = self._diagnose_block(addr, blocks[addr], got, blocks)
+					log.error('verify mismatch at 0x%08x: %s', addr, reason)
+					mismatches.append(addr)
 				progress_bar.update(page_size)
 		self._close()
 
-		if d[:len(original)] == original:
+		if not mismatches:
 			print(f'{Fore.GREEN}{Style.BRIGHT}Verify OK{Style.RESET_ALL}')
 		else:
-			for i, (a, b) in enumerate(zip(original, d[:len(original)])):
-				if a != b:
-					print(f'{Fore.RED}{Style.BRIGHT}Verify FAILED{Style.RESET_ALL}: first mismatch at offset 0x{i:08x} (expected 0x{a:02x}, got 0x{b:02x})')
-					break
+			total = read_size // page_size
+			print(f'{Fore.RED}{Style.BRIGHT}Verify FAILED{Style.RESET_ALL}: '
+			      f'{len(mismatches)}/{total} block(s) differ, first at offset 0x{mismatches[0]:08x} '
+			      f'(see the logged per-block diagnostics above)')
 			sys.exit(1)
 
 
 
 if __name__ == "__main__":
 
-	colorama_init()
 	args = init_args()
+	init_logging()
 
 	with pynbus2.connect(args.uri) as nbus:
 		sock = nbus.socket()
