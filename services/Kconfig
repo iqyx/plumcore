@@ -657,6 +657,10 @@ menu "Communication protocols"
 			bool "NBUS flash access interface"
 			default n
 
+		config SERVICE_NBUS_FLASH_PROXY
+			bool "NBUS flash access proxy (forwards to a remote nbus-flash over nbus2)"
+			default n
+
 		source "services/proto-conf/Kconfig"
 	endmenu
 endmenu
