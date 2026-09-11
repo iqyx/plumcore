@@ -15,6 +15,7 @@
 
 #include <interfaces/window.h>
 #include <interfaces/sensor.h>
+#include <interfaces/ble.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 
@@ -46,6 +47,14 @@ typedef struct {
 	 * by the compositor. */
 	Window *window;
 	FbPainter painter;
+
+	/* BLE device discovered through the service locator at init, or NULL if none is advertised. Polled on
+	 * each repaint through its get_status to decide whether the Bluetooth icon is shown. */
+	Ble *ble;
+
+	/* Whether the Bluetooth icon was drawn on the previous repaint. Toggled each repaint while pairing so
+	 * the icon blinks at the repaint rate. */
+	bool bt_icon_shown;
 
 	/* Task periodically sampling the active window and repainting the bar whenever it changes.
 	 * active_window holds the last sampled window for change detection. */

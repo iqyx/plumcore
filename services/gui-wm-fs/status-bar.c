@@ -24,6 +24,7 @@
 
 #include <interfaces/window.h>
 #include <interfaces/painter.h>
+#include <interfaces/servicelocator.h>
 #include <services/fb-compositor/fb-compositor.h>
 
 #include "status-bar.h"
@@ -92,7 +93,21 @@ static void status_bar_render(StatusBar *self) {
 		painter->vmt->image(painter, (current_x -= 6), 0, &charging_data, PAINTER_MODE_INVERTED);
 	}
 
-	painter->vmt->image(painter, (current_x -= 12), 0, &bt_data, PAINTER_MODE_INVERTED);
+	/* Bluetooth icon: shown steadily while a discovered BLE device is connected, and blinked while it is
+	 * pairing by toggling its visibility on each repaint. */
+	struct ble_status ble_status = {0};
+	if (self->ble != NULL && self->ble->vmt->get_status(self->ble, &ble_status) == BLE_RET_OK) {
+		if (ble_status.pairing) {
+			self->bt_icon_shown = !self->bt_icon_shown;
+		} else {
+			self->bt_icon_shown = ble_status.connected;
+		}
+	} else {
+		self->bt_icon_shown = false;
+	}
+	if (self->bt_icon_shown) {
+		painter->vmt->image(painter, (current_x -= 12), 0, &bt_data, PAINTER_MODE_INVERTED);
+	}
 
 	painter->vmt->end(painter);
 }
@@ -133,6 +148,13 @@ status_bar_ret_t status_bar_init(StatusBar *self, const struct status_bar_conf *
 	}
 	memset(self, 0, sizeof(StatusBar));
 	memcpy(&self->conf, conf, sizeof(struct status_bar_conf));
+
+	/* Discover a BLE device to show a connection icon for. A port without one simply never draws the icon. */
+	self->ble = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_BLE, 0, (Interface **)&self->ble) !=
+	    ISERVICELOCATOR_RET_OK) {
+		self->ble = NULL;
+	}
 
 	if (self->conf.compositor->factory.vmt->create(&self->conf.compositor->factory, &self->conf.geometry,
 	    &self->window) != WINDOW_RET_OK) {
