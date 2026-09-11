@@ -146,7 +146,11 @@ static flash_updater_ret_t load_xz_image_cache(FlashUpdater *self, size_t block)
 
 static flash_updater_ret_t load_image_cache(FlashUpdater *self, size_t block) {
 	if (self->method == FLASH_UPDATER_SOURCE_METHOD_RAW) {
-		return abstract_source_read(self, block * CONFIG_IMAGE_CACHE_SIZE, self->image_cache, CONFIG_IMAGE_CACHE_SIZE);
+		if (abstract_source_read(self, block * CONFIG_IMAGE_CACHE_SIZE, self->image_cache, CONFIG_IMAGE_CACHE_SIZE) != FLASH_UPDATER_RET_OK) {
+			return FLASH_UPDATER_RET_FAILED;
+		}
+		self->image_cache_block = block;
+		return FLASH_UPDATER_RET_OK;
 	} else if (self->method == FLASH_UPDATER_SOURCE_METHOD_XZ) {
 		return load_xz_image_cache(self, block);
 	} else {
@@ -202,11 +206,12 @@ flash_updater_ret_t flash_updater_init(FlashUpdater *self, Flash *target) {
 
 	flash_block_ops_t flash_ops = {0};
 	if (self->target->vmt->get_size(self->target, 0, &self->target_size, &flash_ops) != FLASH_RET_OK ||
-	    self->target->vmt->get_size(self->target, 1, &self->target_erase_size, &flash_ops) != FLASH_RET_OK) {
+	    self->target->vmt->get_size(self->target, 1, &self->target_erase_size, &flash_ops) != FLASH_RET_OK ||
+	    self->target->vmt->get_size(self->target, 3, &self->target_write_size, &flash_ops) != FLASH_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot retrieve target flash metadata"));
 		return FLASH_UPDATER_RET_FAILED;
 	}
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized, target flash size = %lu KB, erase_size = %lu KB"), self->target_size / 1024, self->target_erase_size / 1024);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized, target flash size = %lu KB, erase_size = %lu KB, write_size = %lu B"), self->target_size / 1024, self->target_erase_size / 1024, self->target_write_size);
 
 	return FLASH_UPDATER_RET_OK;
 }
@@ -250,8 +255,12 @@ flash_updater_ret_t flash_updater_set_source_flash(FlashUpdater *self, Flash *fl
  * @todo This progressbar rendering is not functional/pretty on the current implementation
  * of a graphic terminal console on a framebuffer device. It should be fixed on the terminal
  * side.
+ *
+ * The whole progress bar implementation is suboptimal and disabled now.
  */
 static void progress_bar(FlashUpdater *self, size_t pos, size_t total) {
+	return;
+
 	if (self->console == NULL) {
 		return;
 	}
@@ -271,6 +280,8 @@ static void progress_bar(FlashUpdater *self, size_t pos, size_t total) {
 
 
 static void progress_bar_finish(FlashUpdater *self) {
+	return;
+
 	if (self->console == NULL) {
 		return;
 	}
@@ -293,42 +304,55 @@ flash_updater_ret_t flash_updater_find_signature(FlashUpdater *self) {
 }
 
 
+/* Hash the byte range [start, end) of the update image into the running Blake2s state. Reads are done in
+ * small chunks that never cross an image cache block boundary. The range is hashed byte-exact so the
+ * signature section may sit at any (even unaligned) offset, matching the chainloader's verification. */
+static flash_updater_ret_t hash_image_range(FlashUpdater *self, blake2s_state *s, size_t start, size_t end) {
+	size_t pos = start;
+	while (pos < end) {
+		uint8_t buf[64];
+		size_t chunk = end - pos;
+		size_t block_left = CONFIG_IMAGE_CACHE_SIZE - (pos % CONFIG_IMAGE_CACHE_SIZE);
+		if (chunk > block_left) {
+			chunk = block_left;
+		}
+		if (chunk > sizeof(buf)) {
+			chunk = sizeof(buf);
+		}
+		if (abstract_image_read(self, pos, buf, chunk) != FLASH_UPDATER_RET_OK) {
+			return FLASH_UPDATER_RET_FAILED;
+		}
+		blake2s_update(s, buf, chunk);
+		if ((pos % 1024) == 0) {
+			progress_bar(self, pos / 1024, self->elf_size / 1024);
+		}
+		pos += chunk;
+	}
+	return FLASH_UPDATER_RET_OK;
+}
+
+
 static flash_updater_ret_t flash_updater_elf_b2s(FlashUpdater *self, uint8_t h[32]) {
-	/* Part before the exclude region. */
 	blake2s_state s;
 	blake2s_init(&s, 32);
 
-	/* Do not include this part if the signature position is 0. */
-	for (size_t i = 0; i < (self->ed25519_sig_pos / 4); i++) {
-		uint8_t buf[4];
-		if (abstract_image_read(self, i * 4, buf, 4) != FLASH_UPDATER_RET_OK) {
-			return FLASH_UPDATER_RET_FAILED;
-		}
-		if ((i % 256) == 0) {
-			progress_bar(self, i / 256, self->elf_size / 1024);
-		}
-		blake2s_update(&s, buf, 4);
-	}
-
-	/* Exclusion is included as a zero buffer. Do not explude if exclude size is 0. */
-	uint8_t hm[32] = {0};
-	if (self->ed25519_sig_size % 32) {
+	/* Part before the excluded signature region. */
+	if (hash_image_range(self, &s, 0, self->ed25519_sig_pos) != FLASH_UPDATER_RET_OK) {
 		return FLASH_UPDATER_RET_FAILED;
 	}
-	for (size_t i = 0; i < (self->ed25519_sig_size / 32); i++) {
-		blake2s_update(&s, hm, sizeof(hm));
+
+	/* The excluded signature region is hashed as a run of zeros. */
+	uint8_t hm[32] = {0};
+	size_t excluded = self->ed25519_sig_size;
+	while (excluded > 0) {
+		size_t chunk = excluded < sizeof(hm) ? excluded : sizeof(hm);
+		blake2s_update(&s, hm, chunk);
+		excluded -= chunk;
 	}
 
-	/* Part immediately following the excluded range to the end of the ELF. */
-	for (size_t i = (self->ed25519_sig_pos + self->ed25519_sig_size) / 4; i < (self->elf_size / 4); i++) {
-		uint8_t buf[4];
-		if (abstract_image_read(self, i * 4, buf, 4) != FLASH_UPDATER_RET_OK) {
-			return FLASH_UPDATER_RET_FAILED;
-		}
-		if ((i % 256) == 0) {
-			progress_bar(self, i / 256, self->elf_size / 1024);
-		}
-		blake2s_update(&s, buf, 4);
+	/* Part immediately following the excluded region to the end of the ELF. */
+	if (hash_image_range(self, &s, self->ed25519_sig_pos + self->ed25519_sig_size, self->elf_size) != FLASH_UPDATER_RET_OK) {
+		return FLASH_UPDATER_RET_FAILED;
 	}
 	progress_bar_finish(self);
 	blake2s_final(&s, h);
@@ -426,15 +450,21 @@ flash_updater_ret_t flash_updater_write(FlashUpdater *self) {
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("writing target..."));
 
-	/* 32bit ELF is 4-byte aligned but we are writing in 8 byte double-words.
-	 * Write one double-word more. */
-	/** @todo handle in a more generic way */
-	for (size_t i = 0; i < (self->elf_size / 8 + 1); i++) {
-		uint8_t block[8];
-		if (abstract_image_read(self, i * 8, block, 8) != FLASH_UPDATER_RET_OK) {
+	/* The target is programmed one write block at a time (an 8 byte double-word on STM32G4,
+	 * a 16 byte quad-word on STM32U5, ...). Write the ELF rounded up to a whole write block;
+	 * the ELF is only 4-byte aligned so the last block may read a few bytes past its end. */
+	size_t write_size = self->target_write_size;
+	if (write_size == 0 || write_size > CONFIG_IMAGE_CACHE_SIZE) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("unsupported target write size %lu"), write_size);
+		return FLASH_UPDATER_RET_FAILED;
+	}
+	size_t blocks = (self->elf_size + write_size - 1) / write_size;
+	for (size_t i = 0; i < blocks; i++) {
+		uint8_t block[CONFIG_IMAGE_CACHE_SIZE];
+		if (abstract_image_read(self, i * write_size, block, write_size) != FLASH_UPDATER_RET_OK) {
 			return FLASH_UPDATER_RET_FAILED;
 		}
-		if (self->target->vmt->write(self->target, i * 8, block, 8) != FLASH_RET_OK) {
+		if (self->target->vmt->write(self->target, i * write_size, block, write_size) != FLASH_RET_OK) {
 			return FLASH_UPDATER_RET_FAILED;
 		}
 		if (self->console && (i % 128) == 0) {
@@ -455,12 +485,16 @@ flash_updater_ret_t flash_updater_set_console(FlashUpdater *self, Stream *consol
 
 
 flash_updater_ret_t flash_updater_disable_update(FlashUpdater *self) {
-	/* Disables any further update simply by corrupting the update ELF (rewriting its header). */
+	/* Disables any further update by erasing the whole update source partition. */
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("disable further updates, nuke the source"));
 
-	uint8_t buf[8] = {0};
 	if (self->flash) {
-		if (self->flash->vmt->write(self->flash, 0, buf, sizeof(buf)) != FLASH_RET_OK) {
+		size_t source_size = 0;
+		flash_block_ops_t ops = 0;
+		if (self->flash->vmt->get_size(self->flash, 0, &source_size, &ops) != FLASH_RET_OK) {
+			return FLASH_UPDATER_RET_FAILED;
+		}
+		if (self->flash->vmt->erase(self->flash, 0, source_size) != FLASH_RET_OK) {
 			return FLASH_UPDATER_RET_FAILED;
 		}
 	}

@@ -46,6 +46,7 @@ typedef struct flash_updater {
 	Flash *target;
 	size_t target_size;
 	size_t target_erase_size;
+	size_t target_write_size;
 
 	/* Source for update images. Can be filesystem or an object store
 	 * with a @p Fs interface. */
