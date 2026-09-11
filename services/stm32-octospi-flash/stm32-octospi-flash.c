@@ -247,8 +247,7 @@ static stm32_octospi_flash_ret_t write(Stm32OctospiFlash *self, const uint8_t *b
 
 
 stm32_octospi_flash_ret_t stm32_octospi_flash_read_page(Stm32OctospiFlash *self, size_t addr, void *buf, size_t size) {
-	if (u_assert(buf != NULL) ||
-	    u_assert(size <= (1UL << self->info->page_size))) {
+	if (u_assert(buf != NULL)) {
 		return STM32_OCTOSPI_FLASH_RET_FAILED;
 	}
 
