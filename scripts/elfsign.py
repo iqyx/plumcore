@@ -30,6 +30,7 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument('--sk', type=str, help='Signing private key (base64)')
 parser.add_argument('--pk', type=str, help='Public key for verification (base64)')
+parser.add_argument('-g', '--generate', type=str, default=None, help='Generate a new signing (private) key and save it to this file')
 parser.add_argument('-s', '--sign', type=str, default=None, help='ELF firmware image to sign')
 parser.add_argument('-v', '--verify', type=str, default=None, help='ELF firmware image to verify')
 parser.add_argument('-p', '--save-pubkey', type=str, default=None, help='Save public key to a file')
@@ -43,7 +44,14 @@ if args.pk:
 	pk = b64decode(load_file(args.pk))
 
 
-if args.sign:
+if args.generate:
+
+	# Ed25519 private keys are 32 byte seeds; store them base64 encoded, same as the signing tool expects.
+	save_file(args.generate, b64encode(os.urandom(32)))
+	print(f'signing key saved to {args.generate}')
+
+
+elif args.sign:
 
 	# Generate an empty file with 64 zeros and add it as a sign.ed25519 section
 	f = tempfile.NamedTemporaryFile(delete=False)
