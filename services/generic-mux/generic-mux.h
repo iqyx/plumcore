@@ -9,6 +9,7 @@
 #pragma once
 
 #include <main.h>
+#include <interfaces/gpio.h>
 #include <interfaces/mux.h>
 
 typedef enum  {
@@ -17,14 +18,12 @@ typedef enum  {
 } generic_mux_ret_t;
 
 struct generic_mux_sel_line {
-	uint32_t port;
-	uint32_t pin;
+	Gpio *gpio;
 };
 
 typedef struct generic_mux {
-	/* libopencm3 GPIO style enable */
-	uint32_t en_port;
-	uint32_t en_pin;
+	/* Optional enable line, may be NULL if the mux is always enabled. */
+	Gpio *en_gpio;
 
 	/* Select lines A0, A1, ... */
 	const struct generic_mux_sel_line (*lines)[];
@@ -34,6 +33,5 @@ typedef struct generic_mux {
 } GenericMux;
 
 
-generic_mux_ret_t generic_mux_init(GenericMux *self, uint32_t en_port, uint32_t en_pin, const struct generic_mux_sel_line (*lines)[], uint32_t line_count);
+generic_mux_ret_t generic_mux_init(GenericMux *self, Gpio *en_gpio, const struct generic_mux_sel_line (*lines)[], uint32_t line_count);
 generic_mux_ret_t generic_mux_free(GenericMux *self);
-

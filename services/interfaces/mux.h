@@ -21,6 +21,15 @@ typedef struct mux Mux;
 struct mux_vmt {
 	mux_ret_t (*enable)(Mux *self, bool enable);
 	mux_ret_t (*select)(Mux *self, uint32_t channel);
+
+	/**
+	 * @brief Get the number of selectable channels
+	 *
+	 * @param self Mux interface instance
+	 * @param channels Set to the number of channels the mux can select. May not be NULL.
+	 * @return MUX_RET_FAILED on error or MUX_RET_OK otherwise.
+	 */
+	mux_ret_t (*channels)(Mux *self, uint32_t *channels);
 };
 
 typedef struct mux {
