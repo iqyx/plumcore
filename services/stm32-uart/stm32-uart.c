@@ -504,6 +504,21 @@ stm32_uart_ret_t stm32_uart_set_rxtx_swap(Stm32Uart *self, bool swap) {
 	return STM32_UART_RET_OK;
 }
 
+stm32_uart_ret_t stm32_uart_set_tx_invert(Stm32Uart *self, bool invert) {
+	USART_TypeDef *port = (USART_TypeDef *)self->port;
+
+	stm32_uart_enable(self, false);
+	if (invert) {
+		port->CR2 |= USART_CR2_TXINV;
+	} else {
+		port->CR2 &= ~USART_CR2_TXINV;
+	}
+	stm32_uart_enable(self, true);
+
+	return STM32_UART_RET_OK;
+}
+
+
 stm32_uart_ret_t stm32_uart_enable(Stm32Uart *self, bool enable) {
 	USART_TypeDef *port = (USART_TypeDef *)self->port;
 

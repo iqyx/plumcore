@@ -41,4 +41,5 @@ stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, Gpio *de_gpio);
 stm32_uart_ret_t stm32_uart_set_rto(Stm32Uart *self, bool rto);
 stm32_uart_ret_t stm32_uart_set_swmode(Stm32Uart *self);
 stm32_uart_ret_t stm32_uart_set_rxtx_swap(Stm32Uart *self, bool swap);
+stm32_uart_ret_t stm32_uart_set_tx_invert(Stm32Uart *self, bool invert);
 stm32_uart_ret_t stm32_uart_enable(Stm32Uart *self, bool enable);
