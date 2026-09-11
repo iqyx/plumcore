@@ -20,11 +20,13 @@
 #include <types/ndarray.h>
 
 
-/* Scratch buffer for a single received batch datagram. */
+/* Scratch buffer for a single received reply datagram. */
 #define NBUS_MQ_CLIENT_RX_BUF_LEN 256
 #define NBUS_MQ_CLIENT_MAX_TOPIC_LEN 32
 /* Length of the prefix prepended to every republished topic (see topic_prefix). */
 #define NBUS_MQ_CLIENT_MAX_PREFIX_LEN 32
+/* Number of batches requested per poll when the configuration leaves max_batches at 0. */
+#define NBUS_MQ_CLIENT_DEFAULT_MAX_BATCHES 4
 
 
 typedef enum {
@@ -40,8 +42,11 @@ struct nbus_mq_client_conf {
 	Mq *mq;
 	/** Datagram (a bound and connected nbus2 socket) talking to the remote nbus-mq-poll service. */
 	Datagram *d;
-	/** Interval between two poll requests in milliseconds. */
+	/** Idle interval between two poll requests in milliseconds. A backlog is drained back to back
+	 *  regardless of this, which only paces polling once the remote reports nothing pending. */
 	uint32_t poll_interval_ms;
+	/** Maximum number of batches to request per poll. 0 selects the built-in default. */
+	uint32_t max_batches;
 	/** Optional prefix prepended as "<prefix>/<topic>" to every republished topic. NULL or "" to
 	 *  publish under the remote topic unchanged. */
 	const char *topic_prefix;
@@ -56,7 +61,12 @@ typedef struct {
 	/* MQ client the decoded values are published through. */
 	MqClient *mqc;
 
-	/* Scratch buffer for a single received batch. */
+	/* Highest batch sequence number received contiguously so far, echoed as the acknowledged cursor in
+	 * every poll request. 0 means nothing received yet. Written by the receiver, read by the sender; a
+	 * 32-bit access is atomic on the target so no lock is needed. */
+	volatile uint32_t cursor;
+
+	/* Scratch buffer for a single received reply. */
 	uint8_t rx_buf[NBUS_MQ_CLIENT_RX_BUF_LEN];
 
 	/* Sending and receiving run as two independent tasks: the sender keeps polling at a fixed rate
