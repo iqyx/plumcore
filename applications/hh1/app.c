@@ -206,6 +206,26 @@ static app_ret_t app_setup_backplane(App *self) {
 	nbus_mq_client_start(&self->nbus_mq);
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("nbus-mq-client polling %02x%02x%02x%02x ep %d"), poll_id[0], poll_id[1], poll_id[2], poll_id[3], 1);
+
+	/* Bind a second local socket and connect it to the measurement card's nbus-flash endpoint at
+	 * SID 00000010, ep 1. A distinct local endpoint (ep 2) keeps its responses separate from the
+	 * mq-client socket above, which binds the same node ID on ep 1 (the nbus2 receive path matches on
+	 * the local address only). */
+	const uint8_t flash_id[4] = {0x00, 0x00, 0x00, 0x10};
+	self->nbus_flash_socket = nbus_socket_allocate(&self->nbus);
+	nbus_socket_bind(self->nbus_flash_socket, local_id, 2);
+	nbus_socket_connect(self->nbus_flash_socket, flash_id, 1);
+
+	/* Relay the BLE flash proxy tunnel endpoint (BLE service 0x00000020) to the remote nbus-flash
+	 * service over this socket, so a BLE client transparently accesses the measurement card's flash. */
+	const struct nbus_flash_proxy_conf flash_proxy_conf = {
+		.client = self->dgble_proxy_flash,
+		.remote = &self->nbus_flash_socket->datagram,
+	};
+	nbus_flash_proxy_init(&self->nbus_flash_proxy, &flash_proxy_conf);
+	nbus_flash_proxy_start(&self->nbus_flash_proxy);
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("nbus-flash-proxy forwarding to %02x%02x%02x%02x ep %d"), flash_id[0], flash_id[1], flash_id[2], flash_id[3], 1);
 	return APP_RET_OK;
 }
 #endif
@@ -255,6 +275,9 @@ app_ret_t app_init(App *self) {
 	} else {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("LCD framebuffer not found"));
 	}
+
+	/* Discover the BLE device advertised by the port and build the GATT server on it. */
+	app_ble_init(self);
 
 	#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
 		/* Pull the measurement card's values in over the backplane. */

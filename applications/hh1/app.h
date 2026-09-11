@@ -19,9 +19,14 @@
 #include <interfaces/painter.h>
 #include <interfaces/event.h>
 #include <interfaces/beeper.h>
+#include <interfaces/ble.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 #include <services/gui-wm-fs/gui-wm-fs.h>
+#include <interfaces/datagram.h>
+#include <services/proto-dgble/proto-dgble.h>
+#include <services/nbus-flash/nbus-flash.h>
+#include <services/nbus-flash-proxy/nbus-flash-proxy.h>
 #if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
 	#include <interfaces/mq.h>
 	#include <services/nbus2/nbus2.h>
@@ -56,6 +61,28 @@ typedef struct {
 	/* Serial console stream advertised by the port. */
 	Stream *console;
 
+	/* Generic BLE device advertised by the port and the GATT server built on top of it (see ble.c). */
+	Ble *ble;
+	BleSrv ble_srv;
+	BleChar ble_chr;
+
+	/* Datagram-over-BLE tunnel built on the same device and the flash endpoint's Datagram. */
+	ProtoDgble dgble;
+	Datagram *dgble_flash;
+	/* nbus-flash access service served over the flash tunnel endpoint. */
+	NbusFlash dgble_nbus_flash;
+
+	/* Second endpoint (ep 2) on the dgble tunnel above, proxied to the measurement card's nbus-flash
+	 * service over the backplane. Exposed on the same tunnel because the ST67W611 does not reliably route
+	 * peer writes to a second GATT service. */
+	Datagram *dgble_proxy_flash;
+
+	/* Pairing dialog: a hidden compositor window brought on top while a passkey is being entered,
+	 * painted through its own painter. The passkey is kept as a preformatted six digit string. */
+	Window *ble_pair_window;
+	FbPainter ble_pair_painter;
+	char ble_passkey[8];
+
 	/* LCD framebuffer advertised by the port, driven through the compositor below. */
 	Fb *lcd;
 
@@ -72,9 +99,26 @@ typedef struct {
 		Nbus nbus;
 		struct nbus_socket *nbus_mq_socket;
 		NbusMqClient nbus_mq;
+
+		/* Socket connected to the measurement card's nbus-flash service and the proxy relaying the BLE
+		 * flash tunnel endpoint to it. */
+		struct nbus_socket *nbus_flash_socket;
+		NbusFlashProxy nbus_flash_proxy;
 	#endif
 } App;
 
+
+/**
+ * @brief Discover the BLE device advertised by the port and build the GATT server on it.
+ *
+ * Sets up the event handler, device name, pairing security, the GATT service and characteristic,
+ * the GAP appearance and starts advertising. Implemented in ble.c.
+ *
+ * @param self Instance of the application
+ * @return APP_RET_FAILED if the BLE device was not found or setup failed,
+ *         APP_RET_OK otherwise.
+ */
+app_ret_t app_ble_init(App *self);
 
 /**
  * @brief Prepare the new instance, allocate resources and start
