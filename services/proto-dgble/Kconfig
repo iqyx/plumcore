@@ -1,0 +1,23 @@
+config SERVICE_PROTO_DGBLE
+	bool "Tunnelling of datagrams over a BLE GATT service"
+	default n
+
+	config SERVICE_PROTO_DGBLE_DEBUG
+		bool "Enable debug logging of tunnelled datagram traffic"
+		default n
+		depends on SERVICE_PROTO_DGBLE
+
+	config SERVICE_PROTO_DGBLE_MAX_ENDPOINTS
+		int "Maximum number of tunnelled endpoints (GATT characteristics)"
+		default 4
+		depends on SERVICE_PROTO_DGBLE
+
+	config SERVICE_PROTO_DGBLE_MAX_DATAGRAM
+		int "Maximum datagram payload size (bytes)"
+		default 244
+		depends on SERVICE_PROTO_DGBLE
+
+	config SERVICE_PROTO_DGBLE_RX_QUEUE_LEN
+		int "Number of inbound datagrams buffered per endpoint"
+		default 4
+		depends on SERVICE_PROTO_DGBLE

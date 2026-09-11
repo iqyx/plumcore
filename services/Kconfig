@@ -644,6 +644,7 @@ menu "Communication protocols"
 		source "services/proto-stream/Kconfig"
 		source "services/proto-dgtext/Kconfig"
 		source "services/proto-dgstream/Kconfig"
+		source "services/proto-dgble/Kconfig"
 	endmenu
 
 	menu "Application layer protocols"
