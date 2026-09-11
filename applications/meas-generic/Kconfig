@@ -1,0 +1,95 @@
+config APP_MEAS_GENERIC
+	bool "meas-generic generic measurement device application"
+
+menu "meas-generic application configuration"
+	depends on APP_MEAS_GENERIC
+
+	config APP_NAME
+		string
+		default "meas-generic"
+
+	config APP_MEAS_GENERIC_MAX_SENSORS
+		int "Maximum number of measurement sensors"
+		default 8
+
+	config APP_MEAS_GENERIC_SENSORS
+		string "Comma-separated list of sensor names to sample and publish"
+		default "ch0,ch1,ch2,ch3"
+
+	config APP_MEAS_GENERIC_TEMP_SENSOR
+		string "Optional temperature sensor name feeding the compensation (empty to disable)"
+		default ""
+
+	config APP_MEAS_GENERIC_SAMPLE_INTERVAL_MS
+		int "Sampling interval in milliseconds"
+		default 100
+
+	choice
+		prompt "ADC measure unit"
+		default APP_MEAS_GENERIC_MEASURE_UNIT_COUNTS
+
+		config APP_MEAS_GENERIC_MEASURE_UNIT_COUNTS
+			bool "Counts"
+
+		config APP_MEAS_GENERIC_MEASURE_UNIT_RESISTANCE
+			bool "Ratiometric resistance divider"
+	endchoice
+
+	config APP_MEAS_GENERIC_ADC_BITS
+		int "ADC resolution in bits"
+		depends on APP_MEAS_GENERIC_MEASURE_UNIT_RESISTANCE
+
+	choice
+		prompt "ADC input type"
+		depends on APP_MEAS_GENERIC_MEASURE_UNIT_RESISTANCE
+
+		config APP_MEAS_GENERIC_ADC_SINGLE_ENDED
+			bool "Single-ended"
+
+		config APP_MEAS_GENERIC_ADC_DIFFERENTIAL
+			bool "Differential"
+	endchoice
+
+	config APP_MEAS_GENERIC_REFERENCE_RESISTOR
+		int "Reference resistor value (ohm)"
+		depends on APP_MEAS_GENERIC_MEASURE_UNIT_RESISTANCE
+
+	choice
+		prompt "Reference resistor position"
+		depends on APP_MEAS_GENERIC_MEASURE_UNIT_RESISTANCE
+
+		config APP_MEAS_GENERIC_REFERENCE_ON_TOP
+			bool "Reference is on top"
+
+		config APP_MEAS_GENERIC_REFERENCE_ON_BOTTOM
+			bool "Reference is on bottom"
+	endchoice
+
+	config APP_MEAS_GENERIC_NBUS_API
+		bool "Export the configuration tree over nbus2 on the console"
+		default y
+
+	config APP_MEAS_GENERIC_TEDS
+		bool "Enable TEDS over one-wire"
+		default n
+
+	choice
+		prompt "TEDS data format"
+		depends on APP_MEAS_GENERIC_TEDS
+		default APP_MEAS_GENERIC_TEDS_FORMAT_PLUMCORE_CBOR
+
+		config APP_MEAS_GENERIC_TEDS_FORMAT_PLUMCORE_CBOR
+			bool "plumCore CBOR calibration data format"
+	endchoice
+
+	config APP_MEAS_GENERIC_TEDS_MAX_CHANNELS
+		int "Maximum number of TEDS mux channels"
+		depends on APP_MEAS_GENERIC_TEDS
+		default 16
+
+	config APP_MEAS_GENERIC_TEDS_PROBE_INTERVAL_MS
+		int "TEDS probe interval in milliseconds"
+		depends on APP_MEAS_GENERIC_TEDS
+		default 1000
+
+endmenu

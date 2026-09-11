@@ -1,0 +1,6 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+objs.append(env.Object(source = Glob("*.c")))
+env.Append(CPPPATH = [Dir(".")])
