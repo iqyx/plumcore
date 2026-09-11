@@ -245,6 +245,9 @@ static nbus_ret_t nbus_pbuf_transmit(struct nbus_pbuf *self, Nbus *nbus) {
 static nbus_ret_t nbus_pbuf_dispatch(Nbus *self, struct nbus_pbuf *pbuf) {
 	/* We are going to traverse the socket list, obtain the mutex first. Do not block if unable. */
 	if (xSemaphoreTake(self->socket_lock, 0) != pdTRUE) {
+		/* We still own the pbuf even though we cannot dispatch it now; release it so it is not
+		 * leaked out of the pool. Dropping the packet is acceptable, leaking the buffer is not. */
+		nbus_pbuf_release(self, pbuf);
 		return NBUS_RET_FAILED;
 	}
 
@@ -285,23 +288,6 @@ static nbus_ret_t nbus_pbuf_dispatch(Nbus *self, struct nbus_pbuf *pbuf) {
 	return NBUS_RET_FAILED;
 }
 
-
-static void addr_to_str(uint8_t addr[4], char *s, size_t size) {
-	snprintf(s, size, "0x%02x%02x%02x%02x", addr[0], addr[1], addr[2], addr[3]);
-}
-
-/*
-static void print_pbuf(Nbus *self, struct nbus_pbuf *pbuf, const char *prefix) {
-	(void)self;
-
-	char dstid[11];
-	addr_to_str(pbuf->dstid, dstid, sizeof(dstid));
-	char srcid[11];
-	addr_to_str(pbuf->srcid, srcid, sizeof(srcid));
-
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("%s%s -> %s, len %u, 0x%02x 0x%02x"), prefix, srcid, dstid, pbuf->buf_len, pbuf->buf[24], pbuf->buf[25]);
-}
-*/
 
 static void nbus_rx_task(void *p) {
 	Nbus *self = (Nbus *)p;
