@@ -266,6 +266,9 @@ static nbus_flash_ret_t process_cc_read(NbusFlash *self, CborValue *imap, CborEn
 		return NBUS_FLASH_RET_FAILED;
 	}
 
+	/* Echo the requested address so the host can match this reply to its request and reject a stale/desynced one. */
+	cbor_encode_text_stringz(omap, "addr");
+	cbor_encode_uint(omap, addr);
 	cbor_encode_text_stringz(omap, "d");
 	cbor_encode_byte_string(omap, buf, len);
 
