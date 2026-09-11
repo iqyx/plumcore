@@ -45,7 +45,7 @@ static clock_ret_t stm32_system_clock_get(Clock *clock, struct timespec *time) {
 
 	/** @todo handle the race condition! */
 	time->tv_sec = self->overflows;
-	time->tv_nsec = base->CNT * 1e9 / self->freq_hz;
+	time->tv_nsec = (uint64_t)base->CNT * 1000000000ULL / self->freq_hz;
 
 	return CLOCK_RET_OK;;
 }
@@ -61,7 +61,7 @@ static clock_ret_t stm32_system_clock_set(Clock *clock, const struct timespec *t
 
 	base->CR1 &= ~TIM_CR1_CEN;
 	self->overflows = time->tv_sec;
-	base->CNT = (uint32_t)(time->tv_nsec * self->freq_hz / 1e9);
+	base->CNT = (uint32_t)((uint64_t)time->tv_nsec * self->freq_hz / 1000000000ULL);
 	base->CR1 |= TIM_CR1_CEN;
 
 	return CLOCK_RET_OK;;
