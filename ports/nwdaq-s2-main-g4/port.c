@@ -23,6 +23,7 @@
 #include <interfaces/uart.h>
 
 /* Low level drivers for the STM32G4 family */
+#include <services/stm32-clock/stm32-clock.h>
 #include <services/stm32-gpio/stm32-gpio.h>
 #include <services/stm32-uart/stm32-uart.h>
 #include <services/stm32-watchdog/watchdog.h>
@@ -56,6 +57,7 @@
 
 uint32_t SystemCoreClock;
 
+Stm32Clock cmgr;
 Watchdog watchdog;
 
 Stm32Gpio gpioa;
@@ -65,6 +67,17 @@ Stm32Gpio gpioc;
 
 int32_t port_early_init(void) {
 	SystemCoreClock = 16e6;
+
+	/* Enable the HSE crystal oscillator and run the system clock from it until the clock manager
+	 * takes over and reconfigures the PLL for the target SYSCLK. */
+	RCC->CR |= RCC_CR_HSEON;
+	while (!(RCC->CR & RCC_CR_HSERDY)) {
+		;
+	}
+	RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_SW) | RCC_CFGR_SW_HSE;
+	while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_HSE) {
+		;
+	}
 
 	RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN;
 	RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
@@ -115,9 +128,11 @@ void usart1_isr(void) {
 
 /**********************************************************************************************************************
  * Stacking connector nbus2 port init
+ *
+ * Disabled: USART3 is repurposed for the proto-dgstream <-> UDP bridge below. Kept for reference.
  **********************************************************************************************************************/
 
-#if !defined(CONFIG_APP_BL)
+#if 0
 Stm32Uart nbus2_uart;
 
 /* MIB configuration tree read from the "mib" flash partition (populated by port_flash_init). mib_root
@@ -154,7 +169,7 @@ static void nbus2_init(void) {
 	stm32_uart_init(&nbus2_uart, (void *)USART3);
 	stm32_uart_set_swmode(&nbus2_uart);
 	stm32_uart_set_rto(&nbus2_uart, true);
-	nbus2_uart.uart.vmt->set_bitrate(&nbus2_uart.uart, 250000);
+	nbus2_uart.uart.vmt->set_bitrate(&nbus2_uart.uart, 500000);
 
 	NVIC_EnableIRQ(USART3_IRQn);
 	NVIC_SetPriority(USART3_IRQn, 7);
@@ -291,6 +306,169 @@ static void ethernet_init(void) {
 #endif
 
 
+/**********************************************************************************************************************
+ * USART3 proto-dgstream <-> UDP/IPv6 bridge
+ *
+ * USART3 runs half-duplex (single wire) on PB10, AF7, at 4 Mbaud. Datagrams framed on the wire by
+ * proto-dgstream (inter-frame gaps) are received and forwarded verbatim as UDP/IPv6 payloads over the
+ * NCN26010 10BASE-T1S segment.
+ **********************************************************************************************************************/
+
+#if !defined(CONFIG_APP_BL)
+Stm32Uart usart3;
+ProtoDgstream dgstream;
+Datagram *dgstream_dgram;
+
+/* Running count of datagrams received on USART3 and forwarded as UDP, sampled once a second by
+ * port_init() to report the datagram rate. */
+volatile uint32_t dgstream_rx_count;
+
+#define BRIDGE_TASK_STACK 1024
+
+
+/* One's-complement running sum over a byte range, treated as big-endian 16-bit words. Fold and
+ * complement with port_inet_csum_fold() once all the parts have been accumulated. */
+static uint32_t port_inet_csum_add(uint32_t sum, const uint8_t *data, size_t len) {
+	while (len > 1) {
+		sum += (uint32_t)((data[0] << 8) | data[1]);
+		data += 2;
+		len -= 2;
+	}
+	if (len > 0) {
+		sum += (uint32_t)(data[0] << 8);
+	}
+	return sum;
+}
+
+
+static uint16_t port_inet_csum_fold(uint32_t sum) {
+	while (sum >> 16) {
+		sum = (sum & 0xffff) + (sum >> 16);
+	}
+	return (uint16_t)(~sum);
+}
+
+
+/* Hand-craft an Ethernet + IPv6 + UDP datagram carrying "payload" and hand it to the PHY. It is a
+ * plain unicast to the host on the T1S segment, so a normal "nc -6 -ul <host> <port>" receives it
+ * without having to join a multicast group. */
+static void port_udp_send(const uint8_t *payload, size_t payload_len) {
+	if (payload_len > 512) {
+		payload_len = 512;
+	}
+
+	/* Ethernet II header. eth_dst is the host's unicast MAC (nbus-t1s); eth_src is our locally
+	 * administered address. No VLAN tag on the direct 10BASE-T1S segment. */
+	static const uint8_t eth_dst[6] = {0x96, 0x0e, 0xe0, 0x45, 0xf8, 0x31};
+	static const uint8_t eth_src[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+
+	/* Both endpoints sit in the fd00:dead:beee::/96 prefix: the host is ::1, we send from ::3. */
+	static const uint8_t ip6_src[16] = {
+		0xfd, 0x00, 0xde, 0xad, 0xbe, 0xee, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+	};
+	static const uint8_t ip6_dst[16] = {
+		0xfd, 0x00, 0xde, 0xad, 0xbe, 0xee, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+	};
+	const uint16_t udp_src_port = 52001;
+	const uint16_t udp_dst_port = 52001;
+	const uint16_t udp_len = 8 + payload_len;
+
+	/* Ethernet(18) + IPv6(40) + UDP(8) + payload, zero-padded to the 60-byte minimum frame size. */
+	uint8_t frame[600] = {0};
+	size_t pos = 0;
+
+	memcpy(frame + pos, eth_dst, 6); pos += 6;
+	memcpy(frame + pos, eth_src, 6); pos += 6;
+	frame[pos++] = 0x86; frame[pos++] = 0xdd;                    /* EtherType = IPv6 */
+
+	frame[pos++] = 0x60; frame[pos++] = 0x00;                    /* version 6, traffic class 0 */
+	frame[pos++] = 0x00; frame[pos++] = 0x00;                    /* flow label 0 */
+	frame[pos++] = udp_len >> 8; frame[pos++] = udp_len & 0xff;  /* payload length */
+	frame[pos++] = 17;                                           /* next header = UDP */
+	frame[pos++] = 255;                                          /* hop limit */
+	memcpy(frame + pos, ip6_src, 16); pos += 16;
+	memcpy(frame + pos, ip6_dst, 16); pos += 16;
+
+	size_t udp_off = pos;
+	frame[pos++] = udp_src_port >> 8; frame[pos++] = udp_src_port & 0xff;  /* source port */
+	frame[pos++] = udp_dst_port >> 8; frame[pos++] = udp_dst_port & 0xff;  /* destination port */
+	frame[pos++] = udp_len >> 8; frame[pos++] = udp_len & 0xff;    /* UDP length */
+	frame[pos++] = 0x00; frame[pos++] = 0x00;                      /* checksum, filled in below */
+	memcpy(frame + pos, payload, payload_len); pos += payload_len;
+
+	/* The UDP checksum is mandatory over IPv6. Sum the pseudo-header (src + dst addresses, the
+	 * upper-layer length and the next-header value) followed by the UDP header and payload. */
+	uint32_t sum = 0;
+	sum = port_inet_csum_add(sum, ip6_src, 16);
+	sum = port_inet_csum_add(sum, ip6_dst, 16);
+	sum += udp_len;
+	sum += 17;
+	sum = port_inet_csum_add(sum, frame + udp_off, udp_len);
+	uint16_t csum = port_inet_csum_fold(sum);
+	if (csum == 0) {
+		csum = 0xffff;
+	}
+	frame[udp_off + 6] = csum >> 8;
+	frame[udp_off + 7] = csum & 0xff;
+
+	if (pos < 60) {
+		pos = 60;
+	}
+	ncn26010_send(&ncn, frame, pos);
+}
+
+
+/* Receive datagrams framed on the USART3 medium by proto-dgstream and forward each one as a UDP/IPv6
+ * payload over the T1S Ethernet segment. */
+static void bridge_task(void *p) {
+	(void)p;
+	while (true) {
+		uint8_t buf[512];
+		size_t len = sizeof(buf);
+		if (dgstream_dgram->vmt->read(dgstream_dgram, buf, &len, NULL) != DATAGRAM_RET_OK) {
+			continue;
+		}
+		port_udp_send(buf, len);
+		dgstream_rx_count++;
+	}
+}
+
+
+static void bridge_init(void) {
+	RCC->APB1ENR1 |= RCC_APB1ENR1_USART3EN;
+
+	/* USART3 TX on PB10, AF7, open-drain half-duplex. */
+	gpiob.pin[10].vmt->set_mode(&(gpiob.pin[10]), MODE_ALTERNATE);
+	gpiob.pin[10].vmt->set_otype(&(gpiob.pin[10]), OTYPE_OD);
+	gpiob.pin[10].vmt->set_pull(&(gpiob.pin[10]), PULL_UP);
+	gpiob.pin[10].vmt->set_pinmux(&(gpiob.pin[10]), 7);
+
+	/* SystemCoreClock is already at its final value here, so the 4 Mbaud divider is computed correctly. */
+	stm32_uart_init(&usart3, (void *)USART3);
+	stm32_uart_set_swmode(&usart3);
+	//stm32_uart_set_rto(&usart3, true);
+	usart3.uart.vmt->set_bitrate(&usart3.uart, 1000000);
+
+	NVIC_EnableIRQ(USART3_IRQn);
+	NVIC_SetPriority(USART3_IRQn, 7);
+
+	proto_dgstream_init(&dgstream, &usart3.stream);
+	proto_dgstream_get_datagram(&dgstream, &dgstream_dgram);
+	proto_dgstream_set_rx_timeout(&dgstream, 1);
+
+	xTaskCreate(bridge_task, "dgstream-udp", BRIDGE_TASK_STACK, NULL, 2, NULL);
+}
+
+
+void usart3_isr(void);
+void usart3_isr(void) {
+	stm32_uart_interrupt_handler(&usart3);
+}
+#endif
+
+
 void vPortSetupTimerInterrupt(void);
 void vPortSetupTimerInterrupt(void) {
 	/* Initialize systick interrupt for FreeRTOS. */
@@ -312,6 +490,11 @@ Flash *lv_conf;
 Flash *lv_mib;
 Flash *lv_app;
 Flash *lv_update;
+
+/* MIB configuration tree read from the "mib" flash partition. mib_root is the synthesized Conf tree
+ * decoded from the CBOR map; it stays NULL if no valid MIB is present. */
+FlashCborMib mib;
+Conf *mib_root;
 
 static void port_flash_init(void) {
 	stm32_flash_init(&iflash);
@@ -383,8 +566,23 @@ int32_t port_init(void) {
 	led_init();
 
 	#if !defined(CONFIG_APP_BL)
-		nbus2_init();
+		/* Bring the system clock up to full speed before configuring the high-speed peripherals. */
+		stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_MEDIUM_PERF);
+		stm32_clock_wait_init_done(&cmgr);
+		SystemCoreClock = 128e6;
+
 		ethernet_init();
+		bridge_init();
+
+		/* Report the forwarded datagram rate once a second. */
+		uint32_t last_count = 0;
+		while (true) {
+			vTaskDelay(pdMS_TO_TICKS(1000));
+			uint32_t count = dgstream_rx_count;
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("datagrams: %lu/s"),
+				(unsigned long)(count - last_count));
+			last_count = count;
+		}
 	#endif
 
 	return PORT_INIT_OK;
