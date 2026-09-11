@@ -22,15 +22,14 @@
 #include <services/stm32-gpio/stm32-gpio.h>
 #include <services/stm32-uart/stm32-uart.h>
 #include <services/stm32-octospi-flash/stm32-octospi-flash.h>
+#include <services/stm32-flash/stm32-flash.h>
+#include <services/flash-vol-static/flash-vol-static.h>
 #include <services/stm32-i2c/stm32-i2c.h>
 #include <services/stm32-spi/stm32-spi.h>
 #include <services/lcd-st7586/lcd-st7586.h>
-#include <services/ncn26010/ncn26010.h>
-#include <services/st67w611/st67w611.h>
+#include <services/fb-console/fb-console.h>
 #include <services/lp581x-led/lp581x-led.h>
 #include <services/lp586x-led/lp586x-led.h>
-#include <services/bq25798/bq25798.h>
-#include <services/bq27441/bq27441.h>
 #include <services/gpio-led/gpio-led.h>
 #include <services/stm32-timer/stm32-timer.h>
 #include <services/pwm-beeper/pwm-beeper.h>
@@ -40,11 +39,18 @@
 #include <interfaces/led-sequences.h>
 #include <interfaces/beeper-sequences.h>
 #include <interfaces/event.h>
+
+#if !defined(CONFIG_APP_BL)
+#include <services/ncn26010/ncn26010.h>
+#include <services/st67w611/st67w611.h>
+#include <services/bq25798/bq25798.h>
+#include <services/bq27441/bq27441.h>
 #include <interfaces/applet.h>
 #include <applets/hello-world/hello-world.h>
 #include <applets/hello-wren/generated/hello-wren.h>
 #include <applets/settings/settings.h>
 #include <applets/live-data/live-data.h>
+#endif
 
 
 #define MODULE_NAME "port"
@@ -62,6 +68,28 @@ Stm32Gpio gpioc;
 Stm32Gpio gpiod;
 Stm32Gpio gpioe;
 Stm32OctospiFlash octospi_flash;
+
+/* Internal flash of the STM32U575. The bootloader lives at the start and the application image is placed
+ * right after it; both the chainloader and the flash updater target this internal flash. */
+Stm32Flash iflash;
+FlashVolStatic iflash_vol;
+
+Flash *lv_bootloader;
+Flash *lv_bl_conf;
+Flash *lv_app;
+
+/* Partition table carved out of the flash1 QSPI NOR flash. */
+FlashVolStatic flash1_vol;
+
+Flash *lv_fw_good;
+Flash *lv_fw_update;
+Flash *lv_fw_backup;
+Flash *lv_applets;
+Flash *lv_bl_backup;
+Flash *lv_conf;
+Flash *lv_calib;
+Flash *lv_conf_backup;
+Flash *lv_log;
 
 
 int32_t port_early_init(void) {
@@ -185,6 +213,8 @@ void uart4_isr(void) {
  * nbus2 backplane stream on USART1
  **********************************************************************************************************************/
 
+#if !defined(CONFIG_APP_BL)
+
 /* USART1 carries the nbus2 protocol on the backplane connecting to the measurement card. The port only
  * sets up the USART and advertises its byte stream; the application discovers the stream and builds the
  * nbus2 stack (framing, MAC and the protocols) on top of it. */
@@ -222,6 +252,8 @@ void usart1_isr(void) {
 	stm32_uart_interrupt_handler(&uart1);
 }
 
+#endif
+
 
 /**********************************************************************************************************************
  * OCTOSPI NOR flash initialisation
@@ -251,6 +283,77 @@ static void port_setup_flash(void) {
 
 	/* Advertise the raw flash interface. */
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)&octospi_flash.iface, "flash1");
+
+	/* Carve the flash1 QSPI NOR flash into fixed partitions. Layout (offset -> size):
+	 *   0x000000  fw-good      512K
+	 *   0x080000  fw-update    512K
+	 *   0x100000  fw-backup    512K
+	 *   0x180000  applets      512K
+	 *   0x200000  bl-backup     64K
+	 *   0x210000  conf          64K
+	 *   0x220000  calib         64K
+	 *   0x230000  conf-backup   64K
+	 *   0x240000  log          256K
+	 */
+	flash_vol_static_init(&flash1_vol, &octospi_flash.iface);
+
+	flash_vol_static_create(&flash1_vol, "fw-good",     0x000000, 512 * 1024, &lv_fw_good);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_fw_good, "fw-good");
+
+	flash_vol_static_create(&flash1_vol, "fw-update",   0x080000, 512 * 1024, &lv_fw_update);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_fw_update, "fw-update");
+	/* The bootloader's flash updater looks the staged image up under the generic "update" name. */
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_fw_update, "update");
+
+	flash_vol_static_create(&flash1_vol, "fw-backup",   0x100000, 512 * 1024, &lv_fw_backup);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_fw_backup, "fw-backup");
+
+	flash_vol_static_create(&flash1_vol, "applets",     0x180000, 512 * 1024, &lv_applets);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_applets, "applets");
+
+	flash_vol_static_create(&flash1_vol, "bl-backup",   0x200000, 64 * 1024, &lv_bl_backup);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_bl_backup, "bl-backup");
+
+	flash_vol_static_create(&flash1_vol, "conf",        0x210000, 64 * 1024, &lv_conf);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_conf, "conf");
+
+	flash_vol_static_create(&flash1_vol, "calib",       0x220000, 64 * 1024, &lv_calib);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_calib, "calib");
+
+	flash_vol_static_create(&flash1_vol, "conf-backup", 0x230000, 64 * 1024, &lv_conf_backup);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_conf_backup, "conf-backup");
+
+	flash_vol_static_create(&flash1_vol, "log",         0x240000, 256 * 1024, &lv_log);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_log, "log");
+}
+
+
+/**********************************************************************************************************************
+ * Internal flash partitions (bootloader and application image)
+ **********************************************************************************************************************/
+
+static void port_setup_iflash(void) {
+	/* The internal flash is memory mapped and executes in place, so both the bootloader and the application
+	 * image live here. The QSPI flash1 only stages the update image, which the bootloader flashes into the
+	 * "app" partition below. */
+	stm32_flash_init(&iflash);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)&iflash.flash, "flash0");
+
+	/* Layout (offset -> size):
+	 *   0x000000  bootloader  120K
+	 *   0x01e000  bl-conf       8K   (bootloader configuration)
+	 *   0x020000  app         512K   (application image, load address 0x08020000)
+	 */
+	flash_vol_static_init(&iflash_vol, &iflash.flash);
+
+	flash_vol_static_create(&iflash_vol, "bootloader", 0,          120 * 1024, &lv_bootloader);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_bootloader, "bootloader");
+
+	flash_vol_static_create(&iflash_vol, "bl-conf",    120 * 1024, 8 * 1024,   &lv_bl_conf);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_bl_conf, "bl-conf");
+
+	flash_vol_static_create(&iflash_vol, "app",        128 * 1024, 512 * 1024, &lv_app);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_app, "app");
 }
 
 
@@ -306,6 +409,8 @@ void i2c1_er_isr(void) {
  * I2C2 bus
  **********************************************************************************************************************/
 
+#if !defined(CONFIG_APP_BL)
+
 Stm32I2c i2c2;
 
 Gpio *i2c2_scl = &(gpiob.pin[10]);
@@ -354,6 +459,8 @@ void i2c2_er_isr(void);
 void i2c2_er_isr(void) {
 	stm32_i2c_irq_handler(&i2c2);
 }
+
+#endif
 
 
 /**********************************************************************************************************************
@@ -405,6 +512,12 @@ static void top_led_setup(GpioLed *led, size_t ch_base) {
 	LED_SEQ_END \
 } \
 
+#define LED_SEQ_ORANGE_FAST_BLINK LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_RGB(255, 64, 0) | LED_SEQ_TIME_MS(128), \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(128), \
+	LED_SEQ_END \
+} \
+
 static void port_setup_leds(void) {
 	/* C variant of the LP5812 (chip address 0x16). Its 12 PWM channels drive four RGB LEDs. */
 	if (lp581x_init(&lp5812, &i2c1.bus, 0x16, LP581X_TYPE_LP5812) != LP581X_RET_OK) {
@@ -420,7 +533,11 @@ static void port_setup_leds(void) {
 	led_setup(&led_mem, 6);
 	led_setup(&led_ble_wifi, 9);
 
+#if defined(CONFIG_APP_BL)
+	led_sys.led.vmt->sequence(&led_sys.led, LED_SEQ_ORANGE_FAST_BLINK);
+#else
 	led_sys.led.vmt->set(&led_sys.led, LED_COLOR_RGB(0, 255, 15));
+#endif
 
 	/* Top LEDs driven by a LP5862. EN on PD11 gates the controller, so power it up before talking to it. */
 	top_led_en_gpio->vmt->set_mode(top_led_en_gpio, MODE_OUTPUT);
@@ -503,6 +620,7 @@ static void port_setup_lcd(void) {
 Stm32SpiBus spi2;
 Stm32SpiDev spi2_lcd;
 LcdSt7586 lcd;
+FbConsole fb_console;
 
 Gpio *spi2_sck  = &(gpiod.pin[1]);
 Gpio *spi2_miso = &(gpiod.pin[3]);
@@ -534,12 +652,24 @@ static void port_setup_display(void) {
 	lcd_st7586_init(&lcd, &spi2_lcd.dev, lcd_reset, lcd_cd);
 	lcd_st7586_set_contrast(&lcd, 0.305f);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FB, (Interface *)&lcd.fb, "lcd");
+
+	/* Redirect console and log output to the LCD when the bootloader application is active. */
+	#if defined(CONFIG_APP_BL)
+		fb_console_init(&fb_console, &lcd.fb);
+		fb_console_banner_bootloader(&fb_console);
+
+		Stream *console = &fb_console.stream;
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)console, "console");
+		u_log_set_stream(console);
+	#endif
 }
 
 
 /**********************************************************************************************************************
  * NCN26010 10Base-T1S ethernet on SPI2
  **********************************************************************************************************************/
+
+#if !defined(CONFIG_APP_BL)
 
 Stm32SpiDev spi2_t1s;
 Ncn26010 t1s;
@@ -623,8 +753,16 @@ static void port_setup_ble(void) {
 		return;
 	}
 
-	/* Bring BLE up and start advertising this port under its name. */
-	st67w611_ble_advertise(&ble, "nwdaq-main-hh1");
+	/* Require every peer to pair on connect: the driver starts pairing automatically and drops any peer
+	 * whose pairing fails. This is a driver-specific policy not reachable through the generic Ble interface,
+	 * so it stays here with the driver instance. */
+	st67w611_set_conn_security(&ble, ST67W611_CONN_SEC_PAIR_ON_CONNECT);
+
+	/* Advertise the generic Ble interface. The application discovers it and builds the GATT server, sets up
+	 * security and starts advertising on top of it. */
+	Ble *ble_iface = NULL;
+	st67w611_get_ble(&ble, &ble_iface);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_BLE, (Interface *)ble_iface, "ble");
 }
 
 
@@ -700,6 +838,8 @@ static void port_setup_fuel_gauge(void) {
 	bq27441_get_remaining_capacity(&fuel_gauge, &sensor);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)sensor, "bat_remaining");
 }
+
+#endif
 
 
 /**********************************************************************************************************************
@@ -795,6 +935,7 @@ static void port_setup_beeper(void) {
 }
 
 
+#if !defined(CONFIG_APP_BL)
 static void port_setup_applets(void) {
 #if defined(CONFIG_APPLET_HELLO_WORLD)
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
@@ -827,6 +968,7 @@ static void port_setup_applets(void) {
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_wren, "hello-wren");
 #endif
 }
+#endif
 
 
 int32_t port_init(void) {
@@ -837,21 +979,30 @@ int32_t port_init(void) {
 	stm32_gpio_init(&gpioe, (void *)GPIOE_BASE);
 
 	port_setup_console();
+#if !defined(CONFIG_APP_BL)
 	port_setup_nbus2();
+#endif
 	port_setup_i2c();
+#if !defined(CONFIG_APP_BL)
 	port_setup_pm_i2c();
+#endif
 	port_setup_leds();
 	port_setup_lcd();
 	port_setup_display();
+#if !defined(CONFIG_APP_BL)
 	port_setup_t1s();
 	port_setup_ble();
 	port_setup_charger();
 	port_setup_vbus_lp();
 	port_setup_fuel_gauge();
+#endif
 	port_setup_flash();
+	port_setup_iflash();
 	port_setup_keypad();
 	port_setup_beeper();
+#if !defined(CONFIG_APP_BL)
 	port_setup_applets();
+#endif
 
 	return PORT_INIT_OK;
 }
