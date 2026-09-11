@@ -12,20 +12,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include <libopencm3/stm32/rcc.h>
-#include <libopencm3/stm32/gpio.h>
-#include <libopencm3/stm32/timer.h>
-#include <libopencm3/stm32/usart.h>
-#include <libopencm3/stm32/spi.h>
-#include <libopencm3/cm3/scb.h>
-#include <libopencm3/cm3/systick.h>
-#include <libopencm3/cm3/nvic.h>
-#include <libopencm3/stm32/adc.h>
-#include <libopencm3/stm32/dac.h>
-#include <libopencm3/stm32/i2c.h>
-#include <libopencm3/stm32/exti.h>
-#include <libopencm3/stm32/flash.h>
-#include <libopencm3/stm32/fdcan.h>
+#include <stm32g4xx.h>
 
 #include <main.h>
 #include "port.h"
@@ -36,12 +23,11 @@
 #include <interfaces/uart.h>
 #include <interfaces/flash.h>
 
-/* Low level drivers for th STM32G4 family */
-#include <services/stm32-system-clock/clock.h>
-#include <services/stm32-rtc/rtc.h>
-#include <services/stm32-spi/stm32-spi.h>
+/* Low level drivers for the STM32G4 family */
+#include <services/stm32-gpio/stm32-gpio.h>
 #include <services/stm32-uart/stm32-uart.h>
 #include <services/stm32-watchdog/watchdog.h>
+#include <services/stm32-clock/stm32-clock.h>
 
 /* High level drivers */
 #include <services/stm32-flash/stm32-flash.h>
@@ -49,13 +35,7 @@
 
 #if !defined(CONFIG_APP_BL)
 	#include <services/nbus2/nbus2.h>
-	#include <services/stm32-clock/stm32-clock.h>
-	#include <services/generic-power/generic-power.h>
-	#include <interfaces/led.h>
-	#include <interfaces/led-sequences.h>
-	#include <services/stm32-gpio/stm32-gpio.h>
-	#include <services/gpio-led/gpio-led.h>
-	#include <services/nbus2/nbus2.h>
+	#include <services/proto-dgstream/proto-dgstream.h>
 	#include <services/nbus-flash/nbus-flash.h>
 	#include <services/proto-stream/proto-stream.h>
 	#include <services/gps-ublox/gps-ublox.h>
@@ -67,6 +47,8 @@
 /**
  * Port specific global variables and singleton instances.
  */
+
+uint32_t SystemCoreClock;
 
 Watchdog watchdog;
 
@@ -92,15 +74,15 @@ Watchdog watchdog;
 
 
 int32_t port_early_init(void) {
-	rcc_periph_clock_enable(RCC_GPIOA);
-	rcc_periph_clock_enable(RCC_GPIOB);
-	rcc_periph_clock_enable(RCC_GPIOC);
-	//rcc_periph_clock_enable(RCC_SPI1);
-	//rcc_periph_clock_enable(RCC_SPI3);
+	SystemCoreClock = 16e6;
+
+	RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN;
+	RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
+	RCC->AHB2ENR |= RCC_AHB2ENR_GPIOCEN;
 
 	/* Timer 6 needs to be initialized prior to starting the scheduler. It is
 	 * used as a reference clock for getting task statistics. */
-	rcc_periph_clock_enable(RCC_TIM6);
+	RCC->APB1ENR1 |= RCC_APB1ENR1_TIM6EN;
 
 	return PORT_EARLY_INIT_OK;
 }
@@ -111,9 +93,9 @@ int32_t port_early_init(void) {
  **********************************************************************************************************************/
 
 static void port_setup_gpio(void) {
-	stm32_gpio_init(&gpioa, STM32_PORTA);
-	stm32_gpio_init(&gpiob, STM32_PORTB);
-	stm32_gpio_init(&gpioc, STM32_PORTC);
+	stm32_gpio_init(&gpioa, (void *)GPIOA_BASE);
+	stm32_gpio_init(&gpiob, (void *)GPIOB_BASE);
+	stm32_gpio_init(&gpioc, (void *)GPIOC_BASE);
 
 	gpio_x20p_power_en->vmt->set_mode(gpio_x20p_power_en, MODE_OUTPUT);
 	gpio_x20p_power_en->vmt->set(gpio_x20p_power_en, false);
@@ -134,6 +116,7 @@ static void port_setup_gpio(void) {
  **********************************************************************************************************************/
 
 Stm32Uart nbus2_uart;
+ProtoDgstream nbus2_dgstream;
 Nbus nbus;
 static void port_setup_nbus2(void) {
 
@@ -147,17 +130,32 @@ static void port_setup_nbus2(void) {
 	gpio_nbus2_shdn->vmt->set_mode(gpio_nbus2_shdn, MODE_OUTPUT);
 	gpio_nbus2_shdn->vmt->set(gpio_nbus2_shdn, false);
 
-	rcc_periph_clock_enable(RCC_USART1);
+	RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
 
-	stm32_uart_init(&nbus2_uart, USART1);
+	stm32_uart_init(&nbus2_uart, (void *)USART1);
+	stm32_uart_set_rto(&nbus2_uart, true);
 	nbus2_uart.uart.vmt->set_bitrate(&nbus2_uart.uart, 2e6);
 
-	nvic_enable_irq(NVIC_USART1_IRQ);
-	nvic_set_priority(NVIC_USART1_IRQ, 7 * 16);
+	NVIC_EnableIRQ(USART1_IRQn);
+	NVIC_SetPriority(USART1_IRQn, 7);
 
-	nbus_init(&nbus, &(nbus2_uart.stream));
+	/* Frame nbus2 packets onto the USART1 byte stream and run nbus2 on top of the resulting Datagram
+	 * interface. The proto-dgstream service handles medium access (framing and the inter-frame gaps);
+	 * nbus2 only deals with the protocol itself. */
+	Datagram *nbus_dgram = NULL;
+	proto_dgstream_init(&nbus2_dgstream, &nbus2_uart.stream);
+	proto_dgstream_set_rx_timeout(&nbus2_dgstream, 1);
+	proto_dgstream_set_tx_gap(&nbus2_dgstream, 2);
+	proto_dgstream_get_datagram(&nbus2_dgstream, &nbus_dgram);
+
+	const struct nbus_config nbus_config = {
+		.dgram = nbus_dgram,
+		.tx_crypto = NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+		.rx_crypto = NBUS_CRYPTO_BLAKE2S_SIV | NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+	};
+	nbus_init(&nbus, &nbus_config);
 	nbus_set_mac_key(&nbus, (uint8_t *)"abcd", 4);
-	//iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&(rs485_uart.stream), "rs485");
+	//iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&(nbus2_uart.stream), "nbus2_stream");
 }
 
 void usart1_isr(void) {
@@ -240,19 +238,19 @@ struct nbus_socket *gnss_rtcm_socket;
 
 static void port_setup_x20p(void) {
 
-	/* Configure the USART1 GPIO first. */
+	/* Configure the USART2 GPIO first. */
 	gpio_x20p_txd1->vmt->set_mode(gpio_x20p_txd1, MODE_ALTERNATE);
 	gpio_x20p_txd1->vmt->set_pinmux(gpio_x20p_txd1, 7);
 	gpio_x20p_rxd1->vmt->set_mode(gpio_x20p_rxd1, MODE_ALTERNATE);
 	gpio_x20p_rxd1->vmt->set_pinmux(gpio_x20p_rxd1, 7);
 
-	rcc_periph_clock_enable(RCC_USART2);
+	RCC->APB1ENR1 |= RCC_APB1ENR1_USART2EN;
 
-	stm32_uart_init(&x20p_uart1, USART2);
+	stm32_uart_init(&x20p_uart1, (void *)USART2);
 	x20p_uart1.uart.vmt->set_bitrate(&x20p_uart1.uart, 115200);
 
-	nvic_enable_irq(NVIC_USART2_IRQ);
-	nvic_set_priority(NVIC_USART2_IRQ, 7 * 16);
+	NVIC_EnableIRQ(USART2_IRQn);
+	NVIC_SetPriority(USART2_IRQn, 7);
 
 	/* Power on the GNSS receiver with safeboot at H. */
 	gpio_x20p_power_en->vmt->set(gpio_x20p_power_en, true);
@@ -295,12 +293,13 @@ void usart2_isr(void) {
 
 void vPortSetupTimerInterrupt(void);
 void vPortSetupTimerInterrupt(void) {
-	/* Initialize systick interrupt for FreeRTOS. */
-	nvic_set_priority(NVIC_SYSTICK_IRQ, 255);
-	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
-	systick_set_reload(16000UL - 1);
-	systick_interrupt_enable();
-	systick_counter_enable();
+	/* Initialize systick interrupt for FreeRTOS. SysTick is clocked from HCLK
+	 * (SystemCoreClock), so derive the reload from the configured tick rate. */
+	NVIC_SetPriority(SysTick_IRQn, 15);
+	//SysTick->LOAD = (SystemCoreClock / configTICK_RATE_HZ) - 1;
+	SysTick->LOAD = (16e6 / configTICK_RATE_HZ) - 1;
+	SysTick->VAL = 0;
+	SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;
 }
 
 //struct nbus_socket *socket;
@@ -312,6 +311,7 @@ int32_t port_init(void) {
 	#if !defined(CONFIG_APP_BL)
 		stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_MEDIUM_PERF);
 		stm32_clock_wait_init_done(&cmgr);
+		SystemCoreClock = 128e6;
 	#endif
 
 	port_setup_nbus2();
@@ -335,18 +335,16 @@ int32_t port_init(void) {
 /* Configure dedicated timer (TIM6) for runtime task statistics. It should be later
  * redone to use one of the system monotonic clocks with interface_clock. */
 void port_task_timer_init(void) {
-	rcc_periph_reset_pulse(RST_TIM6);
+	RCC->APB1RSTR1 |= RCC_APB1RSTR1_TIM6RST;
+	RCC->APB1RSTR1 &= ~RCC_APB1RSTR1_TIM6RST;
 	/* The timer should run at 1MHz */
-	timer_set_prescaler(TIM6, 16 - 1);
-	timer_continuous_mode(TIM6);
-	timer_set_period(TIM6, UINT16_MAX);
-	timer_enable_counter(TIM6);
+	TIM6->PSC = 16 - 1;
+	TIM6->CR1 &= ~TIM_CR1_OPM;
+	TIM6->ARR = UINT16_MAX;
+	TIM6->CR1 |= TIM_CR1_CEN;
 }
 
 
 uint32_t port_task_timer_get_value(void) {
-	return timer_get_counter(TIM6);
+	return TIM6->CNT;
 }
-
-
-

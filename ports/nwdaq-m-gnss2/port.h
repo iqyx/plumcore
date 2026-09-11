@@ -9,14 +9,9 @@
 #pragma once
 
 #include <stdint.h>
+#include "config.h"
 #include "version.h"
 #include "interfaces/servicelocator.h"
-#include "services/generic-power/generic-power.h"
-#include "services/generic-mux/generic-mux.h"
-#include "services/adc-mcp3564/mcp3564.h"
-#include <services/stm32-rtc/rtc.h>
-#include <services/adc-sensor/adc-sensor.h>
-#include <interfaces/mux.h>
 
 
 #define PORT_NAME                  "nwdaq-m-gnss2"
@@ -49,5 +44,3 @@ int32_t port_early_init(void);
 int32_t port_init(void);
 #define PORT_INIT_OK 0
 #define PORT_INIT_FAILED -1
-
-
