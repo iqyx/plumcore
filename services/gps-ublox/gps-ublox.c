@@ -541,7 +541,7 @@ static void gps_ublox_rx_task(void *p) {
 	//gps_ublox_cfg_valset(self, 0x209100bb, (uint8_t[]){0x01});
 
 	/* Enable UBX SAT message output. */
-	gps_ublox_cfg_valset(self, 0x20910016, (uint8_t[]){0x01});
+	//gps_ublox_cfg_valset(self, 0x20910016, (uint8_t[]){0x01});
 	/* nav-sig */
 	gps_ublox_cfg_valset(self, 0x20910346, (uint8_t[]){0x01});
 
@@ -552,15 +552,15 @@ static void gps_ublox_rx_task(void *p) {
 	gps_ublox_cfg_valset(self, 0x10310026, (uint8_t[]){0x01});
 
 	/* enable RXM_COR */
-	//gps_ublox_cfg_valset(self, 0x209106b7, (uint8_t[]){0x01});
+	gps_ublox_cfg_valset(self, 0x209106b7, (uint8_t[]){0x01});
 
 	/* enable NAV_PVT */
 	gps_ublox_cfg_valset(self, 0x20910007, (uint8_t[]){0x01});
 
 	/* enable NAV_RELPOSNED */
-	//gps_ublox_cfg_valset(self, 0x2091008e, (uint8_t[]){0x01});
+	gps_ublox_cfg_valset(self, 0x2091008e, (uint8_t[]){0x01});
 
-
+	/* enable UBX-NAV-HPPOSLLH */
 	gps_ublox_cfg_valset(self, 0x20910034, (uint8_t[]){0x01});
 
 
@@ -667,8 +667,8 @@ gps_ublox_ret_t gps_ublox_timepulse_handler(GpsUblox *self) {
 	UBaseType_t cs = taskENTER_CRITICAL_FROM_ISR();
 	self->timepulse_time.tv_sec++;
 
-	if (self->measure_clock && self->measure_clock->get) {
-		self->measure_clock->get(self->measure_clock->parent, &self->measure_time);
+	if (self->measure_clock && self->measure_clock->vmt->get) {
+		self->measure_clock->vmt->get(self->measure_clock, (struct timespec *)&self->measure_time);
 	}
 	self->timepulse_count++;
 	taskEXIT_CRITICAL_FROM_ISR(cs);
