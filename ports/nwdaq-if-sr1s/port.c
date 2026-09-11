@@ -157,6 +157,26 @@ static void port_flash_init(void) {
 
 
 /**********************************************************************************************************************
+ * Per-port power enable outputs
+ **********************************************************************************************************************/
+
+/* Active-high power enables for front-panel ports 1..4 on PA1, PA3, PA5 and PA7. */
+Gpio *port_pwr_en[4] = {
+	&(gpioa.pin[1]),
+	&(gpioa.pin[3]),
+	&(gpioa.pin[5]),
+	&(gpioa.pin[7]),
+};
+
+static void port_setup_power(void) {
+	for (size_t i = 0; i < 4; i++) {
+		port_pwr_en[i]->vmt->set_mode(port_pwr_en[i], MODE_OUTPUT);
+		port_pwr_en[i]->vmt->set(port_pwr_en[i], true);
+	}
+}
+
+
+/**********************************************************************************************************************
  * I2C2 bus and PCAL6408A GPIO expander
  **********************************************************************************************************************/
 
@@ -180,6 +200,9 @@ static void port_setup_i2c(void) {
 	i2c2_sda->vmt->set_otype(i2c2_sda, OTYPE_OD);
 	i2c2_sda->vmt->set_pinmux(i2c2_sda, 4);
 
+	/* Mux the I2C2 kernel clock to HSI16 (16 MHz); the driver's timing computation assumes a fixed 16 MHz clock. */
+	RCC->CCIPR = (RCC->CCIPR & ~RCC_CCIPR_I2C2SEL_Msk) | RCC_CCIPR_I2C2SEL_1;
+
 	/* Configure and run the I2C driver and peripheral when GPIO is ready. */
 	RCC->APB1ENR1 |= RCC_APB1ENR1_I2C2EN;
 	NVIC_EnableIRQ(I2C2_EV_IRQn);
@@ -195,7 +218,7 @@ static void port_setup_i2c(void) {
 		pcal.pin[i].vmt->set_mode(&(pcal.pin[i]), MODE_OUTPUT);
 		pcal.pin[i].vmt->set(&(pcal.pin[i]), false);
 	}
-	pcal.pin[0].vmt->set(&(pcal.pin[0]), true);
+	//pcal.pin[0].vmt->set(&(pcal.pin[0]), true);
 }
 
 
@@ -271,6 +294,7 @@ int32_t port_init(void) {
 
 	console_init();
 	port_setup_default_gpio();
+	port_setup_power();
 	port_flash_init();
 	port_setup_i2c();
 	port_switch_setup();
