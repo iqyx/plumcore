@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <main.h>
@@ -28,8 +29,13 @@
 /* EEPROM 8-byte word programming time, tPROG max = 21 ms; keep a margin. */
 #define TMP1826_PROG_TIME_MS 25
 
-/* Idle bus time the device needs after the read address before it streams a block, tREADIDLE = 560 us. */
-#define TMP1826_READ_IDLE_MS 1
+/* Idle bus time the device needs after the read address before it streams a block, tREADIDLE = 560 us. At a 1 kHz
+ * tick a vTaskDelay of 1 rounds down to as little as ~0 us (tick quantization) and can undershoot tREADIDLE, which
+ * corrupts the first read bit-slots; use 2 ticks to guarantee at least ~1 ms of idle. */
+#define TMP1826_READ_IDLE_MS 2
+
+/* Number of additional attempts made when an EEPROM block read or write fails (0 = try once, no retry). */
+#define TMP1826_EEPROM_RETRIES CONFIG_SERVICE_TMP1826_EEPROM_RETRIES
 
 /* ROM commands. */
 #define TMP1826_ROM_READ 0x33
@@ -77,14 +83,14 @@ static uint8_t ow_crc8(const uint8_t *data, size_t len) {
 
 
 /* Read the 64-bit ROM unique address of the single device on the bus (used as a presence probe at init). */
-static tmp1826_ret_t tmp1826_read_rom(Tmp1826 *self, uint8_t *rom) {
+static tmp1826_ret_t tmp1826_read_rom(Ow *ow, uint8_t *rom) {
 	bool present = false;
-	if (self->ow->vmt->reset(self->ow, &present) != OW_RET_OK || !present) {
+	if (ow->vmt->reset(ow, &present) != OW_RET_OK || !present) {
 		return TMP1826_RET_FAILED;
 	}
 	uint8_t cmd = TMP1826_ROM_READ;
-	if (self->ow->vmt->exchange(self->ow, &cmd, NULL, 1) != OW_RET_OK ||
-	    self->ow->vmt->exchange(self->ow, NULL, rom, 8) != OW_RET_OK) {
+	if (ow->vmt->exchange(ow, &cmd, NULL, 1) != OW_RET_OK ||
+	    ow->vmt->exchange(ow, NULL, rom, 8) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
 	if (ow_crc8(rom, 7) != rom[7]) {
@@ -137,8 +143,11 @@ static tmp1826_ret_t tmp1826_measure(Tmp1826 *self, float *value) {
 }
 
 
-/* Read one 8-byte EEPROM block at the block-aligned address @p addr. */
-static tmp1826_ret_t tmp1826_eeprom_read_block(Tmp1826 *self, uint16_t addr, uint8_t *data) {
+/* Read one 8-byte EEPROM block at the block-aligned address @p addr (single READ EEPROM transaction).
+ *
+ * Per the datasheet (READ EEPROM, F0h) the device provides no CRC in the response, so a single read cannot be
+ * integrity-checked on its own; the redundant-read comparison in tmp1826_eeprom_read_block() provides that. */
+static tmp1826_ret_t tmp1826_eeprom_read_block_once(Tmp1826 *self, uint16_t addr, uint8_t *data) {
 	if (self->ow->vmt->select(self->ow) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
@@ -146,7 +155,7 @@ static tmp1826_ret_t tmp1826_eeprom_read_block(Tmp1826 *self, uint16_t addr, uin
 	if (self->ow->vmt->exchange(self->ow, cmd, NULL, sizeof(cmd)) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
 	}
-	/* The device needs an idle gap after the address before it starts streaming the block data. */
+	/* The device needs an idle gap (tREADIDLE) after the address before it starts streaming the block data. */
 	vTaskDelay(pdMS_TO_TICKS(TMP1826_READ_IDLE_MS));
 	if (self->ow->vmt->exchange(self->ow, NULL, data, TMP1826_EEPROM_BLOCK) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
@@ -155,8 +164,8 @@ static tmp1826_ret_t tmp1826_eeprom_read_block(Tmp1826 *self, uint16_t addr, uin
 }
 
 
-/* Write one full 8-byte EEPROM block at the block-aligned address @p addr and commit it to the EEPROM. */
-static tmp1826_ret_t tmp1826_eeprom_write_block(Tmp1826 *self, uint16_t addr, const uint8_t *data) {
+/* Write one full 8-byte EEPROM block at @p addr, commit it, and read it back to confirm (single attempt, no retry). */
+static tmp1826_ret_t tmp1826_eeprom_write_block_once(Tmp1826 *self, uint16_t addr, const uint8_t *data) {
 	/* Stage the address and data in scratchpad-2; the device echoes a CRC over the 2 address and 8 data bytes. */
 	if (self->ow->vmt->select(self->ow) != OW_RET_OK) {
 		return TMP1826_RET_FAILED;
@@ -184,7 +193,73 @@ static tmp1826_ret_t tmp1826_eeprom_write_block(Tmp1826 *self, uint16_t addr, co
 		return TMP1826_RET_FAILED;
 	}
 	vTaskDelay(pdMS_TO_TICKS(TMP1826_PROG_TIME_MS));
+
+	/* Confirm the commit actually landed by reading the block back and comparing it against what we wrote. This is a
+	 * CRC-independent end-to-end check of the whole stage-commit-read path. */
+	uint8_t readback[TMP1826_EEPROM_BLOCK] = {0};
+	if (tmp1826_eeprom_read_block_once(self, addr, readback) != TMP1826_RET_OK ||
+	    memcmp(readback, data, TMP1826_EEPROM_BLOCK) != 0) {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("EEPROM write verify mismatch at block 0x%04x"), addr);
+		return TMP1826_RET_FAILED;
+	}
 	return TMP1826_RET_OK;
+}
+
+
+/* Read one 8-byte EEPROM block with integrity checking.
+ *
+ * READ EEPROM (F0h) carries no CRC, so the only device-level defense against a transient bus error on a read is to
+ * read the block twice and require two identical results. On a mismatch (or a failed transaction) the pair is retried
+ * up to TMP1826_EEPROM_RETRIES additional times. This catches transient/random corruption; a stuck bit that repeats
+ * identically across reads cannot be detected without a stored application-level checksum. */
+static tmp1826_ret_t tmp1826_eeprom_read_block(Tmp1826 *self, uint16_t addr, uint8_t *data) {
+	for (unsigned int attempt = 0; attempt <= TMP1826_EEPROM_RETRIES; attempt++) {
+		uint8_t first[TMP1826_EEPROM_BLOCK];
+		uint8_t second[TMP1826_EEPROM_BLOCK];
+		tmp1826_ret_t r1 = tmp1826_eeprom_read_block_once(self, addr, first);
+		tmp1826_ret_t r2 = tmp1826_eeprom_read_block_once(self, addr, second);
+		if (r1 == TMP1826_RET_OK && r2 == TMP1826_RET_OK && memcmp(first, second, TMP1826_EEPROM_BLOCK) == 0) {
+			memcpy(data, first, TMP1826_EEPROM_BLOCK);
+			return TMP1826_RET_OK;
+		}
+		if (attempt >= TMP1826_EEPROM_RETRIES) {
+			break;
+		}
+		if (r1 == TMP1826_RET_OK && r2 == TMP1826_RET_OK) {
+			/* Both reads succeeded but disagree: log the per-byte XOR of the two so the pattern of the corrupted
+			 * bits is visible (a set bit marks a byte position that differed between the two reads). */
+			char diff[3 * TMP1826_EEPROM_BLOCK + 1] = {0};
+			for (size_t i = 0; i < TMP1826_EEPROM_BLOCK; i++) {
+				snprintf(diff + 3 * i, 4, "%02x ", (uint8_t)(first[i] ^ second[i]));
+			}
+			u_log(system_log, LOG_TYPE_WARN,
+				U_LOG_MODULE_PREFIX("EEPROM read of block 0x%04x inconsistent, retry %u/%u, xor=%s"),
+				addr, attempt + 1, TMP1826_EEPROM_RETRIES, diff);
+		} else {
+			u_log(system_log, LOG_TYPE_WARN,
+				U_LOG_MODULE_PREFIX("EEPROM read of block 0x%04x transaction failed, retry %u/%u"),
+				addr, attempt + 1, TMP1826_EEPROM_RETRIES);
+		}
+	}
+	return TMP1826_RET_FAILED;
+}
+
+
+/* Write one 8-byte EEPROM block, retrying up to TMP1826_EEPROM_RETRIES additional times on any failure. */
+static tmp1826_ret_t tmp1826_eeprom_write_block(Tmp1826 *self, uint16_t addr, const uint8_t *data) {
+	tmp1826_ret_t ret = TMP1826_RET_FAILED;
+	for (unsigned int attempt = 0; attempt <= TMP1826_EEPROM_RETRIES; attempt++) {
+		ret = tmp1826_eeprom_write_block_once(self, addr, data);
+		if (ret == TMP1826_RET_OK) {
+			break;
+		}
+		if (attempt < TMP1826_EEPROM_RETRIES) {
+			u_log(system_log, LOG_TYPE_WARN,
+				U_LOG_MODULE_PREFIX("EEPROM write of block 0x%04x failed, retry %u/%u"),
+				addr, attempt + 1, TMP1826_EEPROM_RETRIES);
+		}
+	}
+	return ret;
 }
 
 
@@ -360,6 +435,17 @@ static const struct flash_vmt eeprom_flash_vmt = {
  * Public API
  **********************************************************************************************************************/
 
+tmp1826_ret_t tmp1826_probe(Ow *ow, uint8_t id[TMP1826_ID_SIZE]) {
+	if (u_assert(ow != NULL) ||
+	    u_assert(id != NULL)) {
+		return TMP1826_RET_FAILED;
+	}
+	/* The ROM read only resolves when a single device drives the bus; a populated, CRC-valid address is proof of a
+	 * detected device and serves as its unique id. */
+	return tmp1826_read_rom(ow, id);
+}
+
+
 tmp1826_ret_t tmp1826_init(Tmp1826 *self, Ow *ow) {
 	if (u_assert(self != NULL) ||
 	    u_assert(ow != NULL)) {
@@ -380,12 +466,10 @@ tmp1826_ret_t tmp1826_init(Tmp1826 *self, Ow *ow) {
 	self->temp.vmt = &temp_sensor_vmt;
 	self->temp.info = &temp_sensor_info;
 
-	/* Probe the bus by reading the device 64-bit ROM address. */
-	uint8_t rom[8] = {0};
-	xSemaphoreTake(self->lock, portMAX_DELAY);
-	tmp1826_ret_t ret = tmp1826_read_rom(self, rom);
-	xSemaphoreGive(self->lock);
-	if (ret != TMP1826_RET_OK) {
+	/* Probe the bus for a device by reading its 64-bit ROM address. Nothing else can reach this freshly created
+	 * instance yet, so the probe runs without taking the bus lock. */
+	uint8_t rom[TMP1826_ID_SIZE] = {0};
+	if (tmp1826_probe(self->ow, rom) != TMP1826_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("TMP1826 not detected on the 1-Wire bus"));
 		tmp1826_free(self);
 		return TMP1826_RET_FAILED;

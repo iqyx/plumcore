@@ -27,6 +27,9 @@
  * to the on-chip user EEPROM.
  */
 
+/* Size of the device unique identifier (the 64-bit 1-Wire ROM address). */
+#define TMP1826_ID_SIZE 8
+
 typedef enum {
 	TMP1826_RET_OK = 0,
 	TMP1826_RET_FAILED,
@@ -47,6 +50,10 @@ typedef struct tmp1826 {
 
 tmp1826_ret_t tmp1826_init(Tmp1826 *self, Ow *ow);
 tmp1826_ret_t tmp1826_free(Tmp1826 *self);
+
+/* Probe the 1-Wire bus @p ow for a device without instantiating a driver. Returns TMP1826_RET_OK when a single
+ * device answers and its ROM address CRC checks out, writing the 64-bit ROM address (device unique id) into @p id. */
+tmp1826_ret_t tmp1826_probe(Ow *ow, uint8_t id[TMP1826_ID_SIZE]);
 
 /* Obtain the Flash interface for the on-chip user EEPROM. */
 tmp1826_ret_t tmp1826_get_flash(Tmp1826 *self, Flash **flash);

@@ -1,3 +1,9 @@
 config SERVICE_TMP1826
 	bool "TMP1826 1-Wire temperature sensor and EEPROM driver"
 	default n
+
+if SERVICE_TMP1826
+	config SERVICE_TMP1826_EEPROM_RETRIES
+		int "Number of EEPROM operation retries on failure"
+		default 3
+endif
