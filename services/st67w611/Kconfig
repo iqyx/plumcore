@@ -1,3 +1,45 @@
 config SERVICE_ST67W611
 	bool "STMicroelectronics ST67W611M1 Wi-Fi/BLE combo module driver"
 	default n
+
+	config SERVICE_ST67W611_DEBUG
+		bool "Enable debug logging of AT command/response/URC traffic"
+		default n
+		depends on SERVICE_ST67W611
+
+	comment "BLE connection parameters (renegotiated on every connection)"
+		depends on SERVICE_ST67W611
+
+	config SERVICE_ST67W611_CONN_PARAM_MIN_INTERVAL
+		int "Minimum connection interval, in units of 1.25 ms"
+		default 6
+		range 6 3200
+		depends on SERVICE_ST67W611
+		help
+		  Lower bound of the connection interval requested when a central connects. A shorter interval
+		  cuts the per-datagram round-trip time (e.g. for a flash transfer over the datagram tunnel) at
+		  the cost of higher power draw. 6 is the 7.5 ms minimum allowed by BLE.
+
+	config SERVICE_ST67W611_CONN_PARAM_MAX_INTERVAL
+		int "Maximum connection interval, in units of 1.25 ms"
+		default 6
+		range 6 3200
+		depends on SERVICE_ST67W611
+		help
+		  Upper bound of the requested connection interval. Must be at least the minimum above.
+
+	config SERVICE_ST67W611_CONN_PARAM_LATENCY
+		int "Peripheral latency, in skippable connection events"
+		default 0
+		range 0 499
+		depends on SERVICE_ST67W611
+		help
+		  How many connection events the peripheral may skip. Keep at 0 for lowest latency.
+
+	config SERVICE_ST67W611_CONN_PARAM_TIMEOUT
+		int "Supervision timeout, in units of 10 ms"
+		default 500
+		range 10 3200
+		depends on SERVICE_ST67W611
+		help
+		  Link supervision timeout. Must comfortably exceed the maximum interval times the latency.
