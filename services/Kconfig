@@ -281,9 +281,7 @@ menu "Filesystem and memory management services"
 		bool "WORN (write-once, read-never) log on a block device storage"
 		default n
 
-	config SERVICE_FLASH_VOL_STATIC
-		bool "Flash volumes service (static configuration)"
-		default y
+	source "services/flash-vol-static/Kconfig"
 
 	config SERVICE_FLASH_FIFO
 		bool "FIFO in a flash device"

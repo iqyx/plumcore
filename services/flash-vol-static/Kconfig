@@ -1,0 +1,8 @@
+config SERVICE_FLASH_VOL_STATIC
+	bool "Flash volumes service (static configuration)"
+	default y
+
+	config SERVICE_FLASH_VOL_STATIC_LVS_MAX
+		int "Maximum number of logical volumes per flash device"
+		depends on SERVICE_FLASH_VOL_STATIC
+		default 8

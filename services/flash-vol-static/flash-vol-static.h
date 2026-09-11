@@ -16,7 +16,7 @@
 #include <interfaces/flash.h>
 
 
-#define FLASH_VOL_STATIC_LVS_MAX 8
+#define FLASH_VOL_STATIC_LVS_MAX CONFIG_SERVICE_FLASH_VOL_STATIC_LVS_MAX
 
 typedef enum {
 	FLASH_VOL_STATIC_RET_OK = 0,
