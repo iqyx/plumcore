@@ -19,6 +19,10 @@ import abc
 class SocketBackend(abc.ABC):
 	"""A single bidirectional datagram channel towards one nbus2 endpoint."""
 
+	#: Suggested per-attempt reply timeout (the retransmit interval) for request/response callers.
+	#: Slower media (e.g. a BLE link) raise this so a reply in flight is not treated as lost.
+	request_timeout = 0.10
+
 	@abc.abstractmethod
 	def bind(self, id, ep):
 		"""Set the local source address (sid, ep) used for outgoing datagrams."""
@@ -34,6 +38,15 @@ class SocketBackend(abc.ABC):
 	@abc.abstractmethod
 	def recv(self, timeout):
 		"""Receive one datagram payload, or return ``None`` if ``timeout`` seconds elapse."""
+
+	def flush(self):
+		"""Discard any buffered inbound datagrams so a fresh request starts from a clean state.
+
+		Returns the number of datagrams discarded (useful as instrumentation: a non-zero count means
+		stale replies were left over from an earlier, retransmitted request). The default is a no-op
+		returning 0; transports that queue received datagrams (e.g. BLE notifications) override it.
+		"""
+		return 0
 
 	@abc.abstractmethod
 	def close(self):

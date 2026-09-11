@@ -1,6 +1,6 @@
 [project]
 name = "pynbus2"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python client library for the plumCore nbus2 messaging bus"
 authors = [
     { name = "Marek Koza", email = "qyx@krtko.org" },
@@ -13,6 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 serial = ["pyserial>=3.4"]
+ble = ["simplepyble>=0.7"]
 
 [project.urls]
 Homepage = "https://krtko.org"

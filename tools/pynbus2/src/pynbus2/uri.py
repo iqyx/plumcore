@@ -64,7 +64,15 @@ def parse_uri(uri):
 		host = split.hostname
 		port = split.port
 	except ValueError as e:
-		raise UriError('invalid host or port in the connection URI: %s' % e)
+		# A colon-separated device address (e.g. a BLE MAC, AA:BB:CC:DD:EE:FF) is not a valid
+		# host:port and makes urlsplit's port parsing fail. As an unbracketed authority with more
+		# than one colon can never be host:port (an IPv6 literal would be bracketed), hand the whole
+		# authority to the transport as the host instead of rejecting the URI.
+		authority = split.netloc.rpartition('@')[2]
+		if authority.count(':') < 2:
+			raise UriError('invalid host or port in the connection URI: %s' % e)
+		host = authority
+		port = None
 
 	segments = [s for s in split.path.split('/') if s]
 	query = parse_qs(split.query, keep_blank_values=True)

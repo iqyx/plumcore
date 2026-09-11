@@ -17,6 +17,8 @@ pdm build            # produces dist/pynbus2-<version>.tar.gz
 
 The UDP/IPv6 transport is pure standard library. The serial transport additionally needs
 `pyserial`; install it with the `serial` extra: `pip install pynbus2[serial]` (or `pdm install -G serial`).
+The BLE transport needs `simplepyble`; install it with the `ble` extra: `pip install pynbus2[ble]`
+(or `pdm install -G ble`).
 
 ## Usage
 
@@ -114,6 +116,44 @@ several sockets can share one serial line.
 > The host-side BLAKE2s-SIV protection interoperates with the device only when the firmware emits
 > that scheme. The legacy ChaCha20+halfsiphash scheme is not decoded host-side (no standard library
 > provides ChaCha20-128); `decode` is built to try schemes newest-first so it can be added later.
+
+### `dgble://` — BLE GATT tunnel (proto-dgble)
+
+Tunnels nbus2 datagrams over the firmware `services/proto-dgble` GATT service: one primary service per
+service ID, one readable/writable/notifiable characteristic per endpoint. A datagram to an endpoint is
+a write to its characteristic; a datagram from the device is a notification on it. Payloads are carried
+verbatim, so no nbus2 wire crypto happens host-side. Needs the `ble` extra (SimplePyBLE, sync API).
+
+```
+dgble://<device-name-or-mac>/<sid>/<ep>[?scan=...&adapter=...]
+```
+
+| part / query | meaning | default |
+|--------------|---------|---------|
+| host         | device to connect to, matched against its advertised name or MAC address | — (required) |
+| `/sid/ep`    | destination service ID and endpoint (both required) | — (required) |
+| `scan`       | scan duration in milliseconds | `5000` |
+| `adapter`    | Bluetooth adapter to use, by identifier or address | first available |
+
+On connect the transport scans for the device, connects, enumerates its GATT services and verifies the
+selected service ID (SID) is present (its 128-bit UUID is built from the vendor prefix
+`a3def8c0-acdd-a602-e3a1-78`, the `0x90` service group and the 32-bit SID). Both path components are
+mandatory, so `nbus.socket()` always returns an already-connected socket.
+
+```python
+# By MAC address:
+with pynbus2.connect('dgble://AA:BB:CC:DD:EE:FF/00010002/3') as nbus:
+    sock = nbus.socket()
+    reply = sock.request(b'ping')
+
+# By advertised name, with a longer scan:
+with pynbus2.connect('dgble://nwdaq-hh1/00010002/3?scan=8000') as nbus:
+    sock = nbus.socket()
+    reply = sock.request(b'ping')
+```
+
+Endpoint numbers are 16-bit (matching proto-dgble), unlike the 4-bit nbus2 endpoints of the other
+transports.
 
 ## Extending
 

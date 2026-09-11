@@ -16,10 +16,12 @@ from ..errors import UriError
 from .base import Transport, SocketBackend
 from .udp6 import Udp6Transport
 from .serial_dgtext import SerialDgtextTransport
+from .dgble import DgbleTransport
 
 _REGISTRY = {
 	'udp6': Udp6Transport,
 	'dgtext+serial': SerialDgtextTransport,
+	'dgble': DgbleTransport,
 }
 
 

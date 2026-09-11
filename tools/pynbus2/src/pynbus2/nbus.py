@@ -20,9 +20,13 @@ A default destination may instead be carried in the URI path (``udp6:///00010002
 ``nbus.socket()`` returns a socket already connected to it.
 """
 
+import logging
+
 from .uri import parse_uri
 from .transport import build_transport
 from .errors import NotConnectedError
+
+logger = logging.getLogger(__name__)
 
 
 class NbusSocket:
@@ -55,6 +59,11 @@ class NbusSocket:
 			raise NotConnectedError('connect the socket to a destination before receiving')
 		return self._backend.recv(timeout)
 
+	@property
+	def request_timeout(self):
+		"""The backend's suggested per-attempt reply timeout (the retransmit interval)."""
+		return self._backend.request_timeout
+
 	def request(self, data, timeout=0.05, retries=50):
 		"""Send ``data`` and wait for a reply, retransmitting on timeout.
 
@@ -62,11 +71,20 @@ class NbusSocket:
 		attempts. This is the simple request/response pattern the nbus2 command tools rely on.
 		"""
 		payload = bytes(data)
-		for _ in range(retries):
+		# Discard replies left over from an earlier request (e.g. a duplicate produced by a retransmit)
+		# so this request is matched against a reply that actually answers it, not a stale one. A
+		# non-zero drop count is a symptom worth surfacing: it means the previous exchange desynced.
+		dropped = self._backend.flush()
+		if dropped:
+			logger.debug('flushed %d stale repl%s before request', dropped, 'y' if dropped == 1 else 'ies')
+		for attempt in range(retries):
 			self.send(payload)
 			reply = self.recv(timeout)
 			if reply is not None:
+				if attempt:
+					logger.debug('reply arrived after %d retransmit(s)', attempt)
 				return reply
+		logger.debug('no reply after %d attempt(s)', retries)
 		return None
 
 	def close(self):
