@@ -1,0 +1,174 @@
+/*
+ * Paged-media stylesheet for the documentation PDF (pandoc + WeasyPrint).
+ *
+ * The look (font family, heading colours, ...) comes from the site's own
+ * extra.css, which is loaded before this file so the PDF matches the HTML
+ * version. This file only adds what print needs: page geometry, page numbers,
+ * page breaks and a few block styles that have no HTML-site equivalent.
+ */
+
+@page {
+	size: A4;
+	/* extra top/bottom margin leaves room for the running header and footer */
+	margin: 30mm 20mm 25mm 20mm;
+
+	/* Top left: plum logo + project name (injected running element). Nudged
+	   up (vertical-align: top) and out into the corner (negative margin). */
+	@top-left {
+		content: element(pdfheader);
+		vertical-align: top;
+		padding-top: 3mm;
+		margin-left: -10mm;
+	}
+
+	/* Top right: the current top-level section name, mirrored into the corner. */
+	@top-right {
+		content: string(section);
+		vertical-align: top;
+		padding-top: 3mm;
+		margin-right: -10mm;
+		font-family: "roboto", sans-serif;
+		font-size: 8.5pt;
+		color: #667;
+	}
+
+	/* Bottom left: document version and build stamp (injected running element). */
+	@bottom-left {
+		content: element(pdffooter);
+		vertical-align: top;
+		padding-top: 2mm;
+		margin-left: -10mm;
+	}
+
+	/* Bottom right: "Page x of y". */
+	@bottom-right {
+		content: "Page " counter(page) " of " counter(pages);
+		vertical-align: top;
+		padding-top: 2mm;
+		font-family: "roboto", sans-serif;
+		font-size: 8.5pt;
+		color: #666;
+	}
+}
+
+/* Keep the title page clean: no page number there. */
+@page :first {
+	@bottom-right {
+		content: none;
+	}
+}
+
+/*
+ * Running page header element: the plum logo and the project name, repeated on
+ * every page. It is injected before the body by doc.SConscript (with the logo
+ * embedded as a data URI) and lifted into the @top-left margin box.
+ */
+.pdf-running-header {
+	position: running(pdfheader);
+	font-family: "roboto", sans-serif;
+	font-weight: 400;
+	font-size: 8.5pt;
+	color: #667;
+	white-space: nowrap;
+}
+
+.pdf-running-header img {
+	height: 8mm;
+	vertical-align: middle;
+	margin-right: 2mm;
+}
+
+.pdf-header-name {
+	display: inline-block;
+	vertical-align: middle;
+	line-height: 1.2;
+}
+
+/* Running footer element (bottom-left): version and build stamp. */
+.pdf-running-footer {
+	position: running(pdffooter);
+	font-family: "roboto", sans-serif;
+	font-size: 7.5pt;
+	line-height: 1.3;
+	color: #666;
+	white-space: nowrap;
+}
+
+/* Publish each top-level section's title into the top-right running header. */
+h1:not(.title) {
+	string-set: section content(text);
+}
+
+body {
+	font-size: 10.5pt;
+	line-height: 1.5;
+	color: #222;
+	/* extra.css sets a very light weight (200) for the web; bump it a little
+	   for print legibility on paper. */
+	font-weight: 300;
+}
+
+/* Each top-level document (a numbered section) starts on a fresh page. */
+h1 {
+	break-before: page;
+}
+
+/* The document title and the table of contents stay on the opening pages. */
+header#title-block-header h1.title {
+	break-before: auto;
+	font-size: 26pt;
+	margin-top: 30mm;
+}
+
+#TOC {
+	break-before: auto;
+}
+
+h1, h2, h3, h4 {
+	break-after: avoid;
+}
+
+pre, blockquote, table, figure {
+	break-inside: avoid;
+}
+
+pre {
+	background: #f4f4f4;
+	border: 1px solid #ddd;
+	border-radius: 3px;
+	padding: 0.6em 0.8em;
+	font-size: 8.5pt;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+}
+
+code {
+	font-family: "DejaVu Sans Mono", monospace;
+	font-size: 0.9em;
+}
+
+table {
+	border-collapse: collapse;
+	width: 100%;
+}
+
+th, td {
+	border: 1px solid #bbb;
+	padding: 0.3em 0.5em;
+	text-align: left;
+}
+
+img {
+	max-width: 100%;
+}
+
+a {
+	color: #235;
+	text-decoration: none;
+}
+
+/* Table of contents: readable, no bullets. */
+#TOC ul {
+	list-style: none;
+	padding-left: 1em;
+}

@@ -36,6 +36,8 @@ config.h
 
 # ignore documentation builddirectory
 doc/build
+# ignore the generated documentation PDF
+doc/plumcore.pdf
 
 # ignore repositories with downloaded libraries
 # note: for in-tree libraries, add a .gitignore file in the

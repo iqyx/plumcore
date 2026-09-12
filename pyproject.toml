@@ -19,9 +19,11 @@ dependencies = [
     "colorama>=0.4.6",
     # Documentation is built with zensical (see doc/zensical.toml); it replaces
     # the previous Sphinx toolchain. markdown-gfm-admonition provides the
-    # gfm_admonition extension enabled in the zensical config.
+    # gfm_admonition extension enabled in the zensical config. weasyprint is the
+    # pandoc PDF engine used by scripts/docs-pdf.py (avoids a LaTeX step).
     "zensical>=0.0.61",
     "markdown-gfm-admonition>=0.3",
+    "weasyprint>=60",
 ]
 
 # Managed with PDM. This repository is an application, not a distributable
