@@ -47,6 +47,13 @@ Export("conf")
 SConscript("kconfig.SConscript")
 env.LoadKconfig("Kconfig", ".config")
 
+# lib.SConscript defines the library-fetching helpers (env.Git/env.Patch/env.Make);
+# sbom.SConscript adds env.Component, the SBOM component registry and the `sbom`/`sbom-check`
+# targets (and wraps env.Git). Sourced here, in this order, so both are available to every
+# library and service SConscript evaluated below.
+SConscript("lib.SConscript")
+SConscript("sbom.SConscript")
+
 # And generate the corresponding config.h file for inclusion in sources
 env.Command(
 	target = "config.h",
@@ -137,7 +144,6 @@ objs.append(env.Object(source = [
 
 SConscript("doc.SConscript")
 SConscript("applications/SConscript")
-SConscript("microkernel/freertos/SConscript")
 
 objs.append(SConscript("uhal/SConscript"))
 objs.append(SConscript("system/SConscript"))

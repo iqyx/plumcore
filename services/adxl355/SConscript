@@ -3,5 +3,6 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_INERTIAL_ADXL355"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))
 	env.Append(CPPPATH = [Dir(".")])

@@ -3,4 +3,5 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_APPLET_RUNNER_WREN"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))

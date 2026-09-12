@@ -3,5 +3,6 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_KEYPAD_LAYOUT"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))
 	env.Append(CPPPATH = [Dir(".")])

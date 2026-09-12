@@ -3,6 +3,7 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_CRASH_MGR"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))
 
 if conf["CRASH_MGR_ENABLE_BACKTRACE"] == "y":

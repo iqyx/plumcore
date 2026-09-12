@@ -3,5 +3,6 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_PLOG_PACKAGER"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))
 	env.Proto(File("pkg.proto"))

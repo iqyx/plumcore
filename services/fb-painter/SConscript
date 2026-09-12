@@ -8,6 +8,7 @@ env.Append(CPPPATH = [
 ])
 
 if conf["SERVICE_FB_PAINTER"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))
 
 	# Convert every assets/*.png to a painter_raw_image C array with tools/imtocdata.py, one picture at

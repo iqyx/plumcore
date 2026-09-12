@@ -1,0 +1,22 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["KERNEL_FREERTOS"] == "y":
+
+	# FreeRTOS kernel. Pinned to the released V11.1.0 tag (the previously vendored in-tree copy
+	# was the "V11.1.0+" development snapshot just past that release).
+	env.Git('https://github.com/FreeRTOS/FreeRTOS-Kernel', branch='V11.1.0')
+
+	# Compile the portable kernel sources plus the port layer selected by the platform
+	# (FREERTOS_PORT, e.g. GCC/ARM_CM4F). The memory manager (portable/MemMang/heap_*.c) is
+	# deliberately not built here - the allocator is provided by the port.
+	objs.append(env.Object(source = [
+		File(Glob("src/*.c")),
+		File(Glob("src/portable/%s/*.c" % env["FREERTOS_PORT"])),
+	]))
+
+	env.Append(CPPPATH = [
+		Dir("src/include"),
+		Dir("src/portable/%s" % env["FREERTOS_PORT"]),
+	])

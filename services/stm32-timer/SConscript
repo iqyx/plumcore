@@ -3,4 +3,5 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_STM32_TIMER"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))

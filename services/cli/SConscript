@@ -3,6 +3,7 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_CLI"] == "y":
+	env.Component()
 	objs.append(env.Object([
 		File("system_cli_tree.c"),
 		File("config_export.c"),

@@ -31,3 +31,8 @@ dependencies = [
 # virtualenv and never tries to build the repository itself.
 [tool.pdm]
 distribution = false
+
+[dependency-groups]
+dev = [
+    "spdx-tools>=0.8.5",
+]

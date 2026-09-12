@@ -4,6 +4,8 @@ Import("objs")
 
 if conf["LIB_FEC_GOLAY"] == "y":
 
+	env.Component()
+
 	objs.append(env.Object([
 		File(Glob(env['LIB_DEFAULT_REPO_DIR'] + '*.c')),
 	]))

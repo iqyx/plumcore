@@ -3,5 +3,6 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_PLOG_RELAY"] == "y":
+	env.Component()
 	env.Proto(source = File("relay_msg.proto"))
 	objs.append(env.Object(File(Glob("*.c"))))

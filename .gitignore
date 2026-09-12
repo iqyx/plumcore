@@ -20,6 +20,10 @@
 # ignore the whole bin/ directory containing only generated outputs
 bin
 
+# ignore the generated SBOM and its validation stamp (regenerated per configured
+# firmware via `scons sbom`)
+sbom.spdx.json*
+
 # ignore encryption and signing keys, public too
 *.key
 *.pub
@@ -43,9 +47,6 @@ doc/plumcore.pdf
 # note: for in-tree libraries, add a .gitignore file in the
 # corresponding lib subdirectory and exclude sources with !src/
 lib/*/src
-
-# ignore microkernel sources
-microkernel/*
 
 # ignore stamps marking library source preparation steps
 lib/*/*.stamp

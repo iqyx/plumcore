@@ -3,4 +3,5 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_STM32_I2C_SENSORS"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))

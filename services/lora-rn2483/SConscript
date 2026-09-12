@@ -3,5 +3,6 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_LORA_RN2483"] == "y":
+	env.Component()
 	objs.append(env.Object(File("lora-rn2483.c")))
 	env.Append(CPPPATH = [Dir(".")])

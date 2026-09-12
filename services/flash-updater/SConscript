@@ -3,4 +3,5 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_FLASH_UPDATER"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))

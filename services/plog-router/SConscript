@@ -3,4 +3,5 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_PLOG_ROUTER"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))

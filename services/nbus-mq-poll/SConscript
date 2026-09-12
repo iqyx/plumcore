@@ -3,4 +3,5 @@ Import("objs")
 Import("conf")
 
 if conf["SERVICE_NBUS_MQ_POLL"] == "y":
+	env.Component()
 	objs.append(env.Object(File(Glob("*.c"))))
