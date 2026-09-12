@@ -1,0 +1,1 @@
+# FIFO in a flash device

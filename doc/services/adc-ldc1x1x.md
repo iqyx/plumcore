@@ -1,0 +1,1 @@
+# LDC1312, LDC1314 Multi-Channel 12-Bit Inductance to Digital Converter driver

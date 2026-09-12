@@ -1,0 +1,1 @@
+# ADXL355 3 axis accelerometer

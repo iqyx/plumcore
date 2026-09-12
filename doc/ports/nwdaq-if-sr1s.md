@@ -1,0 +1,1 @@
+# nwdaq-if-sr1s short-range interface with a 10Base-T1S switch

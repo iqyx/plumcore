@@ -1,0 +1,1 @@
+# nwdaq-s2-inc2 inclination sensing module

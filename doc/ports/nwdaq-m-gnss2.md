@@ -1,0 +1,1 @@
+# nwdaq-m-gnss2 GNSS, L-band and UHF receiver

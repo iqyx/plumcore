@@ -1,0 +1,1 @@
+# LIS2HH12 3 axis accelerometer

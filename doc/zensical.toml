@@ -1,0 +1,145 @@
+[project]
+site_name = "plumCore DAQ framework"
+docs_dir = "."
+site_dir = "build"
+extra_css = ["css/extra.css"]
+
+nav = [
+    { "Overview" = "index.md" },
+    { "Introduction" = "introduction.md" },
+    { "Concepts" = "concepts.md" },
+    { "Getting started" = "getting-started.md" },
+    { "Microkernel" = "microkernel.md" },
+    { "Services" = [
+        "services/index.md",
+        { "Low level device drivers" = [
+            "services/stm32-adc.md",
+            "services/stm32-clock.md",
+            "services/stm32-dac.md",
+            "services/stm32-fdcan.md",
+            "services/stm32-i2c.md",
+            "services/stm32-l4-pm.md",
+            "services/stm32-octospi-flash.md",
+            "services/stm32-qspi-flash.md",
+            "services/stm32-rtc.md",
+            "services/stm32-sai.md",
+            "services/stm32-spi.md",
+            "services/stm32-system-clock.md",
+            "services/stm32-timer-capsense.md",
+            "services/stm32-uart.md",
+            "services/stm32-watchdog.md",
+        ] },
+        { "High level device drivers" = [
+            "services/adc-sensor.md",
+            "services/adc-ldc1x1x.md",
+            "services/adxl355.md",
+            "services/als-vcnl4035.md",
+            "services/bq35100.md",
+            "services/bq76922.md",
+            "services/gpio-led.md",
+            "services/gps-ublox.md",
+            "services/gsm-quectel.md",
+            "services/icm42688p.md",
+            "services/iis2iclx.md",
+            "services/lis2hh12.md",
+            "services/ncn26010.md",
+            "services/sensor-keypad.md",
+            "services/shtc3.md",
+            "services/si7006.md",
+            "services/tdk-accel.md",
+        ] },
+        { "DAQ and data processing services" = [
+            "services/data-process.md",
+            "services/mq-batch.md",
+            "services/mq-lora-bridge.md",
+            "services/mq-periodogram.md",
+            "services/mq-sensor-source.md",
+            "services/mq-stats.md",
+            "services/mq-ws-source.md",
+        ] },
+        { "Volume and filesystem access" = [
+            "services/fs-spiffs.md",
+            "services/flash-cbor-mib.md",
+            "services/flash-fifo.md",
+            "services/flash-nvm.md",
+            "services/flash-test.md",
+            "services/flash-updater.md",
+            "services/flash-vol-static.md",
+            "services/lora-fs.md",
+        ] },
+        { "Communication protocols" = [
+            "services/mqtt-tcpip.md",
+            "services/nbus.md",
+            "services/nbus2.md",
+        ] },
+        { "Communication server/clients" = [
+            "services/mqtt-file-download.md",
+            "services/mqtt-file-server.md",
+            "services/mqtt-sensor-upload.md",
+        ] },
+        { "User interface services" = [
+            "services/loginmgr.md",
+            "services/cli.md",
+        ] },
+        { "Generic system services" = [
+            "services/plocator.md",
+            "services/crash-mgr.md",
+            "services/object-store.md",
+            "services/proto-dgtext.md",
+        ] },
+    ] },
+    { "Interfaces" = [
+        "services/interfaces/index.md",
+        "services/interfaces/power.md",
+    ] },
+    { "Applications" = "applications.md" },
+    { "Applets" = "applets.md" },
+    { "nbus protocol" = "protocols/nbus.md" },
+    { "Ports" = [
+        "ports/index.md",
+        "ports/bt-led-ctrl.md",
+        "ports/gkr-lcrail-ctrl.md",
+        "ports/lb-console-b-main.md",
+        "ports/nwdaq-br28-fdc.md",
+        "ports/nwdaq-if-lpcan.md",
+        "ports/nwdaq-if-rs44.md",
+        "ports/nwdaq-if-sr1s.md",
+        "ports/nwdaq-inc5.md",
+        "ports/nwdaq-main-hh1.md",
+        "ports/nwdaq-m-ff14.md",
+        "ports/nwdaq-m-gnss2.md",
+        "ports/nwdaq-p-li200.md",
+        "ports/nwdaq-p-pg1.md",
+        "ports/nwdaq-rtd18-fdc.md",
+        "ports/nwdaq-s2-inc2.md",
+        "ports/nwdaq-s2-main-g4.md",
+        "ports/v35v-port.md",
+    ] },
+    { "Conceptual" = [
+        "conceptual/index.md",
+        "conceptual/on-position-independent-firmware-images.md",
+    ] },
+    { "Code structure" = "code-structure.md" },
+    { "Coding style" = "coding-style.md" },
+    { "Enhancement proposals" = [
+        "ep/index.md",
+        "ep/1cf-mib.md",
+        "ep/235-daq-data-package.md",
+        "ep/2a9-object-store.md",
+        "ep/73c-login-manager.md",
+        "ep/7d3-calibration-certificate.md",
+        "ep/c55-configuration-tree.md",
+    ] },
+]
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.gfm_admonition]
+[project.markdown_extensions.tables]
+
+[project.theme]
+variant = "classic"
+logo = "assets/plum.svg"
+features = [
+]

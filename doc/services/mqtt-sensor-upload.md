@@ -1,0 +1,1 @@
+# mqtt-sensor-upload: Periodically upload sensor data over MQTT

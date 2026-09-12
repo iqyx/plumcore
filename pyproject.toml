@@ -1,0 +1,31 @@
+[project]
+name = "plumcore"
+version = "0.8.0"
+description = "plumCore DAQ framework — build system and host-side tooling dependencies"
+requires-python = ">=3.10"
+
+# Abstract lower bounds only; exact versions are pinned in pdm.lock (committed).
+# Move them forward deliberately with `pdm update`. protobuf is capped on purpose:
+# the generated *_pb2.py modules are tied to the runtime major version, so a jump
+# across majors must be done together with regenerating them.
+dependencies = [
+    "GitPython>=3.1",
+    "pyaml>=23.0",
+    "PyYAML>=6.0",
+    "kconfiglib>=14.1",
+    "protobuf>=5.26,<6",
+    "SCons>=4.4",
+    "tqdm>=4.66",
+    "colorama>=0.4.6",
+    # Documentation is built with zensical (see doc/zensical.toml); it replaces
+    # the previous Sphinx toolchain. markdown-gfm-admonition provides the
+    # gfm_admonition extension enabled in the zensical config.
+    "zensical>=0.0.61",
+    "markdown-gfm-admonition>=0.3",
+]
+
+# Managed with PDM. This repository is an application, not a distributable
+# package, so PDM only provisions the dependencies above into the project
+# virtualenv and never tries to build the repository itself.
+[tool.pdm]
+distribution = false

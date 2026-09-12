@@ -50,3 +50,8 @@ lib/*/*.stamp
 
 # ignore .c/.h generated from .wren sources by the Wren applet builder (applets/SConscript)
 applets/*/generated
+
+# PDM: ignore the local virtualenv and interpreter marker, but keep pdm.lock tracked
+.venv
+.pdm-python
+__pypackages__

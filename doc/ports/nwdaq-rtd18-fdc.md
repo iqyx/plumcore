@@ -1,0 +1,1 @@
+# nwdaq-rtd18-fdc 8-channel, 24 bit RTD sensor digitiser

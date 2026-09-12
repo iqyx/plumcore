@@ -1,0 +1,1 @@
+# nwdaq-s2-main-g4 main module for the S2 platform

@@ -1,0 +1,31 @@
+body {
+	font-family: "roboto", sans-serif;
+	font-weight: 200;
+
+}
+
+.md-grid {
+	max-width: 150em;
+
+}
+
+.md-typeset__table {
+	width: 100%;
+	overflow-wrap: anywhere;
+
+}
+
+.subtopic {
+	font-weight: 200;
+	color: blue;
+	font-size: 140%;
+}
+
+h1 {
+	color: #448 !important;
+}
+
+h2 {
+	border-bottom: 1px solid #888;
+}
+
