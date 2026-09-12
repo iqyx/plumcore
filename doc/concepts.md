@@ -4,6 +4,8 @@
 
 Whenever an external library providing a common service is used, it is wrapped in a thin wrapper exposing a defined Interface. For example, filesystem access libraries are all wrapped to provide the same `Fs` interface.
 
+External libraries reside in the `lib` directory. They can be pulled from the internet, patched, and can expose some configuration. See [External libraries](external-libraries.md) for details.
+
 ## The less supported platforms and compilers, the better
 
 plumCore is not aiming to be the most universal and the most widely used framework among all industries. To achieve our goals, we need fully featured MCUs with capable peripherals. Hence, the list of supported platforms is pretty short:

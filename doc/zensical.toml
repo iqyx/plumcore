@@ -8,6 +8,7 @@ nav = [
     { "Overview" = "index.md" },
     { "Introduction" = "introduction.md" },
     { "Concepts" = "concepts.md" },
+    { "External libraries" = "external-libraries.md" },
     { "Getting started" = "getting-started.md" },
     { "Microkernel" = "microkernel.md" },
     { "Services" = [

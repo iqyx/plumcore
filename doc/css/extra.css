@@ -29,3 +29,26 @@ h2 {
 	border-bottom: 1px solid #888;
 }
 
+.md-header {
+	color: var(--md-primary-fg-color);
+	background-color: var(--md-primary-bg-color);
+	border-bottom: 1px solid var(--md-primary-fg-color);
+}
+
+/* header is light, so use the theme's default (light-background) search styling */
+.md-search__button {
+	color: var(--md-default-fg-color);
+	background-color: var(--md-default-fg-color--lightest);
+	border: 1px solid var(--md-primary-fg-color);
+}
+
+.md-search__button:before {
+	background-color: var(--md-default-fg-color);
+}
+
+.md-search__button:focus,
+.md-search__button:hover {
+	color: var(--md-default-fg-color);
+	background-color: var(--md-default-fg-color--lighter);
+}
+
