@@ -30,3 +30,5 @@ env['IMAGEELFHDRCOMSTR'] = cformat("{c.blue}{c.bold}\nELF image program headers:
 env['PROTOCCOMSTR'] = cformat("{c.bold}{c.blue}Compiling proto{c.white} $SOURCE{c.default}")
 env['STATSCOMSTR'] = cformat("{c.bold}{c.blue}Generating per file size statistics{c.white} $SOURCE{c.default}")
 env['CREATEXIPCOMSTR'] = cformat("{c.bold}{c.blue}\nGenerating plumCore XIP-capable firmware {c.white}$TARGET{c.default}")
+env['SBOMCOMSTR'] = cformat("{c.bold}{c.blue}Generating SBOM{c.white} $TARGET{c.default}")
+env['SBOMCHECKCOMSTR'] = cformat("{c.bold}{c.blue}Validating SBOM{c.white} $SOURCE{c.default}")

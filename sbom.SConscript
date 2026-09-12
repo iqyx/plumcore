@@ -83,14 +83,18 @@ def generate_sbom(target, source, env):
 		doc_name="plumcore-" + conf.get("PORT_NAME", "firmware"),
 		firmware_version=env.get("VERSION", "NOASSERTION"),
 	)
-	with open(str(target[0]), "w") as f:
+	out = str(target[0])
+	os.makedirs(os.path.dirname(out), exist_ok=True)
+	with open(out, "w") as f:
 		json.dump(doc, f, indent=2)
 		f.write("\n")
 	return None
 
 
+# Written next to the firmware image (env["PORTFILE"], e.g. bin/plumcore-<port>-<app>-<version>)
+# with a .spdx.json extension, so the SBOM is named after the exact image it describes.
 sbom_json = env.Command(
-	"sbom.spdx.json",
+	env["PORTFILE"] + ".spdx.json",
 	None,
 	Action(generate_sbom, env.get("SBOMCOMSTR", "Generating SBOM $TARGET")),
 )
@@ -121,14 +125,13 @@ def check_sbom(target, source, env):
 			print("  -", getattr(e, "validation_message", e))
 		return 1
 
-	print(f'{Fore.GREEN}{Style.BRIGHT}SBOM valid{Style.RESET_ALL} (SPDX 2.3): {sbom_path}')
 	with open(str(target[0]), "w") as f:
 		f.write("valid\n")
 	return None
 
 
 sbom_valid = env.Command(
-	"sbom.spdx.json.valid",
+	env["PORTFILE"] + ".spdx.json.valid",
 	sbom_json,
 	Action(check_sbom, env.get("SBOMCHECKCOMSTR", "Validating SBOM $SOURCE")),
 )

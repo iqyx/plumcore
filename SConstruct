@@ -47,12 +47,10 @@ Export("conf")
 SConscript("kconfig.SConscript")
 env.LoadKconfig("Kconfig", ".config")
 
-# lib.SConscript defines the library-fetching helpers (env.Git/env.Patch/env.Make);
-# sbom.SConscript adds env.Component, the SBOM component registry and the `sbom`/`sbom-check`
-# targets (and wraps env.Git). Sourced here, in this order, so both are available to every
-# library and service SConscript evaluated below.
+# lib.SConscript defines the library-fetching helpers (env.Git/env.Patch/env.Make); needed
+# before any library/service SConscript below. sbom.SConscript is sourced later, once PORTFILE
+# is known, so the SBOM can be named after the firmware image.
 SConscript("lib.SConscript")
-SConscript("sbom.SConscript")
 
 # And generate the corresponding config.h file for inclusion in sources
 env.Command(
@@ -110,6 +108,12 @@ if conf["OUTPUT_FILE_APP_PREFIX"] == "y":
 		env["PORTFILE"] += "-" + conf["APP_ALT"]
 if conf["OUTPUT_FILE_VERSION_SUFFIX"] == "y":
 	env["PORTFILE"] += "-" + env["VERSION"]
+
+# sbom.SConscript adds env.Component, the SBOM component registry and the `sbom`/`sbom-check`
+# targets (and wraps env.Git). Sourced here, after PORTFILE is known, so the SBOM is written
+# next to the firmware image; its methods are still available to the library/service SConscripts
+# evaluated further below.
+SConscript("sbom.SConscript")
 
 # Must be included beforehand, it defines the toolchain used
 SConscript("ports/SConscript")
@@ -183,4 +187,7 @@ env.Append(LIBS = [
 
 SConscript("firmware.SConscript")
 
-Default("firmware")
+# Generate and validate the SBOM as part of the default build, after the firmware image is
+# linked, so a plain `scons` always leaves an up-to-date SBOM next to the firmware.
+env.Depends("sbom", "firmware")
+Default("firmware", "sbom")

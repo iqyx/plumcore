@@ -17,12 +17,9 @@
 *.key
 *.map
 
-# ignore the whole bin/ directory containing only generated outputs
+# ignore the whole bin/ directory containing only generated outputs (this includes the
+# generated SBOM and its validation stamp, written next to the firmware via `scons sbom`)
 bin
-
-# ignore the generated SBOM and its validation stamp (regenerated per configured
-# firmware via `scons sbom`)
-sbom.spdx.json*
 
 # ignore encryption and signing keys, public too
 *.key
