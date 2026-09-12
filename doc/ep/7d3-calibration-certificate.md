@@ -1,8 +1,8 @@
 # EP-7d3: Digital calibration certificate format specification
 
-![Status](https://img.shields.io/badge/Status-Draft-blue) ![plumCore](https://img.shields.io/badge/plumCore-0.8.0--dev-gray?labelColor=purple)
+![image](https://img.shields.io/badge/Status-Draft-blue)
 
-TBD
+![image](https://img.shields.io/badge/plumCore-0.8.0--dev-gray?labelColor=purple)
 
 ## Introduction
 

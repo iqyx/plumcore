@@ -17,7 +17,7 @@
 	@top-left {
 		content: element(pdfheader);
 		vertical-align: top;
-		padding-top: 3mm;
+		padding-top: 8mm;
 		margin-left: -10mm;
 	}
 
@@ -25,7 +25,7 @@
 	@top-right {
 		content: string(section);
 		vertical-align: top;
-		padding-top: 3mm;
+		padding-top: 8mm;
 		margin-right: -10mm;
 		font-family: "roboto", sans-serif;
 		font-size: 8.5pt;
@@ -51,11 +51,15 @@
 	}
 }
 
-/* Keep the title page clean: no page number there. */
+/* Cover page: drop the running header text, the footer stamp and the page
+   number. The purple rule and the footer image are position:fixed (below), so
+   they repeat on every page including this one and cannot be selected per page;
+   the cover simply carries the same furniture as the rest. */
 @page :first {
-	@bottom-right {
-		content: none;
-	}
+	@top-left { content: none; }
+	@top-right { content: none; }
+	@bottom-left { content: none; }
+	@bottom-right { content: none; }
 }
 
 /*
@@ -94,6 +98,104 @@
 	white-space: nowrap;
 }
 
+/*
+ * Full-width page furniture repeated on every page. A position:fixed box is
+ * painted on every page and, stretched past the content box into the margins
+ * (left/right -20mm = the side margins), reaches both page edges -- something a
+ * margin box, confined to its corner of the page, cannot do. Fixed boxes cannot
+ * be selected per page, so these repeat on the cover as well.
+ */
+
+/* Solid purple rule 20mm from the top, just below the running header. */
+body::before {
+	content: "";
+	position: fixed;
+	z-index: 0;
+	top: -10mm;
+	left: -20mm;
+	right: -20mm;
+	height: 0.25mm;
+	background: purple;
+}
+
+/* Footer image tiled horizontally, flush to the bottom edge. */
+body::after {
+	content: "";
+	position: fixed;
+	z-index: 0;
+	bottom: -25mm;
+	left: -20mm;
+	right: -20mm;
+	height: 10mm;
+	background: url(../assets/footer.png) repeat-x center bottom / auto 100%;
+}
+
+/*
+ * Cover page (front-page.md, prepended only to the PDF). The pandoc title block
+ * is hidden in favour of this; the cover fills the first page and forces the
+ * table of contents onto the second page.
+ *
+ * The fixed rule and footer cannot be turned off per page, so the cover is an
+ * opaque white box that bleeds a few mm past every page edge and sits above them
+ * (z-index) -- a full-page mask that hides them on page one only. It then paints
+ * its own full-width, full-height footer (::after) at the bottom. Its height and
+ * negative margins are tuned so its in-flow height still equals the content box
+ * (so it stays a single page) while its border box overhangs all four edges.
+ */
+header#title-block-header {
+	display: none;
+}
+
+.pdf-cover {
+	position: relative;
+	z-index: 1;
+	box-sizing: border-box;
+	height: 305mm;
+	margin: -35mm -25mm -30mm;
+	padding: 75mm 25mm 0;
+	background: #fff;
+	break-after: page;
+}
+
+/* The cover's own footer: full width (bleeding to the edges with the box),
+   natural height, tied to the bottom edge. */
+.pdf-cover::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 31mm;
+	background: url(../assets/footer.png) no-repeat center bottom / 100% auto;
+}
+
+/* pandoc inlines the logo as an <svg> (with its own mm width/height), so size
+   both that and a plain <img> fallback. */
+.pdf-cover img,
+.pdf-cover svg {
+	height: 18mm;
+	width: auto;
+	margin-bottom: 10mm;
+}
+
+/* section.pdf-cover raises specificity above the global h1 page-break and
+   section-name (string-set) rules so the cover title neither breaks nor leaks
+   into the running header. */
+section.pdf-cover h1 {
+	break-before: avoid;
+	string-set: none;
+	margin: 0;
+	font-size: 32pt;
+	font-weight: 300;
+	line-height: 1.1;
+}
+
+.pdf-cover p {
+	margin-top: 8mm;
+	font-size: 12pt;
+	color: #667;
+}
+
 /* Publish each top-level section's title into the top-right running header. */
 h1:not(.title) {
 	string-set: section content(text);
@@ -108,8 +210,10 @@ body {
 	font-weight: 300;
 }
 
-/* Each top-level document (a numbered section) starts on a fresh page. */
-h1 {
+/* Each top-level document (a numbered section) and each second-level section
+   starts on a fresh page. */
+h1,
+h2 {
 	break-before: page;
 }
 
@@ -122,6 +226,16 @@ header#title-block-header h1.title {
 
 #TOC {
 	break-before: auto;
+}
+
+/* "Contents" heading above the table of contents. It is a normal H1 (so it
+   matches the chapter headings' style) injected just before the TOC, but it
+   opens page two after the cover's break, so it must neither force another page
+   break nor publish itself into the running header. */
+h1.toc-heading {
+	break-before: avoid;
+	string-set: none;
+	margin-top: 0;
 }
 
 h1, h2, h3, h4 {

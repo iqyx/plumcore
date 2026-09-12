@@ -4,19 +4,29 @@
 
 ![image](https://img.shields.io/badge/plumCore-0.8.0--dev-gray?labelColor=purple)
 
-This document proposes the introduction of a Manufacturer Information Block (MIB) to be stored in the microcontroller flash, containing data populated by the manufacturer during the production process, typically during End-Of-Line (EOL) testing and firmware flashing. The MIB is envisioned as a tree-structured data object, utilizing the Concise Binary Object Representation (CBOR) format, with various keys to store relevant information, including but not limited to: unique serial number, configuration settings for optional features, generated random seeds, cryptographic key pairs (private and public keys), associated certificates, date of manufacture, and version information for the hardware. To ensure the authenticity and integrity of the MIB, it is recommended to be optionally signed using the CBOR Object Signing and Encryption (COSE) protocol. The proposed MIB aims to provide a standardized and secure method for storing manufacturer-specific data, enabling improved device identification, authentication, and supply chain management, while also facilitating the implementation of advanced security features and device lifecycle management.
-
 ## Introduction
 
-TBD
+This document proposes the introduction of a Manufacturer Information Block (MIB) to be stored in the microcontroller
+flash, containing data populated by the manufacturer during the production process, typically during End-Of-Line (EOL)
+testing and firmware flashing. The MIB is envisioned as a tree-structured data object, utilizing the Concise Binary
+Object Representation (CBOR) format, with various keys to store relevant information, including but not limited to:
+unique serial number, configuration settings for optional features, generated random seeds, cryptographic key pairs
+(private and public keys), associated certificates, date of manufacture, and version information for the hardware. To
+ensure the authenticity and integrity of the MIB, it is recommended to be optionally signed using the CBOR Object
+Signing and Encryption (COSE) protocol. The proposed MIB aims to provide a standardized and secure method for storing
+manufacturer-specific data, enabling improved device identification, authentication, and supply chain management, while
+also facilitating the implementation of advanced security features and device lifecycle management.
 
 ### Key-word usage
 
-The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 \[RFC2119\] \[RFC8174\] when, and only when, they appear in all capitals, as shown here.
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT
+RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 \[RFC2119\]
+\[RFC8174\] when, and only when, they appear in all capitals, as shown here.
 
 ### License
 
-This work is licensed under CC BY-SA 4.0. To view a copy of this license, visit <https://creativecommons.org/licenses/by-sa/4.0/>
+This work is licensed under CC BY-SA 4.0. To view a copy of this license, visit
+<https://creativecommons.org/licenses/by-sa/4.0/>
 
 © 2025 Marek Koza \<<qyx@krtko.org>\>
 
@@ -24,7 +34,9 @@ This work is licensed under CC BY-SA 4.0. To view a copy of this license, visit 
 
 ### Product name `pn` (`1`)
 
-Product name is a unique identifier within the manufacturer's namespace that distinguishes a product with a specific set of features and functionality. Products with the same product name are expected to be variants of the same product line, with each new version building upon the previous one, and maintaining a consistent set of characteristics and use cases.
+Product name is a unique identifier within the manufacturer's namespace that distinguishes a product with a specific set
+of features and functionality. Products with the same product name are expected to be variants of the same product line,
+with each new version building upon the previous one, and maintaining a consistent set of characteristics and use cases.
 
 Product name is saved as an UTF-8 string.
 
@@ -36,22 +48,35 @@ Saved as a UTF-8 string.
 
 ### Serial number `sn` (`3`)
 
-Serial Number: A unique, human-readable identifier assigned to each product by the manufacturer. The serial number shall be a string of characters, limited to a maximum length of 16 characters, and composed only of characters from the alphanumeric set (letters A-Z, both uppercase and lowercase, digits 0-9 and a dot or a hyphen as a delimiter). The use of other special characters, accents, and non-ASCII characters is not permitted to avoid any ambiguity when reading. The serial number shall be suitable for embedding on a label, such as a Data Matrix code, and shall be unique within the manufacturer's namespace. The serial number may be either a sequential number or a randomly generated number, but in either case, it shall be checked for uniqueness against the manufacturer's existing serial number database to ensure that no duplicates are assigned.
+Serial Number: A unique, human-readable identifier assigned to each product by the manufacturer. The serial number shall
+be a string of characters, limited to a maximum length of 16 characters, and composed only of characters from the
+alphanumeric set (letters A-Z, both uppercase and lowercase, digits 0-9 and a dot or a hyphen as a delimiter). The use
+of other special characters, accents, and non-ASCII characters is not permitted to avoid any ambiguity when reading. The
+serial number shall be suitable for embedding on a label, such as a Data Matrix code, and shall be unique within the
+manufacturer's namespace. The serial number may be either a sequential number or a randomly generated number, but in
+either case, it shall be checked for uniqueness against the manufacturer's existing serial number database to ensure
+that no duplicates are assigned.
 
-The serial number shall be used to identify and distinguish individual products, and shall be stored in the Manufacturer Information Block (MIB) as a UTF-8 string.
+The serial number shall be used to identify and distinguish individual products, and shall be stored in the Manufacturer
+Information Block (MIB) as a UTF-8 string.
 
 ### Date of manufacture `d` (`4`)
 
-The date and optional time at which the product was manufactured, represented in ISO 8601 format. The date of manufacture shall be specified in one of the following formats:
+The date and optional time at which the product was manufactured, represented in ISO 8601 format. The date of
+manufacture shall be specified in one of the following formats:
 
 - Date only: `YYYY-MM-DD` (e.g., `2022-07-25`)
 - Date and time: `YYYY-MM-DDTHH:MM:SSZ` (e.g., `2022-07-25T14:30:00Z`)
 
-The time zone shall be UTC, indicated by the 'Z' suffix. The use of other time zones or offsets is not permitted. The date of manufacture shall be stored in the MIB as a UTF-8 string in the specified ISO 8601 format, and shall represent the point in time when the product was fully assembled and ready for distribution, usually at the end of EOL testing, when product labels are attached.
+The time zone shall be UTC, indicated by the 'Z' suffix. The use of other time zones or offsets is not permitted. The
+date of manufacture shall be stored in the MIB as a UTF-8 string in the specified ISO 8601 format, and shall represent
+the point in time when the product was fully assembled and ready for distribution, usually at the end of EOL testing,
+when product labels are attached.
 
 ### Service ID seed `sid` (`5`)
 
-A randomly generated byte string, with a minimum length of 8 bytes (64 bits), used as a seed to pseudorandomly derive unique identifiers for services running on the device or product, eg.:
+A randomly generated byte string, with a minimum length of 8 bytes (64 bits), used as a seed to pseudorandomly derive
+unique identifiers for services running on the device or product, eg.:
 
 - IPv4 and IPv6 addresses
 - RS-485 addresses
