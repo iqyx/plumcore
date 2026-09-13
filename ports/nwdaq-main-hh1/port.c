@@ -27,7 +27,6 @@
 #include <services/stm32-i2c/stm32-i2c.h>
 #include <services/stm32-spi/stm32-spi.h>
 #include <services/lcd-st7586/lcd-st7586.h>
-#include <services/fb-console/fb-console.h>
 #include <services/lp581x-led/lp581x-led.h>
 #include <services/lp586x-led/lp586x-led.h>
 #include <services/gpio-led/gpio-led.h>
@@ -620,7 +619,6 @@ static void port_setup_lcd(void) {
 Stm32SpiBus spi2;
 Stm32SpiDev spi2_lcd;
 LcdSt7586 lcd;
-FbConsole fb_console;
 
 Gpio *spi2_sck  = &(gpiod.pin[1]);
 Gpio *spi2_miso = &(gpiod.pin[3]);
@@ -644,24 +642,14 @@ static void port_setup_display(void) {
 	/* Configure and run the SPI bus and the LCD chip-select device. */
 	RCC->APB1ENR1 |= RCC_APB1ENR1_SPI2EN;
 	stm32_spibus_init(&spi2, (void *)SPI2, STM32_SPI_PER_TYPE_SPI);
-	spi2.bus.vmt->set_sck_freq(&spi2.bus, 32e6);
+	spi2.bus.vmt->set_sck_freq(&spi2.bus, 16e6);
 	spi2.bus.vmt->set_mode(&spi2.bus, 0, 0);
 	stm32_spidev_init(&spi2_lcd, &spi2.bus, lcd_cs);
 
 	/* LCD reset on PC7, command/data on PA8. */
 	lcd_st7586_init(&lcd, &spi2_lcd.dev, lcd_reset, lcd_cd);
-	lcd_st7586_set_contrast(&lcd, 0.305f);
+	lcd_st7586_set_contrast(&lcd, 0.30f);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FB, (Interface *)&lcd.fb, "lcd");
-
-	/* Redirect console and log output to the LCD when the bootloader application is active. */
-	#if defined(CONFIG_APP_BL)
-		fb_console_init(&fb_console, &lcd.fb);
-		fb_console_banner_bootloader(&fb_console);
-
-		Stream *console = &fb_console.stream;
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)console, "console");
-		u_log_set_stream(console);
-	#endif
 }
 
 

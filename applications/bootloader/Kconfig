@@ -11,4 +11,9 @@ menu "Bootloader configuration"
 	config BL_PUBKEY
 		string "Ed25519 public key for firmware verification (base64)"
 
+	config BL_GUI
+		bool "Splash screen GUI on a framebuffer device"
+		select SERVICE_FB_PAINTER
+		default n
+
 endmenu

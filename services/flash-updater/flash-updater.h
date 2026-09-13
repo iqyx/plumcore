@@ -33,6 +33,11 @@ enum flash_updater_source_method {
 	FLASH_UPDATER_SOURCE_METHOD_XZ,
 };
 
+/* Progress reporting callback. Called during long running operations with the current progress out of
+ * total and a short status message. At the end of an operation it is called with total = 0 and/or
+ * message = NULL to clear any previously reported progress and status. */
+typedef void (*flash_updater_progress_cb)(void *cb_ctx, size_t total, size_t progress, const char *message);
+
 #define ELF_MAGIC {0x7f, 'E', 'L', 'F'}
 #define ELF_MAGIC_LEN 4
 
@@ -73,6 +78,10 @@ typedef struct flash_updater {
 
 	Stream *console;
 
+	/* Progress reporting callback and its opaque context, both optional (NULL disables reporting). */
+	flash_updater_progress_cb progress_cb;
+	void *progress_cb_ctx;
+
 } FlashUpdater;
 
 
@@ -88,6 +97,11 @@ flash_updater_ret_t flash_updater_set_source_flash(FlashUpdater *self, Flash *fl
 flash_updater_ret_t flash_updater_validate_source(FlashUpdater *self);
 flash_updater_ret_t flash_updater_write(FlashUpdater *self);
 flash_updater_ret_t flash_updater_set_console(FlashUpdater *self, Stream *console);
+
+/**
+ * @brief Set a progress reporting callback (NULL callback disables reporting)
+ */
+flash_updater_ret_t flash_updater_set_progress_callback(FlashUpdater *self, flash_updater_progress_cb cb, void *cb_ctx);
 flash_updater_ret_t flash_updater_find_signature(FlashUpdater *self);
 flash_updater_ret_t flash_updater_check_signature(FlashUpdater *self, const uint8_t pubkey[32]);
 flash_updater_ret_t flash_updater_disable_update(FlashUpdater *self);

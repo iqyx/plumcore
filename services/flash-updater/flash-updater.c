@@ -290,11 +290,21 @@ static void progress_bar_finish(FlashUpdater *self) {
 }
 
 
+/* Report progress and a status message through the optional callback. Called with total = 0 and/or
+ * message = NULL at the end of an operation to clear the reported progress and status. */
+static void flash_updater_progress(FlashUpdater *self, size_t total, size_t progress, const char *message) {
+	if (self->progress_cb != NULL) {
+		self->progress_cb(self->progress_cb_ctx, total, progress, message);
+	}
+}
+
+
 
 flash_updater_ret_t flash_updater_find_signature(FlashUpdater *self) {
 	struct tinyelf_section_header hdr = {0};
 	if (tinyelf_section_find_by_name(&self->elf, ".sign.ed25519", &hdr) != TINYELF_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("update signature not found"));
+		flash_updater_progress(self, 0, 0, "ERROR: update signature not found");
 		return FLASH_UPDATER_RET_FAILED;
 	}
 	self->ed25519_sig_pos = hdr.offset;
@@ -325,6 +335,7 @@ static flash_updater_ret_t hash_image_range(FlashUpdater *self, blake2s_state *s
 		blake2s_update(s, buf, chunk);
 		if ((pos % 1024) == 0) {
 			progress_bar(self, pos / 1024, self->elf_size / 1024);
+			flash_updater_progress(self, self->elf_size, pos, "Verifying signature...");
 		}
 		pos += chunk;
 	}
@@ -380,6 +391,7 @@ flash_updater_ret_t flash_updater_check_signature(FlashUpdater *self, const uint
 	}
 
 	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("update ELF signature verification failed"));
+	flash_updater_progress(self, 0, 0, "ERROR: signature verification failed");
 	return FLASH_UPDATER_RET_FAILED;
 }
 
@@ -402,10 +414,12 @@ flash_updater_ret_t flash_updater_validate_source(FlashUpdater *self) {
 		self->xz = xz_dec_init(XZ_PREALLOC, 8192);
 		if (self->xz == NULL) {
 			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: cannot initialize"));
+			flash_updater_progress(self, 0, 0, "ERROR: decompressor init failed");
 			return FLASH_UPDATER_RET_FAILED;
 		}
 	} else {
 		/* No known method recognized. */
+		flash_updater_progress(self, 0, 0, "ERROR: unknown update image format");
 		return FLASH_UPDATER_RET_FAILED;
 	}
 	load_image_cache(self, 0);
@@ -414,12 +428,14 @@ flash_updater_ret_t flash_updater_validate_source(FlashUpdater *self) {
 	memset(magic, 0, sizeof(magic));
 	if (abstract_image_read(self, 0, magic, sizeof(magic)) != FLASH_UPDATER_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot find ELF header"));
+		flash_updater_progress(self, 0, 0, "ERROR: no ELF header in update");
 		return FLASH_UPDATER_RET_FAILED;
 	}
 
 	tinyelf_init(&self->elf, tinyelf_read, self);
 	if (tinyelf_parse(&self->elf) != TINYELF_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("update ELF parsing error"));
+		flash_updater_progress(self, 0, 0, "ERROR: invalid update ELF image");
 		return FLASH_UPDATER_RET_FAILED;
 	}
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("ELF header OK"));
@@ -439,10 +455,13 @@ flash_updater_ret_t flash_updater_write(FlashUpdater *self) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("erasing target..."));
 
 	/* Workaround for erasing the whole flash volume, full volume erase doesn't work properly. */
-	for (size_t i = 0; i < (self->target_size / self->target_erase_size); i++) {
-		progress_bar(self, i, self->target_size / self->target_erase_size);
+	size_t erase_blocks = self->target_size / self->target_erase_size;
+	for (size_t i = 0; i < erase_blocks; i++) {
+		progress_bar(self, i, erase_blocks);
+		flash_updater_progress(self, erase_blocks, i, "Erasing target flash...");
 		if (self->target->vmt->erase(self->target, i * self->target_erase_size, self->target_erase_size) != FLASH_RET_OK) {
 			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("target flash erasing failed"));
+			flash_updater_progress(self, 0, 0, "ERROR: flash erase failed");
 			return FLASH_UPDATER_RET_FAILED;
 		}
 	}
@@ -456,22 +475,31 @@ flash_updater_ret_t flash_updater_write(FlashUpdater *self) {
 	size_t write_size = self->target_write_size;
 	if (write_size == 0 || write_size > CONFIG_IMAGE_CACHE_SIZE) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("unsupported target write size %lu"), write_size);
+		flash_updater_progress(self, 0, 0, "ERROR: unsupported flash write size");
 		return FLASH_UPDATER_RET_FAILED;
 	}
 	size_t blocks = (self->elf_size + write_size - 1) / write_size;
 	for (size_t i = 0; i < blocks; i++) {
 		uint8_t block[CONFIG_IMAGE_CACHE_SIZE];
 		if (abstract_image_read(self, i * write_size, block, write_size) != FLASH_UPDATER_RET_OK) {
+			flash_updater_progress(self, 0, 0, "ERROR: reading update image failed");
 			return FLASH_UPDATER_RET_FAILED;
 		}
 		if (self->target->vmt->write(self->target, i * write_size, block, write_size) != FLASH_RET_OK) {
+			flash_updater_progress(self, 0, 0, "ERROR: writing firmware failed");
 			return FLASH_UPDATER_RET_FAILED;
 		}
 		if (self->console && (i % 128) == 0) {
 			progress_bar(self, i / 128, self->elf_size / 1024);
 		}
+		if ((i % 64) == 0) {
+			flash_updater_progress(self, self->elf_size, i * write_size, "Writing new firmware...");
+		}
 	}
 	progress_bar_finish(self);
+
+	/* Operation finished: clear the reported progress and status. */
+	flash_updater_progress(self, 0, 0, NULL);
 
 	return FLASH_UPDATER_RET_OK;
 }
@@ -479,6 +507,14 @@ flash_updater_ret_t flash_updater_write(FlashUpdater *self) {
 
 flash_updater_ret_t flash_updater_set_console(FlashUpdater *self, Stream *console) {
 	self->console = console;
+
+	return FLASH_UPDATER_RET_OK;
+}
+
+
+flash_updater_ret_t flash_updater_set_progress_callback(FlashUpdater *self, flash_updater_progress_cb cb, void *cb_ctx) {
+	self->progress_cb = cb;
+	self->progress_cb_ctx = cb_ctx;
 
 	return FLASH_UPDATER_RET_OK;
 }

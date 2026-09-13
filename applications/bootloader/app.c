@@ -26,6 +26,15 @@ static const char *bl_states[] = {
 };
 
 
+#if defined(CONFIG_BL_GUI)
+/* Relay flash-updater progress to the splash screen. */
+static void bl_progress_cb(void *cb_ctx, size_t total, size_t progress, const char *message) {
+	App *self = cb_ctx;
+	gui_set_progress(&self->gui, total, progress, message);
+}
+#endif
+
+
 static void bl_set_state(App *self, enum bl_state state) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("\x1b[1mstate '%s' -> '%s'"), bl_states[self->state], bl_states[state]);
 	self->state = state;
@@ -99,6 +108,10 @@ static app_ret_t bl_step(App *self) {
 				bl_set_state(self, BL_STATE_FIND_APP);
 
 			}
+
+			#if defined(CONFIG_BL_GUI)
+				flash_updater_set_progress_callback(&self->updater, bl_progress_cb, self);
+			#endif
 
 			Stream *console = NULL;
 			if (iservicelocator_query_name_type(locator, "console", ISERVICELOCATOR_TYPE_STREAM, (Interface **)&console) == ISERVICELOCATOR_RET_OK) {
@@ -180,6 +193,10 @@ static void bl_task(void *p) {
 
 app_ret_t app_init(App *self) {
 	memset(self, 0, sizeof(App));
+
+	#if defined(CONFIG_BL_GUI)
+		gui_init(&self->gui);
+	#endif
 
 	xTaskCreate(bl_task, "app", configMINIMAL_STACK_SIZE + 3072, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {

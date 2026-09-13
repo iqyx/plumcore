@@ -3,6 +3,9 @@
 #include <main.h>
 #include <services/chainloader/chainloader.h>
 #include <services/flash-updater/flash-updater.h>
+#if defined(CONFIG_BL_GUI)
+	#include "gui.h"
+#endif
 
 
 typedef enum {
@@ -46,6 +49,11 @@ typedef struct {
 	ChainLoader chainloader;
 
 	FlashUpdater updater;
+
+	#if defined(CONFIG_BL_GUI)
+		/* Splash screen shown on the framebuffer while the bootloader runs. */
+		Gui gui;
+	#endif
 
 	/* Bootloader state machine state and state. */
 	TaskHandle_t task;
