@@ -17,6 +17,9 @@ dependencies = [
     "SCons>=4.4",
     "tqdm>=4.66",
     "colorama>=0.4.6",
+    "cbor2>=5.4",
+    # simplepyble backs pynbus2's BLE (dgble) transport, used by tools/proto-nbus-flash.py.
+    "simplepyble>=0.7",
     # Documentation is built with zensical (see doc/zensical.toml); it replaces
     # the previous Sphinx toolchain. markdown-gfm-admonition provides the
     # gfm_admonition extension enabled in the zensical config. weasyprint is the
