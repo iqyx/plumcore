@@ -311,7 +311,7 @@ static flash_cbor_mib_ret_t mib_set_value(struct flash_cbor_mib_node *node, stru
  * then either the value is consumed (leaf) or recursed into and finished with leave_container.
  */
 static flash_cbor_mib_ret_t mib_build_map(FlashCborMib *self, CborValue *map, struct mib_flash_reader *rd,
-                                          ConfiglibValue *parent) {
+                                          ConfiglibValue *parent, uint32_t depth) {
 	CborValue elem;
 	if (cbor_value_enter_container(map, &elem) != CborNoError) {
 		return FLASH_CBOR_MIB_RET_NO_MIB;
@@ -330,6 +330,15 @@ static flash_cbor_mib_ret_t mib_build_map(FlashCborMib *self, CborValue *map, st
 		}
 		name[sizeof(name) - 1] = '\0';
 
+		/* The CBORMIB magic (ingested as the structure version at load) and the check-blake2s marker
+		 * (consumed during integrity verification) are metadata, not configuration nodes: skip them. */
+		if (strcmp(name, FLASH_CBOR_MIB_MAGIC) == 0 || strcmp(name, FLASH_CBOR_MIB_CHECK_BLAKE2S) == 0) {
+			if (cbor_value_advance(&elem) != CborNoError) {
+				return FLASH_CBOR_MIB_RET_NO_MIB;
+			}
+			continue;
+		}
+
 		struct flash_cbor_mib_node *node = mib_alloc_node(self, name);
 		if (node == NULL) {
 			return FLASH_CBOR_MIB_RET_NOMEM;
@@ -342,8 +351,9 @@ static flash_cbor_mib_ret_t mib_build_map(FlashCborMib *self, CborValue *map, st
 			if (ret != FLASH_CBOR_MIB_RET_OK) {
 				return ret;
 			}
-			/* Recurse linearly; on return elem is positioned right after the child map. */
-			ret = mib_build_map(self, &elem, rd, &node->value);
+			/* Log the subtree header, then recurse; on return elem sits right after the child map. */
+			configlib_log_value(&node->value.conf, depth);
+			ret = mib_build_map(self, &elem, rd, &node->value, depth + 1);
 			if (ret != FLASH_CBOR_MIB_RET_OK) {
 				return ret;
 			}
@@ -356,6 +366,7 @@ static flash_cbor_mib_ret_t mib_build_map(FlashCborMib *self, CborValue *map, st
 			if (ret != FLASH_CBOR_MIB_RET_OK) {
 				return ret;
 			}
+			configlib_log_value(&node->value.conf, depth);
 			if (cbor_value_advance(&elem) != CborNoError) {
 				return FLASH_CBOR_MIB_RET_NO_MIB;
 			}
@@ -598,7 +609,7 @@ static void flash_cbor_mib_task(void *p) {
 		goto err;
 	}
 
-	ret = mib_build_map(self, &map, &rd, &self->root);
+	ret = mib_build_map(self, &map, &rd, &self->root, 0);
 	if (ret != FLASH_CBOR_MIB_RET_OK) {
 		flash_cbor_mib_free(self);
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("failed to build MIB tree"));
@@ -608,9 +619,6 @@ static void flash_cbor_mib_task(void *p) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("MIB loaded (structure version %lu, %lu bytes)"),
 	      (unsigned long)version, (unsigned long)self->cbor_len);
 err:
-	/* Report the minimum free stack (untouched 0xa5 paint) to help right-size the task stack. */
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("stack high water mark: %lu bytes free"),
-	      (unsigned long)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)));
 	vTaskDelete(NULL);
 }
 
@@ -626,7 +634,7 @@ flash_cbor_mib_ret_t flash_cbor_mib_init(FlashCborMib *self, const struct flash_
 	memset(self, 0, sizeof(FlashCborMib));
 	memcpy(&self->config, config, sizeof(struct flash_cbor_mib_conf));
 
-	xTaskCreate(flash_cbor_mib_task, "flash-cbor-mib", configMINIMAL_STACK_SIZE + 192, (void *)self, 1, &(self->task));
+	xTaskCreate(flash_cbor_mib_task, "flash-cbor-mib", configMINIMAL_STACK_SIZE + 512, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		return FLASH_CBOR_MIB_RET_FAILED;
 	}
