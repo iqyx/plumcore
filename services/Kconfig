@@ -308,6 +308,10 @@ menu "System services"
 		bool "System service locator service"
 		default y
 
+	config SERVICE_SYSTEM_CONF
+		bool "System settings and statistics configuration subtree"
+		default y
+
 	config SERVICE_CRASH_MGR
 		bool "Crash manager and debug service"
 		default n

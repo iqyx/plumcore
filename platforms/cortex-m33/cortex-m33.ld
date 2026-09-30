@@ -123,3 +123,8 @@ SECTIONS
 
 PROVIDE(_stack = ORIGIN(ram) + LENGTH(ram));
 
+/* Bounds and size of the RAM region, for runtime memory accounting. As linker symbols, their
+ * addresses carry the values (dereference the address, do not read the contents). */
+PROVIDE(_ram_start = ORIGIN(ram));
+PROVIDE(_ram_size = LENGTH(ram));
+

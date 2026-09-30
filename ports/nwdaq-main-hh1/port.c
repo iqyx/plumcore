@@ -45,6 +45,7 @@
 #include <services/bq25798/bq25798.h>
 #include <services/bq27441/bq27441.h>
 #include <services/flash-cbor-mib/flash-cbor-mib.h>
+#include <services/system-conf/system-conf.h>
 #include <interfaces/applet.h>
 #include <applets/hello-world/hello-world.h>
 #include <applets/hello-wren/generated/hello-wren.h>
@@ -377,6 +378,21 @@ static void port_setup_iflash(void) {
 			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)mib_root, "mib");
 		}
 	#endif
+}
+
+
+/**********************************************************************************************************************
+ * System settings and statistics
+ **********************************************************************************************************************/
+
+SystemConf system_conf;
+
+static void port_setup_system_conf(void) {
+	system_conf_init(&system_conf);
+
+	Conf *system_conf_root = NULL;
+	system_conf_get_conf(&system_conf, &system_conf_root);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)system_conf_root, "system");
 }
 
 
@@ -1010,6 +1026,7 @@ int32_t port_init(void) {
 #endif
 	port_setup_flash();
 	port_setup_iflash();
+	port_setup_system_conf();
 	port_setup_keypad();
 	port_setup_beeper();
 #if !defined(CONFIG_APP_BL)

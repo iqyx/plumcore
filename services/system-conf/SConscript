@@ -1,0 +1,8 @@
+Import("env")
+Import("objs")
+Import("conf")
+
+if conf["SERVICE_SYSTEM_CONF"] == "y":
+	env.Component()
+	objs.append(env.Object(File(Glob("*.c"))))
+	env.Append(CPPPATH = [Dir(".")])
