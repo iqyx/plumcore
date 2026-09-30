@@ -62,4 +62,5 @@ configlib_ret_t configlib_set_constraint(ConfiglibValue *self, union conf_constr
 configlib_ret_t configlib_init_map(ConfiglibValue *self, const char *name, void *var, enum conf_type type);
 configlib_ret_t configlib_init_map_append(ConfiglibValue *self, const char *name, void *var, enum conf_type type, ConfiglibValue *parent, enum conf_dir dir);
 
+conf_ret_t configlib_log_value(Conf *self, uint32_t indent);
 conf_ret_t configlib_log_walk(Conf *self);

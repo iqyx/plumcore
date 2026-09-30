@@ -266,28 +266,81 @@ configlib_ret_t configlib_init_map_append(ConfiglibValue *self, const char *name
 }
 
 
-static void configlib_log_walk_subtree(Conf *self, uint32_t indent) {
+/* Render a leaf node's value into @p buf as human-readable text. Only the scalar and string types are
+ * printed: integers, float, bool, text strings and byte strings (as a space-separated 0x.. hex dump).
+ * Non-value types (subtrees, unreadable nodes) and anything else yield an empty string. A byte string
+ * too long for @p buf is truncated with a trailing ellipsis. */
+static void configlib_value_str(Conf *self, enum conf_type type, char *buf, size_t size) {
+	buf[0] = '\0';
+	union conf_val val = {0};
+	if (self->vmt->read(self, &val) != CONF_RET_OK) {
+		return;
+	}
+	switch (type) {
+		case CONF_F:    snprintf(buf, size, "%f", val.f);                                       break;
+		case CONF_U32:  snprintf(buf, size, "%lu", (unsigned long)val.u32);                     break;
+		case CONF_S32:  snprintf(buf, size, "%ld", (long)val.i32);                              break;
+		case CONF_U16:  snprintf(buf, size, "%u", (unsigned int)val.u16);                       break;
+		case CONF_S16:  snprintf(buf, size, "%d", (int)val.i16);                                break;
+		case CONF_U8:   snprintf(buf, size, "%u", (unsigned int)val.u8);                        break;
+		case CONF_S8:   snprintf(buf, size, "%d", (int)val.i8);                                 break;
+		case CONF_ENUM: snprintf(buf, size, "%lu", (unsigned long)val.u32);                     break;
+		case CONF_B:    snprintf(buf, size, "%s", val.b ? "true" : "false");                    break;
+		case CONF_STR:  snprintf(buf, size, "%s", val.str.buf != NULL ? val.str.buf : "");      break;
+		case CONF_BSTR: {
+			size_t pos = 0;
+			for (size_t i = 0; i < val.bstr.len; i++) {
+				/* Each byte prints as "0xHH " (5 chars); stop early and mark truncation when the
+				 * ellipsis and terminator would no longer fit. */
+				if (pos + 5 >= size - 4) {
+					snprintf(&buf[pos], size - pos, "...");
+					pos += 3;
+					break;
+				}
+				pos += snprintf(&buf[pos], size - pos, "0x%02x ", val.bstr.buf[i]);
+			}
+			/* Drop the separator left dangling after the last byte. */
+			if (pos > 0 && buf[pos - 1] == ' ') {
+				buf[pos - 1] = '\0';
+			}
+			break;
+		}
+		default:
+			break;
+	}
+}
+
+
+conf_ret_t configlib_log_value(Conf *self, uint32_t indent) {
+	if (self == NULL) {
+		return CONF_RET_FAILED;
+	}
 	const char indent_str[16] = "               ";
 	if (indent >= sizeof(indent_str)) {
+		indent = sizeof(indent_str) - 1;
+	}
+
+	const char *name = NULL;
+	enum conf_type type = CONF_NONE;
+	enum conf_flag flags;
+	self->vmt->stat(self, &name, &type, &flags);
+
+	char val_str[128];
+	configlib_value_str(self, type, val_str, sizeof(val_str));
+
+	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("%s%s (%s) = %s"),
+	      &indent_str[sizeof(indent_str) - indent - 1], name, configlib_type_str[type], val_str);
+	return CONF_RET_OK;
+}
+
+
+static void configlib_log_walk_subtree(Conf *self, uint32_t indent) {
+	if (indent >= 16) {
 		return;
 	}
 
 	while (self != NULL) {
-
-		const char *conf_name = NULL;
-		enum conf_type conf_type = CONF_SUBTREE;
-		enum conf_flag conf_flags;
-		self->vmt->stat(self, &conf_name, &conf_type, &conf_flags);
-
-		union conf_val val = {0};
-		self->vmt->read(self, &val);
-		char val_str[16] = {0};
-
-		if (conf_type == CONF_F) {
-			snprintf(val_str, sizeof(val_str), "%f", val.f);
-		}
-
-		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("%s %s(%s) = %s"), &indent_str[sizeof(indent_str) - indent - 1], conf_name, configlib_type_str[conf_type], val_str);
+		configlib_log_value(self, indent);
 
 		Conf *next = NULL;
 		if (self->vmt->walk(self, CONF_DIR_CHILD, &next) == CONF_RET_OK) {
@@ -300,7 +353,6 @@ static void configlib_log_walk_subtree(Conf *self, uint32_t indent) {
 			break;
 		}
 	}
-
 }
 
 
