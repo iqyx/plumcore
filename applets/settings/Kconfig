@@ -1,2 +1,4 @@
 config APPLET_SETTINGS
 	bool "Settings applet"
+	depends on SERVICE_FB_PAINTER
+	depends on LIB_PLUMCORE_CONFIGLIB
