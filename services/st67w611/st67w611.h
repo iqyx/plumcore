@@ -24,7 +24,7 @@
 #define ST67W611_GATTS_SRV_MAX 3
 
 /* Each GATT service holds at most five characteristics (indices 0..4). */
-#define ST67W611_GATTS_CHAR_MAX 5
+#define ST67W611_GATTS_CHAR_MAX 10
 
 /* Bytes of a characteristic's value cached locally to answer get_value; a longer value set is truncated
  * in the cache while the full value is still pushed to the module. */
