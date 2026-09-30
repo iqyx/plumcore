@@ -510,6 +510,16 @@ menu "User interface services"
 		select SERVICE_APPLET_RUNNER_NATIVE
 		default n
 
+	config SERVICE_GUI_LAUNCHER_AUTOSTART
+		bool "Launch an applet right after start"
+		depends on SERVICE_GUI_LAUNCHER
+		default n
+
+	config SERVICE_GUI_LAUNCHER_AUTOSTART_APPLET
+		string "Applet to launch"
+		depends on SERVICE_GUI_LAUNCHER_AUTOSTART
+		default ""
+
 	config SERVICE_APPLET_RUNNER_NATIVE
 		bool "Native (compiled) applet runner"
 		depends on SERVICE_FB_COMPOSITOR

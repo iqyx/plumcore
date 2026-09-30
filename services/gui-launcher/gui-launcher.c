@@ -507,6 +507,10 @@ gui_launcher_ret_t gui_launcher_show(GuiLauncher *self) {
 		return GUI_LAUNCHER_RET_FAILED;
 	}
 
+	#if defined(CONFIG_SERVICE_GUI_LAUNCHER_AUTOSTART)
+	bool first_show = self->window == NULL;
+	#endif
+
 	/* Create the window and start the event loop task on the first show. */
 	if (self->window == NULL) {
 		if (self->conf.compositor->factory.vmt->create(&self->conf.compositor->factory, &self->conf.geometry,
@@ -536,11 +540,30 @@ gui_launcher_ret_t gui_launcher_show(GuiLauncher *self) {
 		}
 	}
 
-	/* Discover the applets, render them and bring the window on screen. */
+	/* Discover the applets. */
 	gui_launcher_capture(self);
+
+	/* Render the applets and bring the window on screen. */
 	gui_launcher_render(self);
 	self->window->vmt->to_front(self->window);
 	self->window->vmt->show(self->window, true);
+
+	#if defined(CONFIG_SERVICE_GUI_LAUNCHER_AUTOSTART)
+	if (first_show) {
+		for (size_t i = 0; i < self->applet_count; i++) {
+			const char *name = self->applets[i]->name;
+			if (name != NULL && !strcmp(name, CONFIG_SERVICE_GUI_LAUNCHER_AUTOSTART_APPLET)) {
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("applet auto-start: %s"), name);
+				self->selected = i;
+				if (gui_launcher_launch(self, self->applets[i])) {
+					return GUI_LAUNCHER_RET_OK;
+				}
+				break;
+			}
+		}
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot auto-start applet %s: not found"), CONFIG_SERVICE_GUI_LAUNCHER_AUTOSTART_APPLET);
+	}
+	#endif
 
 	return GUI_LAUNCHER_RET_OK;
 }
