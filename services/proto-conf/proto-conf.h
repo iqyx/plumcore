@@ -71,5 +71,7 @@ typedef struct proto_conf {
 } ProtoConf;
 
 
+/* When @p root is NULL, paths are resolved against all Conf instances advertised via the service
+ * locator, each virtually mounted under a subtree named by its (space-delimited) locator name. */
 proto_conf_ret_t proto_conf_init(ProtoConf *self, Datagram *d, Conf *root);
 proto_conf_ret_t proto_conf_free(ProtoConf *self);

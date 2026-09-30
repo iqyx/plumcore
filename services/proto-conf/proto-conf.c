@@ -15,6 +15,7 @@
 
 #include <interfaces/conf.h>
 #include <interfaces/datagram.h>
+#include <interfaces/servicelocator.h>
 
 #include "proto-conf.h"
 
@@ -84,11 +85,58 @@ static bool cbor_map_get_path(CborValue *map, char path[][CONFIG_SERVICE_PROTO_C
  * Conf tree helpers
  **********************************************************************************************************************/
 
-/* Walk from root to the node identified by path. An empty path yields root itself. */
+/* Test whether the space-delimited mount name is a prefix of path. On success the number of leading
+ * path components it consumes is returned in *len. */
+static bool mount_name_is_prefix(const char *name, char path[][CONFIG_SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN], size_t depth, size_t *len) {
+	size_t n = 0;
+	const char *p = name;
+	while (*p != '\0') {
+		const char *comp = p;
+		while (*p != '\0' && *p != ' ') {
+			p++;
+		}
+		size_t comp_len = (size_t)(p - comp);
+		if (n >= depth || strlen(path[n]) != comp_len || strncmp(path[n], comp, comp_len) != 0) {
+			return false;
+		}
+		n++;
+		if (*p == ' ') {
+			p++;
+		}
+	}
+	*len = n;
+	return true;
+}
+
+
+/* Walk from root to the node identified by path. An empty path yields root itself. When root is
+ * NULL, the starting node is instead the advertised Conf whose service locator name (split on single
+ * spaces) is the most specific prefix of path; the remaining path components resolve inside it. */
 static conf_ret_t resolve_path(Conf *root, char path[][CONFIG_SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN], size_t depth, Conf **result) {
 	Conf *cur = root;
+	size_t start = 0;
 
-	for (size_t i = 0; i < depth; i++) {
+	if (cur == NULL) {
+		size_t best_len = 0;
+		Interface *iface = NULL;
+		for (size_t i = 0; iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_CONF, i, &iface) == ISERVICELOCATOR_RET_OK; i++) {
+			const char *name = NULL;
+			if (iservicelocator_get_name(locator, iface, &name) != ISERVICELOCATOR_RET_OK || name == NULL) {
+				continue;
+			}
+			size_t len = 0;
+			if (mount_name_is_prefix(name, path, depth, &len) && (cur == NULL || len > best_len)) {
+				cur = (Conf *)iface;
+				best_len = len;
+			}
+		}
+		if (cur == NULL) {
+			return CONF_RET_FAILED;
+		}
+		start = best_len;
+	}
+
+	for (size_t i = start; i < depth; i++) {
 		Conf *child = NULL;
 		if (cur->vmt->walk(cur, CONF_DIR_CHILD, &child) != CONF_RET_OK || child == NULL) {
 			return CONF_RET_FAILED;
@@ -266,6 +314,121 @@ static void encode_stat_fields(CborEncoder *omap, const char *name, enum conf_ty
 
 
 /***********************************************************************************************************************
+ * Service locator mount tree
+ *
+ * When the service runs with a NULL root, advertised Conf instances are virtually mounted under
+ * subtrees named by their (space-delimited) service locator name. The nodes above and between those
+ * mount points are not real Conf objects, so the walk handler navigates them here by streaming over
+ * the advertised names directly, without splitting them into buffers.
+ **********************************************************************************************************************/
+
+/* Compare a name component (@p comp, @p len characters, not null terminated) against a null
+ * terminated string @p ref. Returns <0, 0 or >0 like strcmp. */
+static int comp_cmp(const char *comp, size_t len, const char *ref) {
+	for (size_t i = 0; i < len; i++) {
+		if (ref[i] == '\0') {
+			return 1;
+		}
+		if (comp[i] != ref[i]) {
+			return (unsigned char)comp[i] < (unsigned char)ref[i] ? -1 : 1;
+		}
+	}
+	return ref[len] == '\0' ? 0 : -1;
+}
+
+
+/* If the first @p level space-delimited components of @p name equal path[0..level) and @p name has a
+ * further component at index @p level, return a pointer to it and its length via @p comp / @p len. */
+static bool name_component(const char *name, char path[][CONFIG_SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN], size_t level, const char **comp, size_t *len) {
+	const char *p = name;
+	for (size_t j = 0; *p != '\0'; j++) {
+		const char *start = p;
+		while (*p != '\0' && *p != ' ') {
+			p++;
+		}
+		if (j == level) {
+			*comp = start;
+			*len = (size_t)(p - start);
+			return true;
+		}
+		if (comp_cmp(start, (size_t)(p - start), path[j]) != 0) {
+			return false;
+		}
+		if (*p == ' ') {
+			p++;
+		}
+	}
+	return false;
+}
+
+
+/* Pick a mount tree component at index @p level among advertised names whose first @p level
+ * components equal path[0..level). With @p next, the smallest component greater than @p ref is
+ * chosen; otherwise the largest one smaller than @p ref. A NULL @p ref removes the bound (used to
+ * pick the very first child). The chosen component is copied into @p out and true is returned. */
+static bool pick_component(char path[][CONFIG_SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN], size_t level, const char *ref, bool next, char *out) {
+	bool found = false;
+	Interface *iface = NULL;
+	for (size_t i = 0; iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_CONF, i, &iface) == ISERVICELOCATOR_RET_OK; i++) {
+		const char *name = NULL;
+		if (iservicelocator_get_name(locator, iface, &name) != ISERVICELOCATOR_RET_OK || name == NULL) {
+			continue;
+		}
+		const char *comp = NULL;
+		size_t len = 0;
+		if (!name_component(name, path, level, &comp, &len)) {
+			continue;
+		}
+		if (ref != NULL && (next ? comp_cmp(comp, len, ref) <= 0 : comp_cmp(comp, len, ref) >= 0)) {
+			continue;
+		}
+		if (found && (next ? comp_cmp(comp, len, out) >= 0 : comp_cmp(comp, len, out) <= 0)) {
+			continue;
+		}
+		if (len >= CONFIG_SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN) {
+			len = CONFIG_SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN - 1;
+		}
+		memcpy(out, comp, len);
+		out[len] = '\0';
+		found = true;
+	}
+	return found;
+}
+
+
+/* Decide whether a walk at @p path should traverse the virtual mount tree rather than a real Conf.
+ * Only relevant with a NULL root: the real Conf serves the walk when path lies inside a mount, or
+ * when path is a mount point and we are descending into it. */
+static bool walk_is_virtual(char path[][CONFIG_SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN], size_t depth, enum conf_dir dir) {
+	bool at_root = false;
+	Interface *iface = NULL;
+	for (size_t i = 0; iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_CONF, i, &iface) == ISERVICELOCATOR_RET_OK; i++) {
+		const char *name = NULL;
+		if (iservicelocator_get_name(locator, iface, &name) != ISERVICELOCATOR_RET_OK || name == NULL) {
+			continue;
+		}
+		size_t len = 0;
+		if (mount_name_is_prefix(name, path, depth, &len)) {
+			if (len < depth) {
+				return false;
+			}
+			at_root = true;
+		}
+	}
+	return !(at_root && dir == CONF_DIR_CHILD);
+}
+
+
+/* Encode a single mount tree node (always a subtree) with the given name into an open array. */
+static void encode_mount_node(CborEncoder *arr, const char *name) {
+	CborEncoder entry;
+	cbor_encoder_create_map(arr, &entry, CborIndefiniteLength);
+	encode_stat_fields(&entry, name, CONF_SUBTREE, 0);
+	cbor_encoder_close_container(arr, &entry);
+}
+
+
+/***********************************************************************************************************************
  * Command handlers
  **********************************************************************************************************************/
 
@@ -413,8 +576,12 @@ static proto_conf_ret_t process_cc_walk(ProtoConf *self, CborValue *imap, CborEn
 		limit = req_limit;
 	}
 
+	/* With a NULL root the path may address a virtual node of the service locator mount tree, which
+	 * has no backing Conf and is walked directly below. Real nodes are resolved as usual. */
+	bool virtual = self->root == NULL && walk_is_virtual(path, depth, dir);
+
 	Conf *node = NULL;
-	if (resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (!virtual && resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -424,7 +591,30 @@ static proto_conf_ret_t process_cc_walk(ProtoConf *self, CborValue *imap, CborEn
 	CborEncoder arr;
 	cbor_encoder_create_array(omap, &arr, CborIndefiniteLength);
 
-	if (dir == CONF_DIR_NEXT || dir == CONF_DIR_PREV) {
+	if (virtual) {
+		char comp[CONFIG_SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN];
+		if (dir == CONF_DIR_CHILD) {
+			if (pick_component(path, depth, NULL, true, comp)) {
+				encode_mount_node(&arr, comp);
+			}
+		} else if (dir == CONF_DIR_UP) {
+			if (depth == 1) {
+				encode_mount_node(&arr, "");
+			} else if (depth > 1) {
+				encode_mount_node(&arr, path[depth - 2]);
+			}
+		} else if (depth > 0) {
+			/* CONF_DIR_NEXT or CONF_DIR_PREV: siblings among the mount tree components. */
+			char ref[CONFIG_SERVICE_PROTO_CONF_MAX_PATH_COMP_LEN];
+			strncpy(ref, path[depth - 1], sizeof(ref));
+			ref[sizeof(ref) - 1] = '\0';
+			for (uint32_t count = 0; count < limit && pick_component(path, depth - 1, ref, dir == CONF_DIR_NEXT, comp); count++) {
+				encode_mount_node(&arr, comp);
+				strncpy(ref, comp, sizeof(ref));
+				ref[sizeof(ref) - 1] = '\0';
+			}
+		}
+	} else if (dir == CONF_DIR_NEXT || dir == CONF_DIR_PREV) {
 		Conf *cur = node;
 		size_t count = 0;
 		while (count < limit) {
