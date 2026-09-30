@@ -14,7 +14,8 @@
  * framebuffer's native mode (grayscale by luminance, truecolor by channel truncation).
  *
  * v1 limitations, to be lifted later:
- * - only set_pen, set_brush and rect are implemented (the other vmt entries are NULL),
+ * - the pen/brush state, rect, line, text and image primitives are implemented; circle, ellipse, fill and
+ *   the move_to/line_to path API are still NULL,
  * - no dithering, colors are hard-quantised,
  * - rows are assumed byte-aligned (w * bpp is a multiple of 8, true for all real modes here).
  */
@@ -494,6 +495,82 @@ static painter_ret_t painter_rect(Painter *self, int16_t x, int16_t y, uint16_t 
 }
 
 
+/* Plot a pen-width x pen-width native-colour block centred on (cx, cy) through per-scanline read-modify-write,
+ * clipped per pixel to the framebuffer. A width of 1 draws a single pixel. */
+static painter_ret_t painter_plot_thick(FbPainter *p, int32_t cx, int32_t cy, uint32_t color, int32_t pw) {
+	int32_t half = pw / 2;
+	for (int32_t oy = -half; oy < pw - half; oy++) {
+		int32_t yy = cy + oy;
+		if (yy < 0 || yy >= (int32_t)p->h) {
+			continue;
+		}
+		if (row_read(p, yy) != FB_RET_OK) {
+			return PAINTER_RET_FAILED;
+		}
+		bool dirty = false;
+		for (int32_t ox = -half; ox < pw - half; ox++) {
+			int32_t xx = cx + ox;
+			if (xx < 0 || xx >= (int32_t)p->w) {
+				continue;
+			}
+			scan_set_pixel(p->row, p->mode, xx, color);
+			dirty = true;
+		}
+		if (dirty && row_write(p, yy) != FB_RET_OK) {
+			return PAINTER_RET_FAILED;
+		}
+	}
+
+	return PAINTER_RET_OK;
+}
+
+
+/* Stroke a standalone segment from (x1, y1) to (x2, y2) with the current pen using Bresenham's algorithm,
+ * each point drawn as a pen-width square so the pen width thickens the line. A pen width of 0 draws nothing,
+ * matching the "width of 0 disables outlining" pen semantics. */
+static painter_ret_t painter_line(Painter *self, int16_t x1, int16_t y1, int16_t x2, int16_t y2) {
+	FbPainter *p = self->parent;
+
+	if (!p->active) {
+		return PAINTER_RET_NOTARGET;
+	}
+	int32_t pw = p->pen_width;
+	if (pw <= 0) {
+		return PAINTER_RET_OK;
+	}
+
+	uint32_t pen = color_to_native(p, p->pen_color);
+
+	int32_t x = x1;
+	int32_t y = y1;
+	int32_t dx = abs((int32_t)x2 - x1);
+	int32_t dy = -abs((int32_t)y2 - y1);
+	int32_t sx = (x1 < x2) ? 1 : -1;
+	int32_t sy = (y1 < y2) ? 1 : -1;
+	int32_t err = dx + dy;
+
+	while (true) {
+		if (painter_plot_thick(p, x, y, pen, pw) != PAINTER_RET_OK) {
+			return PAINTER_RET_FAILED;
+		}
+		if (x == x2 && y == y2) {
+			break;
+		}
+		int32_t e2 = 2 * err;
+		if (e2 >= dy) {
+			err += dy;
+			x += sx;
+		}
+		if (e2 <= dx) {
+			err += dx;
+			y += sy;
+		}
+	}
+
+	return PAINTER_RET_OK;
+}
+
+
 static painter_ret_t painter_image(Painter *self, int16_t x, int16_t y, const struct painter_raw_image *image,
                                    enum painter_mode mode) {
 	FbPainter *p = self->parent;
@@ -557,6 +634,7 @@ static const struct painter_vmt fb_painter_vmt = {
 	.set_brush = painter_set_brush,
 	.set_font = painter_set_font,
 	.rect = painter_rect,
+	.line = painter_line,
 	.text = painter_text,
 	.text_size = painter_text_size,
 	.image = painter_image,
