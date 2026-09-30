@@ -62,5 +62,10 @@ configlib_ret_t configlib_set_constraint(ConfiglibValue *self, union conf_constr
 configlib_ret_t configlib_init_map(ConfiglibValue *self, const char *name, void *var, enum conf_type type);
 configlib_ret_t configlib_init_map_append(ConfiglibValue *self, const char *name, void *var, enum conf_type type, ConfiglibValue *parent, enum conf_dir dir);
 
+/* Render a leaf node's value into @p buf as human-readable text. Only the scalar and string types are
+ * printed: integers, float, bool, text strings and byte strings (as a space-separated 0x.. hex dump).
+ * Non-value types (subtrees, unreadable nodes) and anything else yield an empty string. */
+void configlib_value_str(Conf *self, enum conf_type type, char *buf, size_t size);
+
 conf_ret_t configlib_log_value(Conf *self, uint32_t indent);
 conf_ret_t configlib_log_walk(Conf *self);

@@ -270,7 +270,7 @@ configlib_ret_t configlib_init_map_append(ConfiglibValue *self, const char *name
  * printed: integers, float, bool, text strings and byte strings (as a space-separated 0x.. hex dump).
  * Non-value types (subtrees, unreadable nodes) and anything else yield an empty string. A byte string
  * too long for @p buf is truncated with a trailing ellipsis. */
-static void configlib_value_str(Conf *self, enum conf_type type, char *buf, size_t size) {
+void configlib_value_str(Conf *self, enum conf_type type, char *buf, size_t size) {
 	buf[0] = '\0';
 	union conf_val val = {0};
 	if (self->vmt->read(self, &val) != CONF_RET_OK) {
