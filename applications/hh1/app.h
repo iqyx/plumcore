@@ -27,6 +27,8 @@
 #include <services/proto-dgble/proto-dgble.h>
 #include <services/nbus-flash/nbus-flash.h>
 #include <services/nbus-flash-proxy/nbus-flash-proxy.h>
+#include <services/nbus-mq-poll/nbus-mq-poll.h>
+#include <services/proto-conf/proto-conf.h>
 #if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
 	#include <interfaces/mq.h>
 	#include <services/nbus2/nbus2.h>
@@ -63,8 +65,6 @@ typedef struct {
 
 	/* Generic BLE device advertised by the port and the GATT server built on top of it (see ble.c). */
 	Ble *ble;
-	BleSrv ble_srv;
-	BleChar ble_chr;
 
 	/* Datagram-over-BLE tunnel built on the same device and the flash endpoint's Datagram. */
 	ProtoDgble dgble;
@@ -76,6 +76,17 @@ typedef struct {
 	 * service over the backplane. Exposed on the same tunnel because the ST67W611 does not reliably route
 	 * peer writes to a second GATT service. */
 	Datagram *dgble_proxy_flash;
+
+	/* Third endpoint (ep 3) on the dgble tunnel above and the nbus-mq-poll bridge serving the local
+	 * message queue over it, so a BLE client can poll the values pulled in from the measurement card. */
+	Datagram *dgble_mq_poll;
+	NbusMqPoll dgble_nbus_mq_poll;
+
+	/* Fourth endpoint (ep 4) on the dgble tunnel above and the remote configuration protocol served
+	 * over it. It runs with a NULL root, so it exposes every Conf tree advertised via the service
+	 * locator, each mounted under its (space-delimited) name. */
+	Datagram *dgble_conf;
+	ProtoConf dgble_proto_conf;
 
 	/* Pairing dialog: a hidden compositor window brought on top while a passkey is being entered,
 	 * painted through its own painter. The passkey is kept as a preformatted six digit string. */
@@ -111,8 +122,8 @@ typedef struct {
 /**
  * @brief Discover the BLE device advertised by the port and build the GATT server on it.
  *
- * Sets up the event handler, device name, pairing security, the GATT service and characteristic,
- * the GAP appearance and starts advertising. Implemented in ble.c.
+ * Sets up the event handler, device name, pairing security, the datagram-over-BLE tunnel and its
+ * endpoints, the GAP appearance and starts advertising. Implemented in ble.c.
  *
  * @param self Instance of the application
  * @return APP_RET_FAILED if the BLE device was not found or setup failed,

@@ -151,6 +151,8 @@ static void app_ble_event_handler(void *ctx, const struct ble_event *event) {
 
 
 app_ret_t app_ble_init(App *self) {
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("--------------- starting BLE services ----------------"));
+
 	/* Discover the generic BLE device advertised by the port. */
 	self->ble = NULL;
 	if (iservicelocator_query_name_type(locator, "ble", ISERVICELOCATOR_TYPE_BLE, (Interface **)&self->ble) != ISERVICELOCATOR_RET_OK) {
@@ -196,8 +198,29 @@ app_ret_t app_ble_init(App *self) {
 
 	/* Endpoint 2: proxied to the measurement card's nbus-flash service over the backplane (the proxy
 	 * itself is wired in app_setup_backplane, once the nbus2 stack is up). */
-	if (proto_dgble_add_endpoint(&self->dgble, 2, &dgble_flash_desc, &self->dgble_proxy_flash) != PROTO_DGBLE_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot add the flash proxy tunnel endpoint"));
+	//if (proto_dgble_add_endpoint(&self->dgble, 2, &dgble_flash_desc, &self->dgble_proxy_flash) != PROTO_DGBLE_RET_OK) {
+		//u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot add the flash proxy tunnel endpoint"));
+		//return APP_RET_FAILED;
+	//}
+
+	/* Endpoint 3: this device's local message queue, served through the nbus-mq-poll bridge below so a
+	 * BLE client can poll the values pulled in from the measurement card. */
+	static const struct proto_dgble_descriptor dgble_mq_desc = {
+		.protocol = "mq",
+		.protocol_version = "1.0.0",
+	};
+	if (proto_dgble_add_endpoint(&self->dgble, 3, &dgble_mq_desc, &self->dgble_mq_poll) != PROTO_DGBLE_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot add the mq poll tunnel endpoint"));
+		return APP_RET_FAILED;
+	}
+
+	/* Endpoint 4: remote configuration tree access, served by the local proto-conf service below. */
+	static const struct proto_dgble_descriptor dgble_conf_desc = {
+		.protocol = "conf",
+		.protocol_version = "1.0.0",
+	};
+	if (proto_dgble_add_endpoint(&self->dgble, 4, &dgble_conf_desc, &self->dgble_conf) != PROTO_DGBLE_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot add the conf tunnel endpoint"));
 		return APP_RET_FAILED;
 	}
 
@@ -211,46 +234,43 @@ app_ret_t app_ble_init(App *self) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start nbus-flash on the tunnel endpoint"));
 	}
 
+	/* Serve the local message queue over endpoint 3 (nbus-mq-poll bridge). The queue holds whatever the
+	 * nbus-mq-client republishes from the measurement card under the "ff14" prefix, so a BLE client can
+	 * poll those values. */
+	Mq *mq = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_MQ, 0, (Interface **)&mq) == ISERVICELOCATOR_RET_OK) {
+		const struct nbus_mq_poll_conf mq_poll_conf = {
+			.mq = mq,
+			.d = self->dgble_mq_poll,
+			.topic = "#",
+			.device_name = "nwdaq-main-hh1",
+		};
+		nbus_mq_poll_init(&self->dgble_nbus_mq_poll, &mq_poll_conf);
+		nbus_mq_poll_start(&self->dgble_nbus_mq_poll);
+	} else {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no message queue, mq poll endpoint not served"));
+	}
+
+	/* Serve the remote configuration protocol over endpoint 4. A NULL root exposes every Conf tree
+	 * advertised via the service locator, each mounted under its (space-delimited) name. */
+	if (proto_conf_init(&self->dgble_proto_conf, self->dgble_conf, NULL) != PROTO_CONF_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start proto-conf on the tunnel endpoint"));
+	}
+
 	/* Enable authenticated pairing with Passkey Entry: this device only has a display (DISPLAY_ONLY), so
 	 * the module generates the PIN and reports it through BLE_EVENT_PASSKEY_DISPLAY while the peer types it
 	 * in. */
 	self->ble->vmt->set_security(self->ble, BLE_IO_CAP_DISPLAY_ONLY, BLE_SEC_LEVEL_AUTH);
 
-	/* Build the GATT server: one primary service, then register it. The 128 bit UUID is written most
-	 * significant octet first: 1ba6f7dd-31a5-7703-5bb0-89e1000004d2. */
-	static const struct ble_uuid ble_srv_uuid = {
-		.type = BLE_UUID_128,
-		.u128 = {
-			0x1b, 0xa6, 0xf7, 0xdd, 0x31, 0xa5, 0x77, 0x03,
-			0x5b, 0xb0, 0x89, 0xe1, 0x00, 0x00, 0x04, 0xd2,
-		},
-	};
-	self->ble->vmt->add_service(self->ble, &ble_srv_uuid, &self->ble_srv);
-
-	/* Add a readable, writable, notifiable characteristic to the service. UUID (placeholder):
-	 * 1ba6f7dd-31a5-7703-5bb0-89e1000004d3, most significant octet first. */
-	static const struct ble_uuid ble_chr_uuid = {
-		.type = BLE_UUID_128,
-		.u128 = {
-			0x1b, 0xa6, 0xf7, 0xdd, 0x31, 0xa5, 0x77, 0x03,
-			0x5b, 0xb0, 0x89, 0xe1, 0x00, 0x00, 0x04, 0xd3,
-		},
-	};
-	self->ble_srv.vmt->add_characteristic(&self->ble_srv, &ble_chr_uuid,
-	                                      BLE_CHAR_PROP_READ | BLE_CHAR_PROP_WRITE | BLE_CHAR_PROP_NOTIFY,
-	                                      &self->ble_chr);
-
+	/* Register the GATT server (the dgble tunnel service built above). */
 	self->ble->vmt->server_start(self->ble);
 
 	/* Override the module's default GAP appearance (0x0341, "Heart Rate Sensor") with 0x1480
 	 * ("Generic Industrial Measurement Device"). */
 	self->ble->vmt->set_appearance(self->ble, 0x1480);
 
-	/* Give the characteristic an initial value so peer reads return something. */
-	static const uint8_t ble_chr_value[] = { 0x00, 0x00, 0x00, 0x00 };
-	self->ble_chr.vmt->set_value(&self->ble_chr, ble_chr_value, sizeof(ble_chr_value));
-
 	self->ble->vmt->advertising_start(self->ble);
 
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("all BLE services started successfully"));
 	return APP_RET_OK;
 }

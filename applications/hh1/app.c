@@ -117,6 +117,7 @@ static void app_task(void *p) {
 	while (true) {
 		/* Read the fuel gauge sensors (SI base units) and write the battery status to the serial
 		 * console, scaled back to the human-friendly display units. */
+		/*
 		char s[96];
 		snprintf(s, sizeof(s), "Vbat: %ld mV  Ibat: %ld mA  SoC: %ld %%  SoH: %ld %%  Qrem: %ld mAh\r\n",
 			(int32_t)(app_read_sensor(self->bat_voltage) * 1000.0f),
@@ -127,7 +128,7 @@ static void app_task(void *p) {
 		if (self->console != NULL) {
 			self->console->vmt->write(self->console, s, strlen(s));
 		}
-
+		*/
 		vTaskDelay(1000);
 	}
 	vTaskDelete(NULL);
@@ -281,6 +282,7 @@ app_ret_t app_init(App *self) {
 
 	#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
 		/* Pull the measurement card's values in over the backplane. */
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("--------------- starting measurement services ----------------"));
 		app_setup_backplane(self);
 	#endif
 
