@@ -44,6 +44,7 @@
 #include <services/st67w611/st67w611.h>
 #include <services/bq25798/bq25798.h>
 #include <services/bq27441/bq27441.h>
+#include <services/flash-cbor-mib/flash-cbor-mib.h>
 #include <interfaces/applet.h>
 #include <applets/hello-world/hello-world.h>
 #include <applets/hello-wren/generated/hello-wren.h>
@@ -74,8 +75,12 @@ Stm32Flash iflash;
 FlashVolStatic iflash_vol;
 
 Flash *lv_bootloader;
-Flash *lv_bl_conf;
+Flash *lv_bootconf;
+Flash *lv_mib;
 Flash *lv_app;
+#if !defined(CONFIG_APP_BL)
+FlashCborMib mib;
+#endif
 
 /* Partition table carved out of the flash1 QSPI NOR flash. */
 FlashVolStatic flash1_vol;
@@ -339,20 +344,39 @@ static void port_setup_iflash(void) {
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)&iflash.flash, "flash0");
 
 	/* Layout (offset -> size):
-	 *   0x000000  bootloader  120K
-	 *   0x01e000  bl-conf       8K   (bootloader configuration)
+	 *   0x000000  bootloader  112K
+	 *   0x01c000  bootconf      8K   (bootloader configuration)
+	 *   0x01e000  mib           8K   (manufacturing information block)
 	 *   0x020000  app         512K   (application image, load address 0x08020000)
 	 */
 	flash_vol_static_init(&iflash_vol, &iflash.flash);
 
-	flash_vol_static_create(&iflash_vol, "bootloader", 0,          120 * 1024, &lv_bootloader);
+	flash_vol_static_create(&iflash_vol, "bootloader", 0,          112 * 1024, &lv_bootloader);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_bootloader, "bootloader");
 
-	flash_vol_static_create(&iflash_vol, "bl-conf",    120 * 1024, 8 * 1024,   &lv_bl_conf);
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_bl_conf, "bl-conf");
+	flash_vol_static_create(&iflash_vol, "bootconf",   112 * 1024, 8 * 1024,   &lv_bootconf);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_bootconf, "bootconf");
+
+	flash_vol_static_create(&iflash_vol, "mib",        120 * 1024, 8 * 1024,   &lv_mib);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_mib, "mib");
 
 	flash_vol_static_create(&iflash_vol, "app",        128 * 1024, 512 * 1024, &lv_app);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_app, "app");
+
+	#if !defined(CONFIG_APP_BL)
+		const struct flash_cbor_mib_conf mib_conf = {
+			.flash = lv_mib,
+			.offset = 0,
+			.max_size = 0,
+			.public_key_b64 = CONFIG_PORT_NWDAQ_MAIN_HH1_MIB_PUBKEY,
+			.root_name = "mib",
+		};
+		if (flash_cbor_mib_init(&mib, &mib_conf) == FLASH_CBOR_MIB_RET_OK) {
+			Conf *mib_root = NULL;
+			flash_cbor_mib_get_root(&mib, &mib_root);
+			iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)mib_root, "mib");
+		}
+	#endif
 }
 
 
