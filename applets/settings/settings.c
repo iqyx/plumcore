@@ -39,10 +39,9 @@
 /* Height of a line of text in the painter's font, used to vertically centre row content and the location. */
 #define SETTINGS_TEXT_H 8
 
-/* Horizontal offset of a level's guide line (and the centre of its expand/collapse icon) within the
- * indent cell, and the side of the square expand/collapse icon, both in pixels. */
+/* Horizontal offset of a level's guide line (and the centre of its expand/collapse icon) within the indent
+ * cell, in pixels. */
 #define SETTINGS_GUIDE_OFF 7
-#define SETTINGS_ICON 9
 
 /* Size of the transient buffers a redraw uses to render one line of text (a node name, a formatted value
  * or the location path). Anything longer is cropped to the display width anyway, so this bounds only a
@@ -506,26 +505,18 @@ static void settings_draw_guides(SettingsApplet *self, const struct settings_nod
 }
 
 
-/* Draw the expand/collapse icon of a subtree: a small square with a minus sign when expanded, a plus sign
- * when collapsed, centred on the level's guide column. The square is filled with the row background so the
- * guide line does not show through it. The caller must have an active painter frame. */
-static void settings_draw_icon(SettingsApplet *self, const struct settings_node *node, int16_t y,
-                               painter_color_t fg, painter_color_t bg) {
+/* Draw the expand/collapse icon of a subtree, centred on the level's guide column: the tree-minus asset when
+ * expanded, the tree-plus asset when collapsed. The assets are black-on-white, so they are blitted inverted
+ * on a normal (black) row and straight on the highlighted (white) row; the icon's own opaque background hides
+ * the guide line that runs beneath it. The caller must have an active painter frame. */
+static void settings_draw_icon(SettingsApplet *self, const struct settings_node *node, int16_t y, bool selected) {
 	Painter *painter = &self->painter.painter;
+	const struct painter_raw_image *icon = node->collapsed ? &tree_plus_data : &tree_minus_data;
 	int16_t gx = settings_guide_x(node->depth);
 	int16_t yc = (int16_t)(y + SETTINGS_ROW_H / 2);
-	int16_t x0 = (int16_t)(gx - SETTINGS_ICON / 2);
-	int16_t y0 = (int16_t)(yc - SETTINGS_ICON / 2);
 
-	painter->vmt->set_pen(painter, fg, 1);
-	painter->vmt->set_brush(painter, bg);
-	painter->vmt->rect(painter, x0, y0, SETTINGS_ICON, SETTINGS_ICON);
-
-	painter->vmt->set_pen(painter, fg, 1);
-	painter->vmt->line(painter, (int16_t)(gx - 2), yc, (int16_t)(gx + 2), yc);
-	if (node->collapsed) {
-		painter->vmt->line(painter, gx, (int16_t)(yc - 2), gx, (int16_t)(yc + 2));
-	}
+	painter->vmt->image(painter, (int16_t)(gx - (int16_t)icon->w / 2), (int16_t)(yc - (int16_t)icon->h / 2),
+	                   icon, selected ? PAINTER_MODE_NORMAL : PAINTER_MODE_INVERTED);
 }
 
 
@@ -537,7 +528,6 @@ static void settings_draw_row(SettingsApplet *self, const struct settings_node *
 	uint16_t content_w = (uint16_t)(self->w - SETTINGS_SCROLLBAR_W);
 	bool selected = (index == self->selected);
 	painter_color_t fg = selected ? 0xff000000 : 0xffffffff;
-	painter_color_t bg = selected ? 0xffffffff : 0xff000000;
 
 	if (selected) {
 		painter->vmt->set_pen(painter, 0xffffffff, 0);
@@ -547,7 +537,7 @@ static void settings_draw_row(SettingsApplet *self, const struct settings_node *
 
 	settings_draw_guides(self, node, y, fg);
 	if (node->subtree && node->has_children) {
-		settings_draw_icon(self, node, y, fg, bg);
+		settings_draw_icon(self, node, y, selected);
 	}
 
 	painter->vmt->set_font(painter, PAINTER_FONT_NORMAL, NULL);
