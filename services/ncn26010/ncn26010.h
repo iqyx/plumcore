@@ -267,6 +267,7 @@
 #define NCN26010_PHYCTRL_LOOPBACK                         0x00004000
 #define NCN26010_PHYCTRL_SPEED_LSB                        0x00002000
 #define NCN26010_PHYCTRL_LINK_CONTROL                     0x00001000
+#define NCN26010_PHYCTRL_POWER_DOWN                       0x00000800
 #define NCN26010_PHYCTRL_ISOLATE                          0x00000400
 #define NCN26010_PHYCTRL_LINK_RESET                       0x00000200
 #define NCN26010_PHYCTRL_DUPLEX_MODE                      0x00000100
@@ -622,7 +623,7 @@ ncn26010_ret_t ncn26010_init(Ncn26010 *self, SpiDev *spi);
 ncn26010_ret_t ncn26010_free(Ncn26010 *self);
 ncn26010_ret_t ncn26010_irq_handler(Ncn26010 *self);
 ncn26010_ret_t ncn26010_link_status(Ncn26010 *self, bool *up, bool *neg_completed);
-ncn26010_ret_t ncn26010_sleep(Ncn26010 *self);
+ncn26010_ret_t ncn26010_sleep(Ncn26010 *self, bool sleep);
 ncn26010_ret_t ncn26010_send(Ncn26010 *self, const uint8_t *buf, size_t len);
 ncn26010_ret_t ncn26010_recv(Ncn26010 *self, uint8_t *buf, size_t size, size_t *len);
 

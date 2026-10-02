@@ -138,6 +138,20 @@ static ncn26010_ret_t ncn26010_rmw_set(Ncn26010 *self, uint8_t mms, uint16_t add
 }
 
 
+static ncn26010_ret_t ncn26010_rmw_clear(Ncn26010 *self, uint8_t mms, uint16_t addr, uint32_t data) {
+	uint32_t val = 0;
+	if (ncn26010_read(self, mms, addr, &val) != NCN26010_RET_OK) {
+		return NCN26010_RET_FAILED;
+	}
+	val &= ~data;
+	if (ncn26010_write(self, mms, addr, val) != NCN26010_RET_OK) {
+		return NCN26010_RET_FAILED;
+	}
+
+	return NCN26010_RET_OK;
+}
+
+
 static ncn26010_ret_t reset(Ncn26010 *self) {
 	ncn26010_rmw_set(self, NCN26010_RESET, NCN26010_RESET_RESET);
 	for (uint32_t attempts = 0; ; attempts++) {
@@ -284,14 +298,29 @@ ncn26010_ret_t ncn26010_link_status(Ncn26010 *self, bool *up, bool *neg_complete
 }
 
 
-ncn26010_ret_t ncn26010_sleep(Ncn26010 *self) {
-	/* Put the 10Base-T1S PHY PMA into its low power mode to cut the idle current consumption. */
-	if (ncn26010_rmw_set(self, NCN26010_T1SPMACTRL, NCN26010_T1SPMACTRL_LOW_POWER_MODE) != NCN26010_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot enter low power mode"));
-		return NCN26010_RET_FAILED;
+ncn26010_ret_t ncn26010_sleep(Ncn26010 *self, bool sleep) {
+	if (sleep) {
+		/* Power down the PHY and isolate it from the MII, then put the 10Base-T1S PHY PMA into its
+		 * low power mode to cut the idle current consumption. */
+		if (ncn26010_rmw_set(self, NCN26010_PHYCTRL,
+				NCN26010_PHYCTRL_POWER_DOWN | NCN26010_PHYCTRL_ISOLATE) != NCN26010_RET_OK ||
+			ncn26010_rmw_set(self, NCN26010_T1SPMACTRL, NCN26010_T1SPMACTRL_LOW_POWER_MODE) != NCN26010_RET_OK) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot enter low power mode"));
+			return NCN26010_RET_FAILED;
+		}
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("entered low power mode"));
+	} else {
+		/* Wake up in the reverse order: leave the PMA low power mode, then bring the PHY back out of
+		 * power down and remove the MII isolation. */
+		if (ncn26010_rmw_clear(self, NCN26010_T1SPMACTRL, NCN26010_T1SPMACTRL_LOW_POWER_MODE) != NCN26010_RET_OK ||
+			ncn26010_rmw_clear(self, NCN26010_PHYCTRL,
+				NCN26010_PHYCTRL_POWER_DOWN | NCN26010_PHYCTRL_ISOLATE) != NCN26010_RET_OK) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot leave low power mode"));
+			return NCN26010_RET_FAILED;
+		}
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("left low power mode"));
 	}
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("entered low power mode"));
 	return NCN26010_RET_OK;
 }
 

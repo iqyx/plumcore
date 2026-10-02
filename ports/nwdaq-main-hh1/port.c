@@ -714,7 +714,7 @@ static void port_setup_t1s(void) {
 	stm32_spidev_init(&spi2_t1s, &spi2.bus, t1s_cs);
 
 	ncn26010_init(&t1s, &spi2_t1s.dev);
-	ncn26010_sleep(&t1s);
+	ncn26010_sleep(&t1s, true);
 }
 
 
