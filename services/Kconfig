@@ -223,6 +223,8 @@ menu "High level device drivers"
 		bool "A generic power device with various/GPIO backends"
 		default n
 
+	source "services/pm-generic/Kconfig"
+
 	config SERVICE_GENERIC_MUX
 		bool "A generic analog/digital MUX configurable using GPIO"
 		default n
