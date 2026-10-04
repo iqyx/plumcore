@@ -280,6 +280,15 @@ lp581x_ret_t lp581x_free(Lp581x *self) {
 }
 
 
+lp581x_ret_t lp581x_enable(Lp581x *self, bool enable) {
+	if (lp581x_write_reg(self, LP581X_REG_CHIP_EN, enable ? LP581X_CHIP_EN_ENABLE : 0) != LP581X_RET_OK) {
+		return LP581X_RET_FAILED;
+	}
+
+	return LP581X_RET_OK;
+}
+
+
 lp581x_ret_t lp581x_get_pwm(Lp581x *self, size_t channel, Pwm **pwm) {
 	if (pwm == NULL || channel >= self->channel_count) {
 		return LP581X_RET_FAILED;

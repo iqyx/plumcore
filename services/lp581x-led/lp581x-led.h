@@ -63,6 +63,17 @@ lp581x_ret_t lp581x_init(Lp581x *self, I2cBus *i2c, uint8_t addr, lp581x_type_t 
 lp581x_ret_t lp581x_free(Lp581x *self);
 
 /**
+ * @brief Enable or disable the device
+ *
+ * Sets the CHIP_EN bit, powering the device on or off. Disabling turns off all outputs while
+ * retaining the configuration, so a subsequent enable resumes with the previously programmed state.
+ *
+ * @param self Driver instance
+ * @param enable true to enable the device, false to disable it
+ */
+lp581x_ret_t lp581x_enable(Lp581x *self, bool enable);
+
+/**
  * @brief Get the PWM interface of a single output channel
  *
  * @param self Driver instance
