@@ -78,6 +78,7 @@ enum iservicelocator_type {
 	ISERVICELOCATOR_TYPE_BLE,
 	ISERVICELOCATOR_TYPE_OW,
 	ISERVICELOCATOR_TYPE_MUX,
+	ISERVICELOCATOR_TYPE_PM,
 };
 
 struct iservicelocator_vmt {
