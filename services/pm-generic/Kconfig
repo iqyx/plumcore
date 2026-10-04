@@ -1,0 +1,3 @@
+config SERVICE_PM_GENERIC
+	bool "Generic power management service"
+	default n
