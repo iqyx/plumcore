@@ -28,10 +28,11 @@
 
 #define MODULE_NAME "settings"
 
-/* Height of the location bar drawn along the top edge of the window and of a single tree row, both in
- * pixels. The tree indents each subtree level by SETTINGS_INDENT pixels and reserves SETTINGS_SCROLLBAR_W
- * pixels along the right edge for the scroll bar. */
-#define SETTINGS_LOCBAR_H 16
+/* Height of the location bar drawn along the top edge of the window, the button panel drawn along the bottom
+ * edge and of a single tree row, all in pixels. The tree indents each subtree level by SETTINGS_INDENT pixels
+ * and reserves SETTINGS_SCROLLBAR_W pixels along the right edge for the scroll bar. */
+#define SETTINGS_LOCBAR_H 11
+#define SETTINGS_BTNBAR_H 11
 #define SETTINGS_ROW_H 12
 #define SETTINGS_INDENT 16
 #define SETTINGS_SCROLLBAR_W 8
@@ -447,9 +448,9 @@ static bool settings_toggle_visit(SettingsApplet *self, const struct settings_no
  * Rendering
  **********************************************************************************************************************/
 
-/* Height of the tree content area below the location bar, in pixels. */
+/* Height of the tree content area between the location bar and the button panel, in pixels. */
 static uint16_t settings_content_h(SettingsApplet *self) {
-	return (uint16_t)(self->h - SETTINGS_LOCBAR_H);
+	return (uint16_t)(self->h - SETTINGS_LOCBAR_H - SETTINGS_BTNBAR_H);
 }
 
 
@@ -597,6 +598,47 @@ static void settings_draw_locbar(SettingsApplet *self, const char *path) {
 }
 
 
+/* Default function-key mapping shown in the button panel: F1 opens the details, F2 collapses the whole tree
+ * and F4 saves, with F3 left unassigned. An empty string leaves that key's cell blank. */
+static const char *settings_default_buttons[4] = {
+	"Details",
+	"Collapse",
+	"",
+	"Save",
+};
+
+
+/* Draw the button panel along the bottom edge of the window, matching the location bar's light grey
+ * background with no per-button rectangles. The width is split into four equal cells, one per function key,
+ * each holding "F<n>: <label>" centred in its cell; a cell whose label is empty is left blank. The caller
+ * must have an active painter frame. */
+static void settings_draw_btnbar(SettingsApplet *self, const char *buttons[4]) {
+	Painter *painter = &self->painter.painter;
+	int16_t bar_y = (int16_t)(self->h - SETTINGS_BTNBAR_H);
+	uint16_t cell_w = (uint16_t)(self->w / 4);
+
+	painter->vmt->set_pen(painter, 0xff444444, 0);
+	painter->vmt->set_brush(painter, 0xff444444);
+	painter->vmt->rect(painter, 0, bar_y, self->w, SETTINGS_BTNBAR_H);
+
+	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, NULL);
+	painter->vmt->set_pen(painter, 0xffffffff, 1);
+
+	for (int i = 0; i < 4; i++) {
+		if (buttons[i] == NULL || buttons[i][0] == '\0') {
+			continue;
+		}
+		char label[SETTINGS_LINE_BUF];
+		snprintf(label, sizeof(label), "F%d: %s", i + 1, buttons[i]);
+		uint16_t label_w = 0;
+		painter->vmt->text_size(painter, label, &label_w, NULL);
+		int16_t cell_x = (int16_t)(i * cell_w);
+		int16_t label_x = (int16_t)(cell_x + (cell_w - label_w) / 2);
+		painter->vmt->text(painter, label_x, (int16_t)(bar_y + self->text_y), label);
+	}
+}
+
+
 /* Draw the vertical scroll bar along the right edge of the content area, exactly like the live-data one: a
  * black-filled, white-bordered track with a white-filled scroller sized and positioned to reflect how much
  * of the tree is visible and how far it is scrolled. The caller must have an active painter frame. */
@@ -683,6 +725,7 @@ static void settings_redraw(SettingsApplet *self) {
 
 	settings_draw_scrollbar(self, r.index);
 	settings_draw_locbar(self, r.have_path ? r.path : "/");
+	settings_draw_btnbar(self, settings_default_buttons);
 
 	painter->vmt->end(painter);
 }
