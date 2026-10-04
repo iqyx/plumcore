@@ -62,9 +62,34 @@ static event_ret_t gui_wm_fs_event_listen(Event *self, enum event_type *type, en
 			return EV_RET_FAILED;
 		}
 
+		/* Sample the current power state once; both the onoff handling and the off-state gate below use it. */
+		enum pm_state state = PM_STATE_NONE;
+		if (g->conf.pm != NULL) {
+			g->conf.pm->vmt->pm_get_state(g->conf.pm, &state);
+		}
+
+		/* While the system is in the off (low-power) state, the onoff key switches the device back on.
+		 * Moving to the on state crosses the D3 -> D2 transition, which reboots into a clean, fully restored
+		 * state, so this call does not return. */
+		if (g->conf.pm != NULL && state == g->conf.off_state && c == g->conf.onoff_event && v != 0) {
+			g->conf.pm->vmt->pm_set_state(g->conf.pm, g->conf.on_state);
+			continue;
+		}
+
+		/* In the off state the onoff key handled above is the only live input; ignore everything else so no
+		 * key reaches the GUI while the device is off. */
+		if (g->conf.pm != NULL && state == g->conf.off_state) {
+			continue;
+		}
+
 		/* Give a single short beep on every key press (not on release). */
 		if (v != 0 && g->conf.beeper != NULL) {
 			g->conf.beeper->vmt->sequence(g->conf.beeper, GUI_WM_FS_BEEPER_SEQ_KEY_CLICK);
+		}
+
+		/* Any key press counts as user activity: bring the system back to full power. */
+		if (v != 0 && g->conf.pm != NULL) {
+			g->conf.pm->vmt->pm_set_state(g->conf.pm, PM_STATE_D0);
 		}
 
 		/* F1 pops up the window list overlay (auto-hides after a few seconds). Handled globally, so
@@ -78,6 +103,14 @@ static event_ret_t gui_wm_fs_event_listen(Event *self, enum event_type *type, en
 		 * window. */
 		if (c == EV_KEY_F6 && v != 0 && g->launcher_up) {
 			gui_launcher_show(&g->launcher);
+			continue;
+		}
+
+		/* The onoff key while the device is on (any state other than off_state, which was handled and gated
+		 * at the top of the loop) puts it into the off (low-power) state. */
+		if (g->conf.pm != NULL && c == g->conf.onoff_event && v != 0) {
+			vTaskDelay(100);
+			g->conf.pm->vmt->pm_set_state(g->conf.pm, g->conf.off_state);
 			continue;
 		}
 

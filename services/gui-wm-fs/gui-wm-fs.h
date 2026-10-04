@@ -21,6 +21,7 @@
 #include <interfaces/painter.h>
 #include <interfaces/beeper.h>
 #include <interfaces/sensor.h>
+#include <interfaces/pm.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 #include <services/gui-launcher/gui-launcher.h>
@@ -46,6 +47,17 @@ struct gui_wm_fs_conf {
 	Event *event;
 	/** Beeper for key-press feedback (optional, may be NULL). */
 	Beeper *beeper;
+
+	/** Power manager, requested to full power on key activity and toggled between on_state and off_state by
+	 * the onoff key (optional, may be NULL). */
+	Pm *pm;
+	/** Key event code that toggles the device power on/off (e.g. EV_KEY_ONOFF). */
+	enum event_code onoff_event;
+	/** Power state representing "on" (full operation); entered from off_state on the onoff key. */
+	enum pm_state on_state;
+	/** Power state representing "off" (low power); entered from on_state on the onoff key. While the manager
+	 * is in this state all key presses other than onoff_event are gated. */
+	enum pm_state off_state;
 
 	Sensor *bat_soc;
 	Sensor *bat_current;
