@@ -19,7 +19,9 @@
 #include <interfaces/painter.h>
 #include <interfaces/event.h>
 #include <interfaces/beeper.h>
+#include <interfaces/led.h>
 #include <interfaces/ble.h>
+#include <interfaces/pm.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 #include <services/gui-wm-fs/gui-wm-fs.h>
@@ -53,12 +55,20 @@ typedef struct {
 	/* Piezo beeper advertised by the port, used for key-press feedback. */
 	Beeper *beeper;
 
+	/* Power manager advertised by the port, requested to full power on key activity. */
+	Pm *pm;
+
 	/* Battery fuel gauge measurements advertised by the BQ27441 driver. */
 	Sensor *bat_voltage;
 	Sensor *bat_current;
 	Sensor *bat_soc;
 	Sensor *bat_soh;
 	Sensor *bat_remaining;
+
+	/* Battery status LED advertised by the port and the blink sequence currently pushed to it, kept so the
+	 * blink is only restarted when the current band actually changes. */
+	Led *led_bat;
+	const led_seq_item_t *bat_led_seq;
 
 	/* Serial console stream advertised by the port. */
 	Stream *console;

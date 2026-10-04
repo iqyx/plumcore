@@ -12,12 +12,34 @@
 #include <interfaces/power.h>
 #include <interfaces/sensor.h>
 #include <interfaces/stream.h>
+#include <interfaces/led.h>
+#include <interfaces/led-sequences.h>
 #include "app.h"
 
 #define MODULE_NAME "hh1"
 
 #define APP_BATTERY_W 28
 #define APP_BATTERY_H 46
+
+/* Battery-current status blinks for led_bat: red for a high current, orange for a moderate one and green
+ * when the battery is nearly idle. The green uses the same green:blue tint as the other status LEDs. */
+#define LED_SEQ_RED_BLINK LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_RGB(255, 0, 0) | LED_SEQ_TIME_MS(256), \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(256), \
+	LED_SEQ_END \
+}
+
+#define LED_SEQ_ORANGE_BLINK LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_RGB(255, 64, 0) | LED_SEQ_TIME_MS(256), \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(256), \
+	LED_SEQ_END \
+}
+
+#define LED_SEQ_GREEN_BLINK LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_RGB(0, 255, 15) | LED_SEQ_TIME_MS(256), \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(256), \
+	LED_SEQ_END \
+}
 
 /* Read a sensor value in its SI base units, returning zero if the sensor is missing or fails. */
 static float app_read_sensor(Sensor *sensor) {
@@ -26,6 +48,36 @@ static float app_read_sensor(Sensor *sensor) {
 		sensor->vmt->value_f(sensor, &value);
 	}
 	return value;
+}
+
+
+/* Reflect the charging current on led_bat: blink red above 100 mA, orange from 10 to 100 mA and green below
+ * 10 mA. bat_current is signed and positive while charging; a negative (discharging) current switches the LED
+ * off. The sequence is only pushed when the band changes, so the blink keeps running smoothly instead of
+ * restarting on every call. */
+static void app_update_bat_led(App *self) {
+	if (self->led_bat == NULL) {
+		return;
+	}
+
+	float current = app_read_sensor(self->bat_current);
+
+	const led_seq_item_t *seq;
+	if (current > 0.1f) {
+		seq = LED_SEQ_RED_BLINK;
+	} else if (current >= 0.01f) {
+		seq = LED_SEQ_ORANGE_BLINK;
+	} else if (current >= 0.005f) {
+		seq = LED_SEQ_GREEN_BLINK;
+	} else {
+		/* Discharging: keep the LED dark. */
+		seq = LED_SEQ_STOP;
+	}
+
+	if (seq != self->bat_led_seq) {
+		self->led_bat->vmt->sequence(self->led_bat, seq);
+		self->bat_led_seq = seq;
+	}
 }
 
 
@@ -115,9 +167,11 @@ static void app_task(void *p) {
 	self->charger->vmt->set_current_limit(self->charger, 1.5f);
 
 	while (true) {
+		/* Reflect the battery current on the status LED. */
+		app_update_bat_led(self);
+
 		/* Read the fuel gauge sensors (SI base units) and write the battery status to the serial
 		 * console, scaled back to the human-friendly display units. */
-		/*
 		char s[96];
 		snprintf(s, sizeof(s), "Vbat: %ld mV  Ibat: %ld mA  SoC: %ld %%  SoH: %ld %%  Qrem: %ld mAh\r\n",
 			(int32_t)(app_read_sensor(self->bat_voltage) * 1000.0f),
@@ -128,7 +182,8 @@ static void app_task(void *p) {
 		if (self->console != NULL) {
 			self->console->vmt->write(self->console, s, strlen(s));
 		}
-		*/
+
+
 		vTaskDelay(1000);
 	}
 	vTaskDelete(NULL);
@@ -147,8 +202,12 @@ static app_ret_t app_setup_ui(App *self) {
 		.fb = self->lcd,
 		.event = self->keypad,
 		.beeper = self->beeper,
+		.pm = self->pm,
 		.bat_soc = self->bat_soc,
 		.bat_current = self->bat_current,
+		.off_state = PM_STATE_D3,
+		.on_state = PM_STATE_D0,
+		.onoff_event = EV_KEY_ONOFF,
 	};
 	if (gui_wm_fs_init(&self->gui, &gui_conf) != GUI_WM_FS_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the GUI"));
@@ -255,6 +314,12 @@ app_ret_t app_init(App *self) {
 	iservicelocator_query_name_type(locator, "bat_soh", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_soh);
 	iservicelocator_query_name_type(locator, "bat_remaining", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_remaining);
 
+	/* Discover the battery status LED advertised by the port, blinked to reflect the battery current. */
+	self->led_bat = NULL;
+	if (iservicelocator_query_name_type(locator, "led_bat", ISERVICELOCATOR_TYPE_LED, (Interface **)&self->led_bat) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("battery status LED not found"));
+	}
+
 	/* Discover the piezo beeper advertised by the port, used for key-press feedback. */
 	self->beeper = NULL;
 	if (iservicelocator_query_name_type(locator, "beeper", ISERVICELOCATOR_TYPE_BEEPER, (Interface **)&self->beeper) != ISERVICELOCATOR_RET_OK) {
@@ -267,6 +332,13 @@ app_ret_t app_init(App *self) {
 	self->keypad = NULL;
 	if (iservicelocator_query_name_type(locator, "keypad", ISERVICELOCATOR_TYPE_EVENT, (Interface **)&self->keypad) != ISERVICELOCATOR_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("keypad event source not found"));
+	}
+
+	/* Discover the power manager advertised by the port. It is handed to the GUI, which requests full
+	 * power on key activity. */
+	self->pm = NULL;
+	if (iservicelocator_query_name_type(locator, "pm", ISERVICELOCATOR_TYPE_PM, (Interface **)&self->pm) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("power manager not found"));
 	}
 
 	/* Discover the LCD framebuffer advertised by the port and bring up the windowed UI on it. */
