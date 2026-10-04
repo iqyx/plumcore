@@ -89,6 +89,10 @@
 #define ST67W611_RX_TASK_STACK    (configMINIMAL_STACK_SIZE + 256)
 #define ST67W611_RX_TASK_PRIORITY 2
 
+/* While asleep the background tasks have nothing to do; they park at this coarse poll interval so they stay
+ * off the CPU until the sleep flag is cleared. */
+#define ST67W611_SLEEP_POLL_MS    100
+
 /* Upper bound on 8-byte chunks clocked out while draining a frame's trailer and any idle tail, a safety
  * valve so a module that holds SPI_RDY asserted indefinitely cannot spin the receive task forever. */
 #define ST67W611_RX_DRAIN_MAX     64
@@ -601,6 +605,12 @@ static void st67w611_rx_task(void *p) {
 	St67w611 *self = (St67w611 *)p;
 
 	while (self->rx_task_running) {
+		if (self->sleeping) {
+			/* The module is powered down; do nothing until woken. */
+			vTaskDelay(pdMS_TO_TICKS(ST67W611_SLEEP_POLL_MS));
+			continue;
+		}
+
 		bool rdy = false;
 		self->conf.rdy_gpio->vmt->get(self->conf.rdy_gpio, &rdy);
 		if (!rdy) {
@@ -829,6 +839,12 @@ static void st67w611_sec_task(void *p) {
 	St67w611 *self = (St67w611 *)p;
 
 	while (self->sec_task_running) {
+		if (self->sleeping) {
+			/* The module is powered down; do nothing until woken. */
+			vTaskDelay(pdMS_TO_TICKS(ST67W611_SLEEP_POLL_MS));
+			continue;
+		}
+
 		struct st67w611_sec_msg msg;
 		if (xQueueReceive(self->sec_queue, &msg, pdMS_TO_TICKS(ST67W611_SEC_TASK_POLL_MS)) != pdTRUE) {
 			continue;
@@ -1499,5 +1515,49 @@ st67w611_ret_t st67w611_set_conn_security(St67w611 *self, enum st67w611_conn_sec
 		return ST67W611_RET_NULL;
 	}
 	self->conn_sec = policy;
+	return ST67W611_RET_OK;
+}
+
+
+st67w611_ret_t st67w611_set_sleep(St67w611 *self, bool sleep) {
+	if (u_assert(self != NULL)) {
+		return ST67W611_RET_NULL;
+	}
+	if (sleep == self->sleeping) {
+		/* Already in the requested state. */
+		return ST67W611_RET_OK;
+	}
+
+	if (sleep) {
+		/* Mark the driver asleep so the background tasks idle instead of touching the link, then power the
+		 * module down. Taking comm_lock first lets any frame the receive task is mid-way through finish before
+		 * the module loses power; the lock is released immediately, as the tasks park on the flag rather than
+		 * holding it while asleep. */
+		self->sleeping = true;
+		xSemaphoreTake(self->comm_lock, portMAX_DELAY);
+		self->conf.en_gpio->vmt->set(self->conf.en_gpio, false);
+		xSemaphoreGive(self->comm_lock);
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("asleep"));
+		return ST67W611_RET_OK;
+	}
+
+	/* Wake: the module lost all its state while powered down, so power-cycle and re-probe it back to the
+	 * post-boot AT-ready state. The tasks are still parked on the sleeping flag, so the probe has the SPI link
+	 * to itself; the flag is cleared only once the module is back up. */
+	if (st67w611_probe(self) != ST67W611_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("wake probe failed"));
+		return ST67W611_RET_FAILED;
+	}
+
+	/* Reset the per-module bookkeeping to match the now-empty module: no GATT services/characteristics, no
+	 * link and no negotiated MTU. The application rebuilds the GATT server on top, as it does after init. */
+	self->srv_count = 0;
+	memset(self->srv_char_count, 0, sizeof(self->srv_char_count));
+	self->char_total = 0;
+	memset(&self->status, 0, sizeof(self->status));
+	self->neg_mtu = 0;
+
+	self->sleeping = false;
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("awake"));
 	return ST67W611_RET_OK;
 }

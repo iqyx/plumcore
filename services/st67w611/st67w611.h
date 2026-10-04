@@ -124,6 +124,10 @@ typedef struct {
 	TaskHandle_t rx_task;
 	volatile bool rx_task_running;
 
+	/* True while the driver is held asleep: the module is powered down and the tasks above idle, touching
+	 * neither the SPI link nor the module, until it is cleared again. */
+	volatile bool sleeping;
+
 	/* cmd_lock serializes commands so only one is in flight at a time. comm_lock serializes the actual
 	 * SPI transactions between the command sender and the background receiver. cmd_sem is given by the
 	 * receiver once the running command's response has been captured, unblocking the sender. cmd_prompt_sem
@@ -168,3 +172,11 @@ st67w611_ret_t st67w611_get_ble(St67w611 *self, Ble **ble);
  * every incoming connection and disconnects the peer if pairing fails; the pairing parameters (IO
  * capability, level) must first be configured through the Ble interface's set_security. */
 st67w611_ret_t st67w611_set_conn_security(St67w611 *self, enum st67w611_conn_sec policy);
+
+/* Put the module to sleep or wake it, to cut the idle power of this Wi-Fi/BLE combo. While asleep the module
+ * is powered down (CHIP_EN low) and the driver's receive and security tasks idle (they keep running but do no
+ * work), so no SPI traffic occurs and the command path must not be used. Waking power-cycles and re-probes the
+ * module back to its fresh post-boot AT-ready state and resets the per-module GATT/link bookkeeping to match;
+ * the application then rebuilds its BLE configuration on top, exactly as it does after st67w611_init(). Both
+ * directions are idempotent. */
+st67w611_ret_t st67w611_set_sleep(St67w611 *self, bool sleep);
