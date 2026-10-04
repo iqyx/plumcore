@@ -39,13 +39,19 @@
 #include <interfaces/beeper-sequences.h>
 #include <interfaces/event.h>
 
+/* The power manager owns the system clock scaling and runs in both the application and the bootloader.
+ * system-conf is advertised unconditionally (see port_setup_system_conf), so its header is needed in
+ * both builds too. */
+#include <services/system-conf/system-conf.h>
+#include <services/pm-generic/pm-generic.h>
+#include <interfaces/pm.h>
+
 #if !defined(CONFIG_APP_BL)
 #include <services/ncn26010/ncn26010.h>
 #include <services/st67w611/st67w611.h>
 #include <services/bq25798/bq25798.h>
 #include <services/bq27441/bq27441.h>
 #include <services/flash-cbor-mib/flash-cbor-mib.h>
-#include <services/system-conf/system-conf.h>
 #include <interfaces/applet.h>
 #include <applets/hello-world/hello-world.h>
 #include <applets/hello-wren/generated/hello-wren.h>
@@ -97,35 +103,35 @@ Flash *lv_conf_backup;
 Flash *lv_log;
 
 
-int32_t port_early_init(void) {
-	/* Run the system clock at the STM32U575 maximum of 160 MHz off PLL1, fed by the 16 MHz HSE crystal.
-	 * Reaching 160 MHz needs voltage scaling range 1 with the EPOD booster enabled and 4 flash wait states.
-	 * PLL1 divides the 16 MHz HSE by M=1, multiplies by N=10 for a 160 MHz VCO and divides by R=1, so the
-	 * SYSCLK is exactly 160 MHz. The AHB/APB prescalers stay at their /1 reset value: 160 MHz is within the
-	 * bus limits, so no peripheral clock adjustment is required. */
+/* Re-arm SysTick for the current SystemCoreClock. The FreeRTOS tick runs off the core clock (HCLK) -- SysTick
+ * has no independent clock source on this part, only HCLK or HCLK/8 -- which the D2 <-> D3 transitions scale,
+ * so its reload must be recomputed whenever the clock changes to keep the 1 kHz tick period constant. Tickless
+ * idle is disabled, so only the reload and current-value registers need updating; the CTRL register (clock
+ * source, interrupt and enable, set up by the FreeRTOS port) is left untouched. */
+static void port_setup_systick(void) {
+	SysTick->LOAD = (SystemCoreClock / CONFIG_FREERTOS_TICK_RATE_HZ) - 1;
+	SysTick->VAL = 0;
+}
 
-	/* The PWR registers live behind an RCC clock gate; enable it before touching the voltage scaling. */
-	RCC->AHB3ENR |= RCC_AHB3ENR_PWREN;
 
+/* Bring the system up to the STM32U575 maximum of 160 MHz off PLL1, fed by the 16 MHz HSE crystal.
+ * Reaching 160 MHz needs voltage scaling range 1 with the EPOD booster enabled and 4 flash wait states.
+ * PLL1 divides the 16 MHz HSE by M=1, multiplies by N=10 for a 160 MHz VCO and divides by R=1, so the
+ * SYSCLK is exactly 160 MHz. The AHB/APB prescalers stay at their /1 reset value: 160 MHz is within the
+ * bus limits, so no peripheral clock adjustment is required. This is the high-power clock configuration
+ * entered on the D3 -> D2 power transition; it is the exact inverse of port_shutdown_sysclk(). */
+static void port_setup_sysclk(void) {
 	/* Select voltage scaling range 1 (VOS = 0b11), the only range that allows 160 MHz. */
 	PWR->VOSR = (PWR->VOSR & ~PWR_VOSR_VOS) | PWR_VOSR_VOS_0 | PWR_VOSR_VOS_1;
 	while ((PWR->VOSR & PWR_VOSR_VOSRDY) == 0) {
 		;
 	}
 
+	/* Start the 16 MHz HSE crystal that feeds PLL1. */
 	RCC->CR |= RCC_CR_HSEON;
 	while ((RCC->CR & RCC_CR_HSERDY) == 0) {
 		;
 	}
-
-	/* Keep HSI16 running as a fixed 16 MHz kernel clock for the I2C buses, decoupling their timing from the
-	 * SYSCLK: the I2C timing prescaler is only 4 bits wide and cannot divide a fast SYSCLK down far enough. */
-	RCC->CR |= RCC_CR_HSION;
-	while ((RCC->CR & RCC_CR_HSIRDY) == 0) {
-		;
-	}
-	RCC->CCIPR1 = (RCC->CCIPR1 & ~(RCC_CCIPR1_I2C1SEL | RCC_CCIPR1_I2C2SEL)) |
-	              RCC_CCIPR1_I2C1SEL_1 | RCC_CCIPR1_I2C2SEL_1;
 
 	/* PLL1: HSE source, input range 8..16 MHz, EPOD booster prescaler /1 (M=1 keeps the 16 MHz reference),
 	 * and enable the R output that feeds SYSCLK. */
@@ -161,6 +167,63 @@ int32_t port_early_init(void) {
 	}
 
 	SystemCoreClock = 160e6;
+
+	/* Re-arm the FreeRTOS tick for the boosted core clock. */
+	port_setup_systick();
+}
+
+
+/* Drop the system back to the low-power slow clock entered on the D2 -> D3 power transition: SYSCLK runs
+ * from the 4 MHz MSIS internal oscillator (the reset default) and PLL1 and the HSE crystal are stopped.
+ * HSI16 is left running by port_early_init so the I2C buses stay clocked and accessible in D3. The flash
+ * wait states, EPOD booster and core voltage are relaxed to match the 4 MHz clock. The inverse of
+ * port_setup_sysclk(). */
+static void port_shutdown_sysclk(void) {
+	/* Switch SYSCLK back to the 4 MHz MSIS (SW = 0b00) before stopping the PLL. */
+	RCC->CFGR1 &= ~RCC_CFGR1_SW;
+	while ((RCC->CFGR1 & RCC_CFGR1_SWS) != 0) {
+		;
+	}
+
+	SystemCoreClock = 4e6;
+
+	/* The PLL and the HSE crystal only fed the fast clock; stop both. */
+	RCC->CR &= ~RCC_CR_PLL1ON;
+	while ((RCC->CR & RCC_CR_PLL1RDY) != 0) {
+		;
+	}
+	RCC->CR &= ~RCC_CR_HSEON;
+
+	/* Relax the flash latency back to 0 wait states and drop the EPOD booster and voltage scaling; none of
+	 * them are needed at 4 MHz. */
+	FLASH->ACR &= ~FLASH_ACR_LATENCY;
+	PWR->VOSR &= ~PWR_VOSR_BOOSTEN;
+	PWR->VOSR &= ~PWR_VOSR_VOS;
+
+	/* Re-arm the FreeRTOS tick for the slow core clock. */
+	port_setup_systick();
+}
+
+
+int32_t port_early_init(void) {
+	/* The PWR registers live behind an RCC clock gate; enable it before touching the voltage scaling. */
+	RCC->AHB3ENR |= RCC_AHB3ENR_PWREN;
+
+	/* Keep HSI16 running as a fixed 16 MHz kernel clock for the I2C buses, decoupling their timing from the
+	 * SYSCLK: the I2C timing prescaler is only 4 bits wide and cannot divide a fast SYSCLK down far enough.
+	 * HSI16 stays up in every power state (including D3) so the I2C buses remain accessible while the fast
+	 * clocks are gated. */
+	RCC->CR |= RCC_CR_HSION;
+	while ((RCC->CR & RCC_CR_HSIRDY) == 0) {
+		;
+	}
+	RCC->CCIPR1 = (RCC->CCIPR1 & ~(RCC_CCIPR1_I2C1SEL | RCC_CCIPR1_I2C2SEL)) |
+	              RCC_CCIPR1_I2C1SEL_1 | RCC_CCIPR1_I2C2SEL_1;
+
+	/* The system comes out of reset on the 4 MHz MSIS and stays there: the power manager raises the clock to
+	 * the full 160 MHz PLL on the D3 -> D2 transition and drops it back on D2 -> D3. D3 is the default state,
+	 * so the slow clock is the boot clock too. */
+	SystemCoreClock = 4e6;
 
 	/* Enable full access to the FPU (CP10/CP11) before any floating point code runs. */
 	SCB->CPACR |= (0xf << 20);
@@ -230,7 +293,8 @@ Gpio *nbus2_shdn_gpio = &(gpiod.pin[14]);
 static void port_setup_nbus2(void) {
 	RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
 
-	/* The nbus2 transceiver shutdown on PD14 is active high; drive it low to enable the transceiver. */
+	/* The nbus2 transceiver shutdown on PD14 is active high; drive it low to enable the transceiver. The
+	 * power manager shuts it down again in D3 (and a wake reboots, so this runs fresh on every boot). */
 	nbus2_shdn_gpio->vmt->set_mode(nbus2_shdn_gpio, MODE_OUTPUT);
 	nbus2_shdn_gpio->vmt->set(nbus2_shdn_gpio, false);
 
@@ -557,6 +621,27 @@ static void top_led_setup(GpioLed *led, size_t ch_base) {
 	LED_SEQ_END \
 } \
 
+/* A short "breathing" effect in white. There is no hardware fade, so the ramp up and down is approximated by a
+ * handful of discrete SET steps held for a few tens of milliseconds each, followed by a longer dark pause that
+ * marks the gap between breaths. */
+#define LED_SEQ_WHITE_BREATHE LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x20) | LED_SEQ_TIME_MS(64), \
+	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x50) | LED_SEQ_TIME_MS(64), \
+	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x90) | LED_SEQ_TIME_MS(64), \
+	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0xc0) | LED_SEQ_TIME_MS(64), \
+	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0xff) | LED_SEQ_TIME_MS(96), \
+	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0xc0) | LED_SEQ_TIME_MS(64), \
+	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x90) | LED_SEQ_TIME_MS(64), \
+	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x50) | LED_SEQ_TIME_MS(64), \
+	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x20) | LED_SEQ_TIME_MS(64), \
+	/* ~4 s dark pause between breaths. A single step tops out at 1008 ms (6-bit field), so it is split. */ \
+	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(1008), \
+	LED_SEQ_WAIT | LED_SEQ_TIME_MS(1008), \
+	LED_SEQ_WAIT | LED_SEQ_TIME_MS(1008), \
+	LED_SEQ_WAIT | LED_SEQ_TIME_MS(976), \
+	LED_SEQ_END \
+} \
+
 static void port_setup_leds(void) {
 	/* C variant of the LP5812 (chip address 0x16). Its 12 PWM channels drive four RGB LEDs. */
 	if (lp581x_init(&lp5812, &i2c1.bus, 0x16, LP581X_TYPE_LP5812) != LP581X_RET_OK) {
@@ -567,10 +652,13 @@ static void port_setup_leds(void) {
 		lp581x_set_max_current(&lp5812, i, 0.5f);
 	}
 
-	led_setup(&led_bat, 0);
-	led_setup(&led_sys, 3);
+	led_setup(&led_sys, 0);
+	led_setup(&led_bat, 3);
 	led_setup(&led_mem, 6);
 	led_setup(&led_ble_wifi, 9);
+
+	/* Advertise the battery status LED so the application can reflect the battery current on it. */
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_bat.led, "led_bat");
 
 #if defined(CONFIG_APP_BL)
 	led_sys.led.vmt->sequence(&led_sys.led, LED_SEQ_ORANGE_FAST_BLINK);
@@ -641,13 +729,13 @@ static void port_setup_lcd(void) {
 		return;
 	}
 
-	/* Run all four parallel channels at a tenth of the full-scale current and turn them fully on. */
+	/* Set the max allowed current to maximum. PWM is manipulated in power manager callbacks. */
 	for (size_t i = 0; i < 4; i++) {
 		lp581x_set_max_current(&lp5810, i, 1.0f);
 
 		Pwm *pwm = NULL;
 		lp581x_get_pwm(&lp5810, i, &pwm);
-		pwm->vmt->set_pwm(pwm, 0.50f);
+		pwm->vmt->set_pwm(pwm, 0.0f);
 	}
 }
 
@@ -831,8 +919,9 @@ static void port_setup_charger(void) {
 Gpio *vbus_lp_en_gpio = &(gpiod.pin[12]);
 
 static void port_setup_vbus_lp(void) {
-	/* EN on PD12 is active high. Drive it high to enable the boost regulator that powers the
-	 * measurement card. */
+	/* EN on PD12 is active high. Drive it high to enable the boost regulator that powers the measurement
+	 * card. The power manager turns it off again in D3 (and a wake reboots, so this runs fresh on every
+	 * boot). */
 	vbus_lp_en_gpio->vmt->set_mode(vbus_lp_en_gpio, MODE_OUTPUT);
 	vbus_lp_en_gpio->vmt->set(vbus_lp_en_gpio, true);
 }
@@ -902,7 +991,7 @@ const struct keypad_layout_item keypad_layout_map[] = {
 	{ .in_code = EV_RAW_3, .out_code = EV_KEY_ENTER },
 	{ .in_code = EV_RAW_4, .out_code = EV_KEY_LEFT },
 	{ .in_code = EV_RAW_4, .out_code = EV_REL_X, .counter = -1 },
-	{ .in_code = EV_RAW_5, .out_code = EV_KEY_ESC },
+	{ .in_code = EV_RAW_5, .out_code = EV_KEY_ESC, .out_code_very_long = EV_KEY_ONOFF },
 	{ .in_code = EV_RAW_6, .out_code = EV_KEY_F1, .out_code_long = EV_KEY_F5 },
 	{ .in_code = EV_RAW_7, .out_code = EV_KEY_F2, .out_code_long = EV_KEY_F6 },
 	{ .in_code = EV_CODE_NONE }
@@ -928,6 +1017,7 @@ static void port_setup_keypad(void) {
 		.source = &keypad.event,
 		.layout = keypad_layout_map,
 		.long_press_ms = 1000,
+		.very_long_press_ms = 5000,
 	};
 	keypad_layout_init(&keypad_layout, &keypad_layout_conf);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_EVENT, (Interface *)&keypad_layout.event, "keypad");
@@ -999,6 +1089,173 @@ static void port_setup_applets(void) {
 #endif
 
 
+/**********************************************************************************************************************
+ * Power management
+ **********************************************************************************************************************/
+
+PmGeneric pm;
+
+/* Re-apply the clock-derived rates on the peripherals whose divisors are latched from SYSCLK at
+ * configuration time, so they keep their configured bitrate/frequency after the system clock has been
+ * scaled between the slow (D3) and fast (D2 and up) configurations. I2C is not reprogrammed: both buses
+ * are clocked from the fixed HSI16 and are unaffected by the SYSCLK change. */
+static void port_reclock_peripherals(void) {
+	/* Console. */
+	uart4.uart.vmt->set_bitrate(&uart4.uart, 115200);
+	/* ST7586 LCD / NCN26010 SPI bus. */
+	spi2.bus.vmt->set_sck_freq(&spi2.bus, 16e6);
+#if !defined(CONFIG_APP_BL)
+	/* nbus2 backplane. */
+	uart1.uart.vmt->set_bitrate(&uart1.uart, 1000000);
+	/* ST67W611 BLE/WIFI SPI bus. */
+	spi1.bus.vmt->set_sck_freq(&spi1.bus, 2e6);
+#endif
+}
+
+/* Drive all four LCD backlight LEDs to the same brightness (0.0 off .. 1.0 full). */
+static void port_set_lcd_brightness(float brightness) {
+	for (size_t i = 0; i < 4; i++) {
+		Pwm *pwm = NULL;
+		lp581x_get_pwm(&lp5810, i, &pwm);
+		pwm->vmt->set_pwm(pwm, brightness);
+	}
+}
+
+/* One callback per adjacent transition. They gate the clocks, regulators and peripherals when stepping between
+ * neighbouring device power levels: the D2 <-> D3 pair scales the system clock between the full 160 MHz PLL and
+ * the 4 MHz slow clock, and every callback also dims the LCD backlight for its level. */
+
+static pm_generic_ret_t pm_d0_to_d1(void *ctx) {
+	(void)ctx;
+
+	port_set_lcd_brightness(0.5f);
+	return PM_GENERIC_RET_OK;
+}
+
+
+static pm_generic_ret_t pm_d1_to_d2(void *ctx) {
+	(void)ctx;
+
+	port_set_lcd_brightness(0.01f);
+	return PM_GENERIC_RET_OK;
+}
+
+
+static pm_generic_ret_t pm_d2_to_d3(void *ctx) {
+	(void)ctx;
+
+	port_set_lcd_brightness(0.0f);
+	lcd_st7586_set_sleep(&lcd, true);
+
+	/* Power down both LP581x driver (LCD backlight) to save power. */
+	lp581x_enable(&lp5810, false);
+
+	/* Disable the top LEd controller to save power. */
+	top_led_en_gpio->vmt->set(top_led_en_gpio, false);
+
+	/* Breathe the sys LED to signal the low-power sleep state. */
+	led_sys.led.vmt->sequence(&led_sys.led, LED_SEQ_WHITE_BREATHE);
+
+#if !defined(CONFIG_APP_BL)
+	/* Put the Wi-Fi/BLE module to sleep: the driver idles its tasks and powers the module down (CHIP_EN). */
+	st67w611_set_sleep(&ble, true);
+
+	/* Power down the measurement card: shut down the nbus2 transceiver (active-high) and turn off the
+	 * VBUS_LP boost regulator (active-high enable). */
+	nbus2_shdn_gpio->vmt->set(nbus2_shdn_gpio, true);
+	vbus_lp_en_gpio->vmt->set(vbus_lp_en_gpio, false);
+#endif
+
+	/* Enter the low-power slow clock: SYSCLK back to the 4 MHz MSIS, PLL1 and HSE stopped. HSI16 keeps
+	 * running, so I2C stays accessible in D3. Reprogram the clock-derived peripherals for the slow clock. */
+	port_shutdown_sysclk();
+	port_reclock_peripherals();
+
+	return PM_GENERIC_RET_OK;
+}
+
+
+static pm_generic_ret_t pm_d3_to_d2(void *ctx) {
+	(void)ctx;
+
+	/* Waking from D3 is recovered by a full system reboot, which brings the clocks, peripherals and the BLE
+	 * module (with its GATT configuration) back to a known-good state far more reliably than a piecemeal
+	 * software restore. D2 is the manager's default state, so the system boots straight into D2 and only ever
+	 * reaches D3 through a real D2 -> D3 descent; this transition is therefore never taken at boot, only on a
+	 * genuine wake. Does not return. */
+	NVIC_SystemReset();
+	return PM_GENERIC_RET_OK;
+}
+
+
+static pm_generic_ret_t pm_d2_to_d1(void *ctx) {
+	(void)ctx;
+
+	port_set_lcd_brightness(0.5f);
+	return PM_GENERIC_RET_OK;
+}
+
+
+static pm_generic_ret_t pm_d1_to_d0(void *ctx) {
+	(void)ctx;
+
+	port_set_lcd_brightness(1.0f);
+	return PM_GENERIC_RET_OK;
+}
+
+
+/* The whole power state machine in a single definition. The states array and the transition table are
+ * file-scope compound literals, so they keep static storage and the pointers stay valid. States are
+ * ordered by power (D0 highest, D3 lowest); locks pull the system up to the highest-power locked state
+ * and it settles back down one level at a time once they are released. Which transitions are possible
+ * is defined solely by the transition table below. */
+static const struct pm_generic_conf pm_conf = {
+	.default_state = PM_STATE_D2,
+	.states = (const struct pm_generic_state_conf[]){
+		{ .state = PM_STATE_D0, .release_timeout = 15000 },
+		{ .state = PM_STATE_D1, .release_timeout = 300000 },
+		{ .state = PM_STATE_D2, .release_timeout = 3600000 },
+		{ .state = PM_STATE_D3 },
+		/* Terminator. */
+		{ .state = PM_STATE_NONE },
+	},
+	.transitions = (const struct pm_generic_transition_conf[]){
+		{ .from = PM_STATE_D0, .to = PM_STATE_D1, .callback = pm_d0_to_d1 },
+		{ .from = PM_STATE_D1, .to = PM_STATE_D2, .callback = pm_d1_to_d2 },
+		{ .from = PM_STATE_D2, .to = PM_STATE_D3, .callback = pm_d2_to_d3 },
+		{ .from = PM_STATE_D3, .to = PM_STATE_D2, .callback = pm_d3_to_d2 },
+		{ .from = PM_STATE_D2, .to = PM_STATE_D1, .callback = pm_d2_to_d1 },
+		{ .from = PM_STATE_D1, .to = PM_STATE_D0, .callback = pm_d1_to_d0 },
+		/* Terminator. */
+		{ .from = PM_STATE_NONE },
+	},
+};
+
+
+static void port_setup_pm(void) {
+	/* Power the system on to its running state: bring the clock up to the full 160 MHz, reprogram the
+	 * clock-derived peripherals (console, backplane and SPI buses, configured at the slow boot clock above)
+	 * for it, and set the LCD backlight. The measurement-card rails and the BLE module are already powered on
+	 * by their setup functions. */
+	port_setup_sysclk();
+	port_reclock_peripherals();
+	port_set_lcd_brightness(0.01f);
+
+	if (pm_generic_init(&pm, &pm_conf) != PM_GENERIC_RET_OK) {
+		return;
+	}
+
+	/* Advertise the power manager interface so services can request and lock power states. */
+	Pm *pm_iface = NULL;
+	pm_generic_get_pm(&pm, &pm_iface);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_PM, (Interface *)pm_iface, "pm");
+
+	/* Bring the system to full power once at boot. With D2 as the default state this walks the power manager
+	 * up through the transition table: D2 -> D1 -> D0. */
+	pm_iface->vmt->pm_set_state(pm_iface, PM_STATE_D0);
+}
+
+
 int32_t port_init(void) {
 	stm32_gpio_init(&gpioa, (void *)GPIOA_BASE);
 	stm32_gpio_init(&gpiob, (void *)GPIOB_BASE);
@@ -1024,6 +1281,10 @@ int32_t port_init(void) {
 	port_setup_vbus_lp();
 	port_setup_fuel_gauge();
 #endif
+	/* The power manager owns the system clock and runs in both the application and the bootloader. It must
+	 * come up after the LCD backlight (lp5810) and the clock-derived peripherals its transitions reprogram
+	 * (console, backplane and SPI buses) have been initialised. */
+	port_setup_pm();
 	port_setup_flash();
 	port_setup_iflash();
 	port_setup_system_conf();
