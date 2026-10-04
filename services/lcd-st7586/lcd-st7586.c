@@ -260,4 +260,22 @@ lcd_st7586_ret_t lcd_st7586_set_contrast(LcdSt7586 *self, float contrast) {
 }
 
 
+lcd_st7586_ret_t lcd_st7586_set_sleep(LcdSt7586 *self, bool sleep) {
+	/* Display OFF (0x28) alone only blanks the panel; the booster, analog circuit and oscillator keep
+	 * running. Sleep In (0x10) additionally stops the DC-DC converter, oscillator and panel drive for
+	 * minimum standby current while preserving the DDRAM contents. Waking reverses the order: Sleep Out
+	 * (0x11), a short settle for the booster, then Display ON (0x29). */
+	if (sleep) {
+		lcd_send_command(self, 0x28);
+		lcd_send_command(self, 0x10);
+	} else {
+		lcd_send_command(self, 0x11);
+		vTaskDelay(10);
+		lcd_send_command(self, 0x29);
+	}
+
+	return LCD_ST7586_RET_OK;
+}
+
+
 
