@@ -76,6 +76,10 @@ enum event_code {
 	EV_KEY_TAB,
 	EV_KEY_ESC,
 
+	/* Power on/off key. Typically generated on a long press of a dedicated or repurposed button; the global
+	 * key handler uses it to move the device in and out of its low-power (off) state. */
+	EV_KEY_ONOFF,
+
 	/* Array/cursor keys */
 	EV_KEY_UP,
 	EV_KEY_DOWN,
