@@ -293,6 +293,7 @@ lp586x_ret_t lp586x_init(Lp586x *self, const struct lp586x_conf *conf) {
 err:
 	free(self->channel);
 	self->channel = NULL;
+	self->channel_count = 0;
 	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("initialization failed"));
 	return LP586X_RET_FAILED;
 }
