@@ -583,30 +583,36 @@ GpioLed top_led[12];
 Gpio *top_led_en_gpio = &(gpiod.pin[11]);
 
 /* Wire a single RGB LED to three consecutive LP5812 PWM channels (red, green, blue). */
-static void led_setup(GpioLed *led, size_t ch_base) {
+static lp581x_ret_t led_setup(GpioLed *led, size_t ch_base) {
 	Pwm *r = NULL;
 	Pwm *g = NULL;
 	Pwm *b = NULL;
-	lp581x_get_pwm(&lp5812, ch_base + 0, &r);
-	lp581x_get_pwm(&lp5812, ch_base + 1, &g);
-	lp581x_get_pwm(&lp5812, ch_base + 2, &b);
+	if (lp581x_get_pwm(&lp5812, ch_base + 0, &r) != LP581X_RET_OK ||
+	    lp581x_get_pwm(&lp5812, ch_base + 1, &g) != LP581X_RET_OK ||
+	    lp581x_get_pwm(&lp5812, ch_base + 2, &b) != LP581X_RET_OK) {
+		return LP581X_RET_FAILED;
+	}
 
 	gpio_led_init(led, NULL, NULL, NULL);
 	gpio_led_set_pwm(led, r, g, b);
+	return LP581X_RET_OK;
 }
 
 /* Wire a single top RGB LED to three consecutive LP5862 PWM channels (red, green, blue). */
-static void top_led_setup(GpioLed *led, size_t ch_base) {
+static lp586x_ret_t top_led_setup(GpioLed *led, size_t ch_base) {
 	Pwm *r = NULL;
 	Pwm *g = NULL;
 	Pwm *b = NULL;
-	lp586x_get_pwm(&lp5862, ch_base + 0, &r);
-	lp586x_get_pwm(&lp5862, ch_base + 1, &g);
-	lp586x_get_pwm(&lp5862, ch_base + 2, &b);
+	if (lp586x_get_pwm(&lp5862, ch_base + 0, &r) != LP586X_RET_OK ||
+	    lp586x_get_pwm(&lp5862, ch_base + 1, &g) != LP586X_RET_OK ||
+	    lp586x_get_pwm(&lp5862, ch_base + 2, &b) != LP586X_RET_OK) {
+		return LP586X_RET_FAILED;
+	}
 
 	gpio_led_init(led, NULL, NULL, NULL);
 	/* Inverted RGB! */
 	gpio_led_set_pwm(led, b, g, r);
+	return LP586X_RET_OK;
 }
 
 #define LED_SEQ_GREEN_BLINK LED_SEQ { \
@@ -652,10 +658,12 @@ static void port_setup_leds(void) {
 		lp581x_set_max_current(&lp5812, i, 0.5f);
 	}
 
-	led_setup(&led_sys, 0);
-	led_setup(&led_bat, 3);
-	led_setup(&led_mem, 6);
-	led_setup(&led_ble_wifi, 9);
+	if (led_setup(&led_sys, 0) != LP581X_RET_OK ||
+	    led_setup(&led_bat, 3) != LP581X_RET_OK ||
+	    led_setup(&led_mem, 6) != LP581X_RET_OK ||
+	    led_setup(&led_ble_wifi, 9) != LP581X_RET_OK) {
+		return;
+	}
 
 	/* Advertise the battery status LED so the application can reflect the battery current on it. */
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_LED, (Interface *)&led_bat.led, "led_bat");
@@ -665,7 +673,10 @@ static void port_setup_leds(void) {
 #else
 	led_sys.led.vmt->set(&led_sys.led, LED_COLOR_RGB(0, 255, 15));
 #endif
+}
 
+
+static void port_setup_top_leds(void) {
 	/* Top LEDs driven by a LP5862. EN on PD11 gates the controller, so power it up before talking to it. */
 	top_led_en_gpio->vmt->set_mode(top_led_en_gpio, MODE_OUTPUT);
 	top_led_en_gpio->vmt->set(top_led_en_gpio, false);
@@ -688,7 +699,9 @@ static void port_setup_leds(void) {
 	}
 
 	for (size_t i = 0; i < 12; i++) {
-		top_led_setup(&top_led[i], i * 3);
+		if (top_led_setup(&top_led[i], i * 3) != LP586X_RET_OK) {
+			return;
+		}
 		top_led[i].led.vmt->set(&(top_led[i].led), LED_COLOR_RGB(0, 0, 0));
 	}
 
@@ -734,7 +747,9 @@ static void port_setup_lcd(void) {
 		lp581x_set_max_current(&lp5810, i, 1.0f);
 
 		Pwm *pwm = NULL;
-		lp581x_get_pwm(&lp5810, i, &pwm);
+		if (lp581x_get_pwm(&lp5810, i, &pwm) != LP581X_RET_OK) {
+			return;
+		}
 		pwm->vmt->set_pwm(pwm, 0.0f);
 	}
 }
@@ -1116,7 +1131,9 @@ static void port_reclock_peripherals(void) {
 static void port_set_lcd_brightness(float brightness) {
 	for (size_t i = 0; i < 4; i++) {
 		Pwm *pwm = NULL;
-		lp581x_get_pwm(&lp5810, i, &pwm);
+		if (lp581x_get_pwm(&lp5810, i, &pwm) != LP581X_RET_OK) {
+			return;
+		}
 		pwm->vmt->set_pwm(pwm, brightness);
 	}
 }
@@ -1153,8 +1170,10 @@ static pm_generic_ret_t pm_d2_to_d3(void *ctx) {
 	/* Disable the top LEd controller to save power. */
 	top_led_en_gpio->vmt->set(top_led_en_gpio, false);
 
-	/* Breathe the sys LED to signal the low-power sleep state. */
-	led_sys.led.vmt->sequence(&led_sys.led, LED_SEQ_WHITE_BREATHE);
+	/* Breathe the sys LED to signal the low-power sleep state. Its vmt is only set once the LP5812 came up. */
+	if (led_sys.led.vmt != NULL) {
+		led_sys.led.vmt->sequence(&led_sys.led, LED_SEQ_WHITE_BREATHE);
+	}
 
 #if !defined(CONFIG_APP_BL)
 	/* Put the Wi-Fi/BLE module to sleep: the driver idles its tasks and powers the module down (CHIP_EN). */
@@ -1272,6 +1291,7 @@ int32_t port_init(void) {
 	port_setup_pm_i2c();
 #endif
 	port_setup_leds();
+	port_setup_top_leds();
 	port_setup_lcd();
 	port_setup_display();
 #if !defined(CONFIG_APP_BL)
