@@ -264,6 +264,7 @@ lp581x_ret_t lp581x_init(Lp581x *self, I2cBus *i2c, uint8_t addr, lp581x_type_t 
 err:
 	free(self->channel);
 	self->channel = NULL;
+	self->channel_count = 0;
 	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("initialization failed"));
 	return LP581X_RET_FAILED;
 }
