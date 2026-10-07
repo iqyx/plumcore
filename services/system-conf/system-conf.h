@@ -18,6 +18,7 @@
 /* Length of the backing buffers for the string leaves. configlib does not copy the value string so
  * each leaf is backed by a buffer with the lifetime of the service instance. */
 #define SYSTEM_CONF_STR_LEN 48
+#define SYSTEM_CONF_HOSTNAME_LEN 32
 
 typedef enum {
 	SYSTEM_CONF_RET_OK = 0,
@@ -41,6 +42,10 @@ typedef struct system_conf {
 	char port[SYSTEM_CONF_STR_LEN];
 	char application[SYSTEM_CONF_STR_LEN];
 	char date[SYSTEM_CONF_STR_LEN];
+
+	/* "hostname" leaf, a writable device name of up to SYSTEM_CONF_HOSTNAME_LEN characters. */
+	ConfiglibValue hostname_conf;
+	char hostname[SYSTEM_CONF_HOSTNAME_LEN + 1];
 
 	/* "uptime" leaf (seconds since the scheduler started). The node is wired only when the FreeRTOS
 	 * tick counter is available; the value is computed on read from it, so no task is needed. */
