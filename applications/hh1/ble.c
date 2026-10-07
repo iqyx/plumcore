@@ -252,8 +252,15 @@ app_ret_t app_ble_init(App *self) {
 	}
 
 	/* Serve the remote configuration protocol over endpoint 4. A NULL root exposes every Conf tree
-	 * advertised via the service locator, each mounted under its (space-delimited) name. */
-	if (proto_conf_init(&self->dgble_proto_conf, self->dgble_conf, NULL) != PROTO_CONF_RET_OK) {
+	 * advertised via the service locator, each mounted under its (space-delimited) name. The load and
+	 * save commands run the conf-cbor jobs. */
+	const struct proto_conf_conf proto_conf_conf = {
+		.d = self->dgble_conf,
+		.root = NULL,
+		.load = &self->conf_cbor.jobs.load.job,
+		.save = &self->conf_cbor.jobs.save.job,
+	};
+	if (proto_conf_init(&self->dgble_proto_conf, &proto_conf_conf) != PROTO_CONF_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start proto-conf on the tunnel endpoint"));
 	}
 

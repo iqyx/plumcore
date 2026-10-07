@@ -222,8 +222,8 @@ static app_ret_t app_setup_ui(App *self) {
 static app_ret_t app_setup_conf(App *self) {
 	self->conf_flash = NULL;
 	if (iservicelocator_query_name_type(locator, "conf", ISERVICELOCATOR_TYPE_FLASH, (Interface **)&self->conf_flash) != ISERVICELOCATOR_RET_OK) {
+		/* Initialize anyway, the save/load jobs then fail instead of being unusable. */
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("conf flash partition not found"));
-		return APP_RET_FAILED;
 	}
 
 	const struct conf_cbor_conf conf_cbor_conf = {
@@ -369,6 +369,9 @@ app_ret_t app_init(App *self) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("LCD framebuffer not found"));
 	}
 
+	/* Bring up the configuration storage before BLE, proto-conf runs its save/load jobs. */
+	app_setup_conf(self);
+
 	/* Discover the BLE device advertised by the port and build the GATT server on it. */
 	app_ble_init(self);
 
@@ -382,9 +385,6 @@ app_ret_t app_init(App *self) {
 	if (self->task == NULL) {
 		return APP_RET_FAILED;
 	}
-
-	/* Bring up the configuration storage, its save/load jobs are available in conf_cbor.jobs. */
-	app_setup_conf(self);
 
 	return APP_RET_OK;
 }
