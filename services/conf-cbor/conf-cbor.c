@@ -761,7 +761,7 @@ static conf_cbor_ret_t conf_cbor_load_map(struct conf_cbor_cursor *c, CborValue 
 		}
 
 		if (child != NULL && first == NULL && type != CONF_SUBTREE && !cbor_value_is_map(&elem)) {
-			conf_cbor_ret_t ret = conf_cbor_load_value(c, &elem, node, type);
+			conf_cbor_ret_t ret = conf_cbor_load_value(c, &elem, child, type);
 			if (ret == CONF_CBOR_RET_OK) {
 				c->loaded++;
 			} else if (ret == CONF_CBOR_RET_FAILED) {
