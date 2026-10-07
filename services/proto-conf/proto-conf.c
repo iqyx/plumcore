@@ -15,6 +15,7 @@
 
 #include <interfaces/conf.h>
 #include <interfaces/datagram.h>
+#include <interfaces/job.h>
 #include <interfaces/servicelocator.h>
 
 #include "proto-conf.h"
@@ -442,7 +443,7 @@ static proto_conf_ret_t process_cc_stat(ProtoConf *self, CborValue *imap, CborEn
 	}
 
 	Conf *node = NULL;
-	if (resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (resolve_path(self->conf.root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -472,7 +473,7 @@ static proto_conf_ret_t process_cc_read(ProtoConf *self, CborValue *imap, CborEn
 	}
 
 	Conf *node = NULL;
-	if (resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (resolve_path(self->conf.root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -531,7 +532,7 @@ static proto_conf_ret_t process_cc_write(ProtoConf *self, CborValue *imap, CborE
 	}
 
 	Conf *node = NULL;
-	if (resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (resolve_path(self->conf.root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -578,10 +579,10 @@ static proto_conf_ret_t process_cc_walk(ProtoConf *self, CborValue *imap, CborEn
 
 	/* With a NULL root the path may address a virtual node of the service locator mount tree, which
 	 * has no backing Conf and is walked directly below. Real nodes are resolved as usual. */
-	bool virtual = self->root == NULL && walk_is_virtual(path, depth, dir);
+	bool virtual = self->conf.root == NULL && walk_is_virtual(path, depth, dir);
 
 	Conf *node = NULL;
-	if (!virtual && resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (!virtual && resolve_path(self->conf.root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -673,7 +674,7 @@ static proto_conf_ret_t process_cc_create(ProtoConf *self, CborValue *imap, Cbor
 	}
 
 	Conf *node = NULL;
-	if (resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (resolve_path(self->conf.root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -716,7 +717,7 @@ static proto_conf_ret_t process_cc_destroy(ProtoConf *self, CborValue *imap, Cbo
 	}
 
 	Conf *node = NULL;
-	if (resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (resolve_path(self->conf.root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -744,7 +745,7 @@ static proto_conf_ret_t process_cc_get_default(ProtoConf *self, CborValue *imap,
 	}
 
 	Conf *node = NULL;
-	if (resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (resolve_path(self->conf.root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -785,7 +786,7 @@ static proto_conf_ret_t process_cc_get_desc(ProtoConf *self, CborValue *imap, Cb
 	}
 
 	Conf *node = NULL;
-	if (resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (resolve_path(self->conf.root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -822,7 +823,7 @@ static proto_conf_ret_t process_cc_get_constraints(ProtoConf *self, CborValue *i
 	}
 
 	Conf *node = NULL;
-	if (resolve_path(self->root, path, depth, &node) != CONF_RET_OK) {
+	if (resolve_path(self->conf.root, path, depth, &node) != CONF_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "path not found");
 		return PROTO_CONF_RET_FAILED;
@@ -894,6 +895,48 @@ static proto_conf_ret_t process_cc_get_constraints(ProtoConf *self, CborValue *i
 }
 
 
+/* Run @p job, wait for the run to end and report its result. */
+static proto_conf_ret_t process_cc_job(Job *job, CborEncoder *omap) {
+	if (job == NULL) {
+		cbor_encode_text_stringz(omap, "err");
+		cbor_encode_text_stringz(omap, "not supported");
+		return PROTO_CONF_RET_FAILED;
+	}
+
+	if (job->vmt->start(job) != JOB_RET_OK) {
+		cbor_encode_text_stringz(omap, "err");
+		cbor_encode_text_stringz(omap, "cannot start");
+		return PROTO_CONF_RET_FAILED;
+	}
+
+	enum job_state state = JOB_STATE_RUNNING;
+	while (job->vmt->get_state(job, &state) == JOB_RET_OK && state != JOB_STATE_SCHEDULED) {
+		vTaskDelay(10);
+	}
+
+	enum job_result result = JOB_RESULT_NONE;
+	char msg[CONFIG_SERVICE_PROTO_CONF_MAX_STR_LEN];
+	if (job->vmt->get_result(job, &result, msg, sizeof(msg)) != JOB_RET_OK) {
+		result = JOB_RESULT_FAILED;
+		msg[0] = '\0';
+	}
+
+	if (result != JOB_RESULT_SUCCESSFUL) {
+		cbor_encode_text_stringz(omap, "err");
+		if (result == JOB_RESULT_CANCELLED) {
+			cbor_encode_text_stringz(omap, "cancelled");
+		} else {
+			cbor_encode_text_stringz(omap, msg[0] != '\0' ? msg : "failed");
+		}
+		return PROTO_CONF_RET_FAILED;
+	}
+
+	cbor_encode_text_stringz(omap, "ret");
+	cbor_encode_text_stringz(omap, "ok");
+	return PROTO_CONF_RET_OK;
+}
+
+
 /***********************************************************************************************************************
  * Request dispatcher and task
  **********************************************************************************************************************/
@@ -942,6 +985,10 @@ static proto_conf_ret_t process_request(ProtoConf *self, uint8_t *buf, size_t le
 		ret = process_cc_get_desc(self, &map, &omap);
 	} else if (!strcmp(cmd, "get_constraints")) {
 		ret = process_cc_get_constraints(self, &map, &omap);
+	} else if (!strcmp(cmd, "load")) {
+		ret = process_cc_job(self->conf.load, &omap);
+	} else if (!strcmp(cmd, "save")) {
+		ret = process_cc_job(self->conf.save, &omap);
 	} else {
 		cbor_encode_text_stringz(&omap, "err");
 		cbor_encode_text_stringz(&omap, "unknown command");
@@ -954,7 +1001,7 @@ static proto_conf_ret_t process_request(ProtoConf *self, uint8_t *buf, size_t le
 	txmsg.addr_size = 4;
 	txmsg.dst_port = self->src_port;
 	memcpy(&txmsg.dst_addr, &self->src_addr, 4);
-	self->d->vmt->write(self->d, self->tx_buf, tx_len, &txmsg);
+	self->conf.d->vmt->write(self->conf.d, self->tx_buf, tx_len, &txmsg);
 
 	return ret;
 }
@@ -966,7 +1013,7 @@ static void proto_conf_task(void *p) {
 	while (true) {
 		size_t len = CONFIG_SERVICE_PROTO_CONF_MAX_DATAGRAM_LEN;
 		struct datagram_msg rxmsg = {0};
-		if (self->d->vmt->read(self->d, self->rx_buf, &len, &rxmsg) == DATAGRAM_RET_OK) {
+		if (self->conf.d->vmt->read(self->conf.d, self->rx_buf, &len, &rxmsg) == DATAGRAM_RET_OK) {
 			self->src_port = rxmsg.src_port;
 			memcpy(&self->src_addr, &rxmsg.src_addr, 4);
 			vTaskDelay(1);
@@ -982,11 +1029,13 @@ static void proto_conf_task(void *p) {
  * Public API
  **********************************************************************************************************************/
 
-proto_conf_ret_t proto_conf_init(ProtoConf *self, Datagram *d, Conf *root) {
+proto_conf_ret_t proto_conf_init(ProtoConf *self, const struct proto_conf_conf *conf) {
+	if (u_assert(self != NULL) ||
+	    u_assert(conf != NULL)) {
+		return PROTO_CONF_RET_NULL;
+	}
 	memset(self, 0, sizeof(ProtoConf));
-
-	self->d = d;
-	self->root = root;
+	memcpy(&self->conf, conf, sizeof(struct proto_conf_conf));
 
 	xTaskCreate(proto_conf_task, "proto-conf", configMINIMAL_STACK_SIZE + 512, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {

@@ -164,7 +164,10 @@ static app_ret_t api_init(App *self) {
 	console_id[3] += 1;
 	self->console_proto_conf_socket = nbus_socket_allocate(&self->console_nbus);
 	nbus_socket_bind(self->console_proto_conf_socket, console_id, local_ep);
-	proto_conf_init(&self->console_proto_conf, &self->console_proto_conf_socket->datagram, &self->root_conf.conf);
+	proto_conf_init(&self->console_proto_conf, &(const struct proto_conf_conf) {
+		.d = &self->console_proto_conf_socket->datagram,
+		.root = &self->root_conf.conf,
+	});
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("proto-conf on console at %02x%02x%02x%02x ep %d"), console_id[0], console_id[1], console_id[2], console_id[3], local_ep);
 
 	return APP_RET_OK;

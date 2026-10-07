@@ -14,6 +14,7 @@
 #include <main.h>
 #include <interfaces/conf.h>
 #include <interfaces/datagram.h>
+#include <interfaces/job.h>
 
 /*
  * Protocol overview
@@ -40,6 +41,8 @@
  *  get_default      p → {t, val}
  *  get_desc         p → {brief, detail}
  *  get_constraints  p → type-specific map
+ *  load             → {ret:"ok"}   run the configuration load job and wait for it to end
+ *  save             → {ret:"ok"}   run the configuration save job and wait for it to end
  *
  * Field names
  * -----------
@@ -56,12 +59,27 @@
 typedef enum {
 	PROTO_CONF_RET_OK = 0,
 	PROTO_CONF_RET_FAILED,
+	PROTO_CONF_RET_NULL,
 } proto_conf_ret_t;
 
 
-typedef struct proto_conf {
+/* Service configuration passed to proto_conf_init(). */
+struct proto_conf_conf {
+	/** Datagram the protocol is served on. */
 	Datagram *d;
+	/** Root of the served configuration tree. When NULL, paths are resolved against all Conf instances
+	 *  advertised via the service locator, each virtually mounted under a subtree named by its
+	 *  (space-delimited) locator name. */
 	Conf *root;
+	/** Job loading the stored configuration, run by the load command. NULL if not supported. */
+	Job *load;
+	/** Job saving the configuration, run by the save command. NULL if not supported. */
+	Job *save;
+};
+
+
+typedef struct proto_conf {
+	struct proto_conf_conf conf;
 	TaskHandle_t task;
 	uint8_t rx_buf[CONFIG_SERVICE_PROTO_CONF_MAX_DATAGRAM_LEN];
 	uint8_t tx_buf[CONFIG_SERVICE_PROTO_CONF_MAX_DATAGRAM_LEN];
@@ -71,7 +89,5 @@ typedef struct proto_conf {
 } ProtoConf;
 
 
-/* When @p root is NULL, paths are resolved against all Conf instances advertised via the service
- * locator, each virtually mounted under a subtree named by its (space-delimited) locator name. */
-proto_conf_ret_t proto_conf_init(ProtoConf *self, Datagram *d, Conf *root);
+proto_conf_ret_t proto_conf_init(ProtoConf *self, const struct proto_conf_conf *conf);
 proto_conf_ret_t proto_conf_free(ProtoConf *self);

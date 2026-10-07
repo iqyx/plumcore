@@ -64,7 +64,10 @@ api_ret_t api_init(Api *self, Conf *conf) {
 	const uint8_t conf_id[4] = {0x00, 0x00, 0x00, 0x11};
 	self->nbus_conf_socket = nbus_socket_allocate(&self->nbus_iface);
 	nbus_socket_bind(self->nbus_conf_socket, conf_id, 1);
-	proto_conf_init(&self->nbus_conf, &self->nbus_conf_socket->datagram, conf);
+	proto_conf_init(&self->nbus_conf, &(const struct proto_conf_conf) {
+		.d = &self->nbus_conf_socket->datagram,
+		.root = conf,
+	});
 	nbus_socket_set_descriptor(self->nbus_conf_socket, &conf_descriptor);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("proto-conf on backplane at %02x%02x%02x%02x ep %d"), conf_id[0], conf_id[1], conf_id[2], conf_id[3], 1);
 

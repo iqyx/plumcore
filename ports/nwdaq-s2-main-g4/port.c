@@ -218,7 +218,10 @@ static void nbus2_init(void) {
 	local_id[3] += 1;
 	nbus_conf_socket = nbus_socket_allocate(&nbus);
 	nbus_socket_bind(nbus_conf_socket, local_id, local_ep);
-	proto_conf_init(&nbus_conf, &nbus_conf_socket->datagram, mib_root);
+	proto_conf_init(&nbus_conf, &(const struct proto_conf_conf) {
+		.d = &nbus_conf_socket->datagram,
+		.root = mib_root,
+	});
 	nbus_socket_set_descriptor(nbus_conf_socket, &conf_descriptor);
 
 	/* Expose the same nbus-flash service on the serial console for testing with the host tools.
@@ -249,7 +252,10 @@ static void nbus2_init(void) {
 	console_id[3] += 1;
 	console_conf_socket = nbus_socket_allocate(&console_nbus);
 	nbus_socket_bind(console_conf_socket, console_id, local_ep);
-	proto_conf_init(&console_conf, &console_conf_socket->datagram, mib_root);
+	proto_conf_init(&console_conf, &(const struct proto_conf_conf) {
+		.d = &console_conf_socket->datagram,
+		.root = mib_root,
+	});
 	nbus_socket_set_descriptor(console_conf_socket, &conf_descriptor);
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("proto-conf on serial console at %02x%02x%02x%02x, endpoint %d"), console_id[0], console_id[1], console_id[2], console_id[3], local_ep);
 }
