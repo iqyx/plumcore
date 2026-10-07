@@ -57,6 +57,7 @@
 	#include <services/nbus2-switch/nbus2-switch.h>
 	#include <services/generic-power/generic-power.h>
 	#include <services/nbus2/nbus2.h>
+	#include <services/proto-dgstream/proto-dgstream.h>
 	#include <services/nbus-flash/nbus-flash.h>
 #endif
 
@@ -110,6 +111,7 @@ int32_t port_early_init(void) {
 
 #if !defined(CONFIG_APP_BL)
 Stm32Uart nbus_bp_uart;
+ProtoDgstream nbus_bp_dgstream;
 Nbus nbus_bp;
 
 static void nbus_bp_port_init(void) {
@@ -131,7 +133,18 @@ static void nbus_bp_port_init(void) {
 	nvic_enable_irq(NVIC_USART2_IRQ);
 	nvic_set_priority(NVIC_USART2_IRQ, 5 * 16);
 
-	nbus_init(&nbus_bp, &nbus_bp_uart.stream);
+	/* Frame nbus2 packets onto the UART byte stream, nbus2 runs on top of the resulting Datagram. */
+	Datagram *dgram = NULL;
+	proto_dgstream_init(&nbus_bp_dgstream, &nbus_bp_uart.stream);
+	proto_dgstream_get_datagram(&nbus_bp_dgstream, &dgram);
+
+	/* Transmit the legacy ChaCha20+HalfSipHash scheme for compatibility, accept both schemes on receive. */
+	const struct nbus_config nbus_config = {
+		.dgram = dgram,
+		.tx_crypto = NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+		.rx_crypto = NBUS_CRYPTO_BLAKE2S_SIV | NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+	};
+	nbus_init(&nbus_bp, &nbus_config);
 	nbus_set_mac_key(&nbus_bp, (uint8_t *)"abcd", 4);
 }
 
@@ -147,6 +160,7 @@ void usart2_isr(void) {
 
 #if !defined(CONFIG_APP_BL)
 Stm32Uart nbus_uart[4];
+ProtoDgstream nbus_dgstream[4];
 Nbus nbus[4];
 
 static void nbus_port0_init(void) {
@@ -169,7 +183,16 @@ static void nbus_port0_init(void) {
 	nvic_enable_irq(NVIC_USART3_IRQ);
 	nvic_set_priority(NVIC_USART3_IRQ, 5 * 16);
 
-	nbus_init(&(nbus[0]), &(nbus_uart[0]).stream);
+	Datagram *dgram = NULL;
+	proto_dgstream_init(&(nbus_dgstream[0]), &(nbus_uart[0].stream));
+	proto_dgstream_get_datagram(&(nbus_dgstream[0]), &dgram);
+
+	const struct nbus_config nbus_config = {
+		.dgram = dgram,
+		.tx_crypto = NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+		.rx_crypto = NBUS_CRYPTO_BLAKE2S_SIV | NBUS_CRYPTO_CHACHA20_HALFSIPHASH,
+	};
+	nbus_init(&(nbus[0]), &nbus_config);
 	nbus_set_mac_key(&(nbus[0]), (uint8_t *)"abcd", 4);
 }
 
