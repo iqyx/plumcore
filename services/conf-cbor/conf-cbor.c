@@ -920,6 +920,12 @@ conf_cbor_ret_t conf_cbor_init(ConfCbor *self, const struct conf_cbor_conf *conf
 	memset(self, 0, sizeof(ConfCbor));
 	memcpy(&self->conf, conf, sizeof(struct conf_cbor_conf));
 
+	/* Jobs are usable even if the initialization fails below, their runs then end as failed. */
+	self->jobs.save.job.vmt = &conf_cbor_save_job_vmt;
+	self->jobs.save.job.parent = self;
+	self->jobs.load.job.vmt = &conf_cbor_load_job_vmt;
+	self->jobs.load.job.parent = self;
+
 	if (self->conf.flash != NULL) {
 		self->io = &conf_cbor_flash_io;
 	} else {
@@ -931,11 +937,6 @@ conf_cbor_ret_t conf_cbor_init(ConfCbor *self, const struct conf_cbor_conf *conf
 	if (self->lock == NULL) {
 		return CONF_CBOR_RET_NOMEM;
 	}
-
-	self->jobs.save.job.vmt = &conf_cbor_save_job_vmt;
-	self->jobs.save.job.parent = self;
-	self->jobs.load.job.vmt = &conf_cbor_load_job_vmt;
-	self->jobs.load.job.parent = self;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 	return CONF_CBOR_RET_OK;
