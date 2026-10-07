@@ -222,14 +222,17 @@ static void conf_cbor_reader_advance(void *token, size_t len) {
 }
 
 
-/* Strings are compared and read directly through the read handler, chunked (indefinite) strings are not
- * supported. */
+/* Strings are compared and read directly through the read handler, their data is never requested from the
+ * parser. The parser still transfers a string to skip it when advancing past it, the cursor is therefore only
+ * moved after the string and no data pointer is provided. */
 static CborError conf_cbor_reader_transfer_string(void *token, const void **userptr, size_t offset, size_t len) {
-	(void)token;
-	(void)userptr;
-	(void)offset;
-	(void)len;
-	return CborErrorUnsupportedType;
+	struct conf_cbor_cursor *c = token;
+	if (offset > c->len - c->pos || len > c->len - c->pos - offset) {
+		return CborErrorUnexpectedEOF;
+	}
+	*userptr = NULL;
+	c->pos += offset + len;
+	return CborNoError;
 }
 
 
