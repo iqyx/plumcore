@@ -259,7 +259,7 @@ static void port_setup_console(void) {
 	/* Initialise and configure the UART */
 	stm32_uart_init(&uart4, (void *)UART4);
 	uart4.uart.vmt->set_bitrate(&uart4.uart, 115200);
-	stm32_uart_set_rxtx_swap(&uart4, true);
+	//stm32_uart_set_rxtx_swap(&uart4, true);
 
 	NVIC_EnableIRQ(UART4_IRQn);
 	NVIC_SetPriority(UART4_IRQn, 7);
