@@ -238,6 +238,31 @@ static app_ret_t app_setup_conf(App *self) {
 }
 
 
+/* Load the stored configuration using the conf-load job, wait for the run to end and log its result. */
+static app_ret_t app_load_conf(App *self) {
+	Job *job = &self->conf_cbor.jobs.load.job;
+	if (job->vmt->start(job) != JOB_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the configuration load"));
+		return APP_RET_FAILED;
+	}
+
+	enum job_state state = JOB_STATE_RUNNING;
+	while (job->vmt->get_state(job, &state) == JOB_RET_OK && state != JOB_STATE_SCHEDULED) {
+		vTaskDelay(10);
+	}
+
+	enum job_result result = JOB_RESULT_NONE;
+	char msg[64];
+	job->vmt->get_result(job, &result, msg, sizeof(msg));
+	if (result != JOB_RESULT_SUCCESSFUL) {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("configuration load failed: %s"), msg);
+		return APP_RET_FAILED;
+	}
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("configuration loaded"));
+	return APP_RET_OK;
+}
+
+
 #if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
 /* Bring up nbus2 on the backplane stream and start pulling measured values from the measurement
  * card's nbus-mq-poll service into the local message queue. */
@@ -385,6 +410,9 @@ app_ret_t app_init(App *self) {
 	if (self->task == NULL) {
 		return APP_RET_FAILED;
 	}
+
+	/* Apply the stored configuration once everything is up. */
+	app_load_conf(self);
 
 	return APP_RET_OK;
 }
