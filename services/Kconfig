@@ -296,6 +296,11 @@ menu "Filesystem and memory management services"
 		select LIB_PLUMCORE_CONFIGLIB
 		default y
 
+	config SERVICE_CONF_CBOR
+		bool "Load/save the configuration tree as CBOR"
+		select LIB_TINYCBOR
+		default y
+
 	config SERVICE_OBJECT_STORE
 		bool "ELF object store"
 		default n
