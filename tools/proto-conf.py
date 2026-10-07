@@ -68,6 +68,8 @@ def init_args():
 	parser.add_argument('-w', '--walk', type=str, nargs='?', const='', default=None, metavar='PATH', help='walk and show the configuration tree at PATH, slash separated (default: root)')
 	parser.add_argument('-r', '--read', type=str, default=None, metavar='PATH', help='read the value of the conf node at PATH and print it (script-friendly)')
 	parser.add_argument('-W', '--write', type=str, nargs=2, default=None, metavar=('PATH', 'VALUE'), help='write VALUE to the conf node at PATH (slash separated)')
+	parser.add_argument('-l', '--load', action='store_true', help='load the stored configuration on the device and wait for it to finish')
+	parser.add_argument('-s', '--save', action='store_true', help='save the configuration on the device and wait for it to finish')
 	parser.add_argument('-v', '--verbose', action='store_true', help='log all nbus2 protocol calls and responses')
 
 	return parser.parse_args()
@@ -80,8 +82,8 @@ class NbusClient:
 		self._sock = sock
 		self._verbose = verbose
 
-	def call(self, req: dict):
-		reply = self._sock.request(cbor2.dumps(req), timeout=0.05, retries=50)
+	def call(self, req: dict, timeout=0.05, retries=50):
+		reply = self._sock.request(cbor2.dumps(req), timeout=timeout, retries=retries)
 		if reply is None:
 			self._log(req, None)
 			return None
@@ -239,6 +241,16 @@ class ConfClient:
 			sys.exit(1)
 		print('ok')
 
+	def run_job(self, cmd):
+		"""Run the load or save job on the device. The device replies once the job ends, so the request is
+		sent only once with a long timeout, a retransmit would start the job again."""
+		r = self._n.call({'c': cmd}, timeout=10.0, retries=1)
+		if r is None or r.get('err'):
+			err = r.get('err', 'no response') if r else 'no response'
+			print(f'{cmd} failed: {err}', file=sys.stderr)
+			sys.exit(1)
+		print('ok')
+
 
 if __name__ == "__main__":
 
@@ -259,3 +271,7 @@ if __name__ == "__main__":
 			c.read([p for p in args.read.split('/') if p])
 		if args.write is not None:
 			c.write([p for p in args.write[0].split('/') if p], args.write[1])
+		if args.load:
+			c.run_job('load')
+		if args.save:
+			c.run_job('save')
