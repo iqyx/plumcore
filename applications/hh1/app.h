@@ -31,6 +31,7 @@
 #include <services/nbus-flash-proxy/nbus-flash-proxy.h>
 #include <services/nbus-mq-poll/nbus-mq-poll.h>
 #include <services/proto-conf/proto-conf.h>
+#include <services/conf-cbor/conf-cbor.h>
 #if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
 	#include <interfaces/mq.h>
 	#include <services/nbus2/nbus2.h>
@@ -109,6 +110,10 @@ typedef struct {
 
 	/* Full-screen GUI window manager running on top of the LCD (owns the compositor and its bars). */
 	GuiWmFs gui;
+
+	/* Configuration tree of all advertised Conf subtrees saved as CBOR to the "conf" flash partition. */
+	Flash *conf_flash;
+	ConfCbor conf_cbor;
 
 	#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
 		/* Message queue the measurement card's values are republished into. */

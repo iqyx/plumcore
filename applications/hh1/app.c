@@ -218,6 +218,26 @@ static app_ret_t app_setup_ui(App *self) {
 }
 
 
+/* Bring up the configuration storage on the "conf" flash partition. */
+static app_ret_t app_setup_conf(App *self) {
+	self->conf_flash = NULL;
+	if (iservicelocator_query_name_type(locator, "conf", ISERVICELOCATOR_TYPE_FLASH, (Interface **)&self->conf_flash) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("conf flash partition not found"));
+		return APP_RET_FAILED;
+	}
+
+	const struct conf_cbor_conf conf_cbor_conf = {
+		.flash = self->conf_flash,
+	};
+	if (conf_cbor_init(&self->conf_cbor, &conf_cbor_conf) != CONF_CBOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot initialize the configuration storage"));
+		return APP_RET_FAILED;
+	}
+
+	return APP_RET_OK;
+}
+
+
 #if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
 /* Bring up nbus2 on the backplane stream and start pulling measured values from the measurement
  * card's nbus-mq-poll service into the local message queue. */
@@ -362,6 +382,9 @@ app_ret_t app_init(App *self) {
 	if (self->task == NULL) {
 		return APP_RET_FAILED;
 	}
+
+	/* Bring up the configuration storage, its save/load jobs are available in conf_cbor.jobs. */
+	app_setup_conf(self);
 
 	return APP_RET_OK;
 }
