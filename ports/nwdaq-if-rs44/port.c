@@ -29,9 +29,6 @@
 #include <main.h>
 #include "port.h"
 
-#include "module_led.h"
-#include "interface_led.h"
-
 #include <interfaces/sensor.h>
 #include <interfaces/servicelocator.h>
 #include <interfaces/i2c-bus.h>
@@ -40,7 +37,6 @@
 #include <interfaces/adc.h>
 
 /* Low level drivers for th STM32G4 family */
-#include <services/stm32-system-clock/clock.h>
 #include <services/stm32-rtc/rtc.h>
 #include <services/stm32-i2c/stm32-i2c.h>
 #include <services/stm32-uart/stm32-uart.h>
@@ -128,7 +124,7 @@ static void nbus_bp_port_init(void) {
 
 	rcc_periph_clock_enable(RCC_USART2);
 
-	stm32_uart_init(&nbus_bp_uart, USART2);
+	stm32_uart_init(&nbus_bp_uart, (void *)USART2);
 	stm32_uart_set_rto(&nbus_bp_uart, true);
 	nbus_bp_uart.uart.vmt->set_bitrate(&nbus_bp_uart.uart, 1000000);
 
@@ -165,9 +161,9 @@ static void nbus_port0_init(void) {
 
 	rcc_periph_clock_enable(RCC_USART3);
 
-	stm32_uart_init(&(nbus_uart[0]), USART3);
+	stm32_uart_init(&(nbus_uart[0]), (void *)USART3);
 	stm32_uart_set_rto(&(nbus_uart[0]), true);
-	stm32_uart_set_de(&(nbus_uart[0]), GPIOB, GPIO14);
+	stm32_uart_set_de(&(nbus_uart[0]), &(gpiob.pin[14]));
 	nbus_uart[0].uart.vmt->set_bitrate(&(nbus_uart[0].uart), 1000000);
 
 	nvic_enable_irq(NVIC_USART3_IRQ);
@@ -294,11 +290,11 @@ static void port_flash_init(void) {
 
 
 int32_t port_init(void) {
-	stm32_gpio_init(&gpioa, STM32_PORTA);
-	stm32_gpio_init(&gpiob, STM32_PORTB);
-	stm32_gpio_init(&gpioc, STM32_PORTC);
-	stm32_gpio_init(&gpiod, STM32_PORTD);
-	stm32_gpio_init(&gpioe, STM32_PORTE);
+	stm32_gpio_init(&gpioa, (void *)GPIOA);
+	stm32_gpio_init(&gpiob, (void *)GPIOB);
+	stm32_gpio_init(&gpioc, (void *)GPIOC);
+	stm32_gpio_init(&gpiod, (void *)GPIOD);
+	stm32_gpio_init(&gpioe, (void *)GPIOE);
 
 	port_setup_default_gpio();
 	stm32_clock_init(&cmgr, STM32_CLOCK_LEVEL_MEDIUM_PERF);
