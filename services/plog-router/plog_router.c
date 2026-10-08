@@ -224,18 +224,24 @@ static mq_ret_t plog_router_mq_client_publish(MqClient *self, const char *topic,
 	Mq *mq = self->parent;
 	PlogRouter *plog = (PlogRouter *)mq->parent;
 
-	/* Hold the client-list mutex for the whole traversal so a concurrent open()/close() cannot add a
-	 * client or free one out from under us. next is snapshotted before each delivery for the same reason. */
+	/* The client list is walked with the clients_mutex held, but it is released for each delivery. Not
+	 * doing so would block a client which publishes from its receive loop (eg. a republishing service)
+	 * while we wait for it to acknowledge our next message. The client being delivered to is pinned by
+	 * a reference instead, close() keeps it linked until all references are dropped, so its next pointer
+	 * is still valid once the delivery finishes. */
 	xSemaphoreTake(plog->clients_mutex, portMAX_DELAY);
 	struct plog_router_mq_client *c = plog->first_client;
 	while (c != NULL) {
-		struct plog_router_mq_client *next = (struct plog_router_mq_client *)c->client.next;
 		/* Never deliver a message back to the publishing client. Delivery is synchronous and
 		 * the publishing task would deadlock waiting to receive from itself. */
-		if (&c->client != self && plog_router_client_matches(c, topic)) {
+		if (&c->client != self && !c->closing && plog_router_client_matches(c, topic)) {
+			c->refs++;
+			xSemaphoreGive(plog->clients_mutex);
 			deliver_to_client(c, topic, array, ts);
+			xSemaphoreTake(plog->clients_mutex, portMAX_DELAY);
+			c->refs--;
 		}
-		c = next;
+		c = (struct plog_router_mq_client *)c->client.next;
 	}
 	xSemaphoreGive(plog->clients_mutex);
 
@@ -250,10 +256,17 @@ static mq_ret_t plog_router_mq_client_close(MqClient *self) {
 	struct plog_router_mq_client *c = (struct plog_router_mq_client *)self;
 	PlogRouter *plog = (PlogRouter *)((Mq *)self->parent)->parent;
 
-	/* Unlink the client from the list so no further deliveries can reach it. Because a publisher holds
-	 * the list mutex for its whole traversal, once we own it here no publisher still references this
-	 * client, so the resources freed below can no longer be touched by anyone. */
+	/* Stop new deliveries to the client and wait for the ones in progress to finish (each is bounded by
+	 * PLOG_ROUTER_DELIVER_TIMEOUT_MS). Only then unlink it, a publisher holding a reference may still
+	 * need its next pointer. Once unlinked with no references left, nobody can touch the resources
+	 * freed below. */
 	xSemaphoreTake(plog->clients_mutex, portMAX_DELAY);
+	c->closing = true;
+	while (c->refs > 0) {
+		xSemaphoreGive(plog->clients_mutex);
+		vTaskDelay(1);
+		xSemaphoreTake(plog->clients_mutex, portMAX_DELAY);
+	}
 	if (plog->first_client == c) {
 		plog->first_client = (struct plog_router_mq_client *)c->client.next;
 	} else {

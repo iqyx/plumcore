@@ -53,8 +53,12 @@ struct plog_router_mq_client {
 	SemaphoreHandle_t msg_mutex;
 	QueueHandle_t send_lock;
 	QueueHandle_t recv_lock;
-	
 
+	/* Number of publishers currently delivering to this client outside of the clients_mutex. The client
+	 * stays linked (and its next pointer valid) while non-zero. Guarded by clients_mutex. */
+	uint32_t refs;
+	/* Set by close(), no new deliveries are started to a closing client. Guarded by clients_mutex. */
+	bool closing;
 };
 
 typedef struct {
@@ -67,8 +71,9 @@ typedef struct {
 	Mq mq;
 
 	struct plog_router_mq_client *first_client;
-	/* Guards the client list against concurrent open()/close() and is held for the whole publish
-	 * traversal, so a client can never be freed while a publisher still references it. */
+	/* Guards the client list and the per-client refs/closing fields. It is not held during a delivery,
+	 * a publisher pins the client with a reference instead. Holding it across a delivery would deadlock
+	 * a client publishing from its receive loop against the next delivery to it. */
 	SemaphoreHandle_t clients_mutex;
 
 	bool initialized;
