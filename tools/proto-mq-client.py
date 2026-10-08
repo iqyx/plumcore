@@ -76,6 +76,9 @@ def init_args():
 	                    help='number of poll requests to send, then exit (default: 0 = poll forever)')
 	parser.add_argument('-m', '--max-batches', type=int, default=DEFAULT_MAX_BATCHES,
 	                    help=f'maximum batches requested per poll (default: {DEFAULT_MAX_BATCHES})')
+	parser.add_argument('-t', '--topic', type=str, default=None,
+	                    help='topic filter the remote subscribes to, e.g. "math/#" (default: keep the remote '
+	                         'subscription)')
 
 	return parser.parse_args()
 
@@ -86,18 +89,20 @@ log = logging.getLogger('proto-mq-client')
 class MqPollClient:
 	"""Poll a remote nbus-mq-poll service and print every value it returns.
 
-	Every poll request carries { "a": <cursor>, "m": <max_batches> }: the cursor acknowledges the
-	highest batch sequence number received contiguously so far, and max_batches caps the reply. The
-	remote answers with { "h": <device>, "p": <pending>, "q": <buffering>, "b": [ <batch>, ... ] },
-	each batch a map { "d": [ {"ts","tn","to","v"}, ... ], "s": <seq> }. Batches are deduplicated and
-	ordered by sequence number, so a lost request or reply only causes a harmless retransmission; "p"
-	drives back-to-back draining of a backlog.
+	Every poll request carries { "a": <cursor>, "m": <max_batches> } and optionally "t": <topic>: the
+	cursor acknowledges the highest batch sequence number received contiguously so far, max_batches caps
+	the reply and the topic filter replaces the remote message queue subscription, so only matching
+	values are buffered and polled. The remote answers with { "h": <device>, "p": <pending>,
+	"q": <buffering>, "b": [ <batch>, ... ] }, each batch a map { "d": [ {"ts","tn","to","v"}, ... ],
+	"s": <seq> }. Batches are deduplicated and ordered by sequence number, so a lost request or reply only
+	causes a harmless retransmission; "p" drives back-to-back draining of a backlog.
 	"""
 
 	def __init__(self, sock: pynbus2.NbusSocket, prefix='', interval_ms=DEFAULT_POLL_INTERVAL_MS,
-	             max_batches=DEFAULT_MAX_BATCHES):
+	             max_batches=DEFAULT_MAX_BATCHES, topic=None):
 		self._sock = sock
 		self._prefix = prefix
+		self._topic = topic
 		self._interval = interval_ms / 1000.0
 		self._max_batches = max_batches
 		# Highest batch sequence number seen contiguously; 0 means nothing received yet.
@@ -165,7 +170,11 @@ class MqPollClient:
 		Returns ``None`` when no reply arrives (a lost request or response), so the caller can tell an
 		empty reply (remote has nothing pending) from a missing one.
 		"""
-		self._sock.send(cbor2.dumps({'a': self._cursor, 'm': self._max_batches}))
+		req = {'a': self._cursor, 'm': self._max_batches}
+		if self._topic is not None:
+			# Sent with every request so the subscription is restored after a remote restart.
+			req['t'] = self._topic
+		self._sock.send(cbor2.dumps(req))
 		reply = self._sock.recv(self._sock.request_timeout)
 		if reply is None:
 			log.debug('no reply to poll request')
@@ -207,7 +216,7 @@ if __name__ == "__main__":
 			print(f'the URI must carry a destination, e.g. udp6:///<sid>/<ep>', file=sys.stderr)
 			sys.exit(1)
 
-		client = MqPollClient(sock, args.prefix, args.interval, args.max_batches)
+		client = MqPollClient(sock, args.prefix, args.interval, args.max_batches, args.topic)
 		try:
 			client.run(args.count)
 		except KeyboardInterrupt:
