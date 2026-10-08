@@ -248,6 +248,39 @@ int32_t port_early_init(void) {
  **********************************************************************************************************************/
 
 Stm32Uart uart4;
+
+/* Old boards have the console RX/TX swapped on the STDC14 debug connector. They also have I2C2_SDA miswired to pin
+ * 52 (PB13, an I2C2_SCL pin), worked around by bridging pins 52 and 53 and using PB14 as SDA. The bridge identifies
+ * an old board: pull PB14 up and check it follows PB13 being released and pulled low. PB13 is driven open-drain
+ * only, so it never fights a slave on the bus. Swap the console RX/TX if the bridge is found. */
+static void port_i2c2_miswire_errata(void) {
+	Gpio *pb13 = &(gpiob.pin[13]);
+	Gpio *pb14 = &(gpiob.pin[14]);
+
+	pb14->vmt->set_mode(pb14, MODE_INPUT);
+	pb14->vmt->set_pull(pb14, PULL_UP);
+	pb13->vmt->set(pb13, true);
+	pb13->vmt->set_otype(pb13, OTYPE_OD);
+	pb13->vmt->set_mode(pb13, MODE_OUTPUT);
+
+	bool released = false;
+	bool pulled = true;
+	vTaskDelay(1);
+	pb14->vmt->get(pb14, &released);
+	pb13->vmt->set(pb13, false);
+	vTaskDelay(1);
+	pb14->vmt->get(pb14, &pulled);
+
+	pb13->vmt->set_mode(pb13, MODE_ANALOG);
+	pb14->vmt->set_pull(pb14, PULL_NONE);
+	pb14->vmt->set_mode(pb14, MODE_ANALOG);
+
+	if (released && !pulled) {
+		stm32_uart_set_rxtx_swap(&uart4, true);
+	}
+}
+
+
 static void port_setup_console(void) {
 	RCC->APB1ENR1 |= RCC_APB1ENR1_UART4EN;
 
@@ -260,7 +293,7 @@ static void port_setup_console(void) {
 	/* Initialise and configure the UART */
 	stm32_uart_init(&uart4, (void *)UART4);
 	uart4.uart.vmt->set_bitrate(&uart4.uart, 115200);
-	//stm32_uart_set_rxtx_swap(&uart4, true);
+	port_i2c2_miswire_errata();
 
 	NVIC_EnableIRQ(UART4_IRQn);
 	NVIC_SetPriority(UART4_IRQn, 7);
