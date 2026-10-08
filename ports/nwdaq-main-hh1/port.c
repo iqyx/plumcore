@@ -51,6 +51,7 @@
 #include <services/st67w611/st67w611.h>
 #include <services/bq25798/bq25798.h>
 #include <services/bq27441/bq27441.h>
+#include <services/lis2hh12/lis2hh12.h>
 #include <services/flash-cbor-mib/flash-cbor-mib.h>
 #include <interfaces/applet.h>
 #include <applets/hello-world/hello-world.h>
@@ -971,6 +972,25 @@ static void port_setup_fuel_gauge(void) {
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)sensor, "bat_remaining");
 }
 
+
+/**********************************************************************************************************************
+ * LIS2HH12 accelerometer on I2C1 (shared with the LED drivers)
+ **********************************************************************************************************************/
+
+Lis2hh12 accel;
+
+static void port_setup_accel(void) {
+	/* The SA0 pin selects the chip address, probe both. */
+	if (lis2hh12_init(&accel, &i2c1.bus, LIS2HH12_I2C_ADDR_SA0_LOW) != LIS2HH12_RET_OK &&
+	    lis2hh12_init(&accel, &i2c1.bus, LIS2HH12_I2C_ADDR_SA0_HIGH) != LIS2HH12_RET_OK) {
+		return;
+	}
+
+	/* Advertise the acceleration waveform and the die temperature. */
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface *)&accel.source, "accel");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&accel.temp, "accel_temp");
+}
+
 #endif
 
 
@@ -1300,6 +1320,7 @@ int32_t port_init(void) {
 	port_setup_charger();
 	port_setup_vbus_lp();
 	port_setup_fuel_gauge();
+	port_setup_accel();
 #endif
 	/* The power manager owns the system clock and runs in both the application and the bootloader. It must
 	 * come up after the LCD backlight (lp5810) and the clock-derived peripherals its transitions reprogram
