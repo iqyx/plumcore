@@ -29,15 +29,16 @@
 #include <interfaces/datagram.h>
 #include <services/proto-dgble/proto-dgble.h>
 #include <services/nbus-flash/nbus-flash.h>
-#include <services/nbus-flash-proxy/nbus-flash-proxy.h>
 #include <services/nbus-mq-poll/nbus-mq-poll.h>
 #include <services/proto-conf/proto-conf.h>
 #include <services/conf-cbor/conf-cbor.h>
-#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
+#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 	#include <interfaces/mq.h>
 	#include <services/nbus2/nbus2.h>
 	#include <services/proto-dgstream/proto-dgstream.h>
 	#include <services/nbus-mq-client/nbus-mq-client.h>
+	#include <services/nbus-flash-proxy/nbus-flash-proxy.h>
+	#include <services/mq-compensation/mq-compensation.h>
 #endif
 
 typedef enum {
@@ -87,10 +88,12 @@ typedef struct {
 	/* nbus-flash access service served over the flash tunnel endpoint. */
 	NbusFlash dgble_nbus_flash;
 
-	/* Second endpoint (ep 2) on the dgble tunnel above, proxied to the measurement card's nbus-flash
-	 * service over the backplane. Exposed on the same tunnel because the ST67W611 does not reliably route
-	 * peer writes to a second GATT service. */
-	Datagram *dgble_proxy_flash;
+	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
+		/* Second endpoint (ep 2) on the dgble tunnel above, proxied to the measurement card's nbus-flash
+		 * service over the backplane. Exposed on the same tunnel because the ST67W611 does not reliably
+		 * route peer writes to a second GATT service. */
+		Datagram *dgble_proxy_flash;
+	#endif
 
 	/* Third endpoint (ep 3) on the dgble tunnel above and the nbus-mq-poll bridge serving the local
 	 * message queue over it, so a BLE client can poll the values pulled in from the measurement card. */
@@ -119,7 +122,7 @@ typedef struct {
 	Flash *conf_flash;
 	ConfCbor conf_cbor;
 
-	#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
+	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 		/* Message queue the measurement card's values are republished into. */
 		Mq *mq;
 
@@ -134,6 +137,9 @@ typedef struct {
 		 * flash tunnel endpoint to it. */
 		struct nbus_socket *nbus_flash_socket;
 		NbusFlashProxy nbus_flash_proxy;
+
+		/* Compensation converting the measurement card's raw channels 0-3 into force channels 0-3. */
+		MqCompensation force;
 	#endif
 } App;
 

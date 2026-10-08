@@ -264,7 +264,7 @@ static app_ret_t app_load_conf(App *self) {
 }
 
 
-#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
+#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 /* Bring up nbus2 on the backplane stream and start pulling measured values from the measurement
  * card's nbus-mq-poll service into the local message queue. */
 static app_ret_t app_setup_backplane(App *self) {
@@ -332,6 +332,42 @@ static app_ret_t app_setup_backplane(App *self) {
 	nbus_flash_proxy_start(&self->nbus_flash_proxy);
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("nbus-flash-proxy forwarding to %02x%02x%02x%02x ep %d"), flash_id[0], flash_id[1], flash_id[2], flash_id[3], 1);
+	return APP_RET_OK;
+}
+
+
+/* Convert the measurement card's channels 0-3 (republished as ff14/out/ch<n>) into force channels 0-3
+ * published as force/<n>. The channels start with identity coefficients, the calibration is set through
+ * the "compensation" configuration tree advertised below (saved and loaded with the rest of the configuration). */
+static app_ret_t app_setup_force(App *self) {
+	if (mq_compensation_init(&self->force, self->mq) != MQ_COMPENSATION_RET_OK) {
+		return APP_RET_FAILED;
+	}
+
+	for (unsigned int i = 0; i < 4; i++) {
+		struct mq_compensation_channel_conf conf = {
+			.x_ref = 0.0f,
+			.c = {0.0f, 1.0f},
+			.exp = 1.0f,
+			.t_ref = MQ_COMPENSATION_DEFAULT_TEMP_C,
+			.tc1 = 0.0f,
+			.tc2 = 0.0f,
+		};
+		snprintf(conf.name, sizeof(conf.name), "force%u", i);
+		snprintf(conf.input_topic, sizeof(conf.input_topic), "ff14/out/ch%u", i);
+		snprintf(conf.output_topic, sizeof(conf.output_topic), "math/force%u", i);
+		mq_compensation_add_channel(&self->force, &conf);
+	}
+
+	if (mq_compensation_start(&self->force, 1) != MQ_COMPENSATION_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the force compensation"));
+		return APP_RET_FAILED;
+	}
+
+	Conf *conf = NULL;
+	mq_compensation_get_conf(&self->force, &conf);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)conf, "channels math");
+
 	return APP_RET_OK;
 }
 #endif
@@ -407,10 +443,11 @@ app_ret_t app_init(App *self) {
 	/* Discover the BLE device advertised by the port and build the GATT server on it. */
 	app_ble_init(self);
 
-	#if defined(CONFIG_SERVICE_NBUS_MQ_CLIENT)
+	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 		/* Pull the measurement card's values in over the backplane. */
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("--------------- starting measurement services ----------------"));
 		app_setup_backplane(self);
+		app_setup_force(self);
 	#endif
 
 	xTaskCreate(app_task, "app", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->task));
