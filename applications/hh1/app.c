@@ -205,6 +205,7 @@ static app_ret_t app_setup_ui(App *self) {
 		.pm = self->pm,
 		.bat_soc = self->bat_soc,
 		.bat_current = self->bat_current,
+		.accel = self->accel,
 		.off_state = PM_STATE_D3,
 		.on_state = PM_STATE_D0,
 		.onoff_event = EV_KEY_ONOFF,
@@ -358,6 +359,12 @@ app_ret_t app_init(App *self) {
 	iservicelocator_query_name_type(locator, "bat_soc", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_soc);
 	iservicelocator_query_name_type(locator, "bat_soh", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_soh);
 	iservicelocator_query_name_type(locator, "bat_remaining", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_remaining);
+
+	/* Discover the accelerometer advertised by the port. */
+	self->accel = NULL;
+	if (iservicelocator_query_name_type(locator, "accel", ISERVICELOCATOR_TYPE_WAVEFORM_SOURCE, (Interface **)&self->accel) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("accelerometer not found"));
+	}
 
 	/* Discover the battery status LED advertised by the port, blinked to reflect the battery current. */
 	self->led_bat = NULL;

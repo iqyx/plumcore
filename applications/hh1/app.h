@@ -16,6 +16,7 @@
 #include <interfaces/window.h>
 #include <interfaces/stream.h>
 #include <interfaces/sensor.h>
+#include <interfaces/waveform-source.h>
 #include <interfaces/painter.h>
 #include <interfaces/event.h>
 #include <interfaces/beeper.h>
@@ -65,6 +66,9 @@ typedef struct {
 	Sensor *bat_soc;
 	Sensor *bat_soh;
 	Sensor *bat_remaining;
+
+	/* LIS2HH12 accelerometer advertised by the port. */
+	WaveformSource *accel;
 
 	/* Battery status LED advertised by the port and the blink sequence currently pushed to it, kept so the
 	 * blink is only restarted when the current band actually changes. */
