@@ -22,6 +22,7 @@
 #include <interfaces/beeper.h>
 #include <interfaces/sensor.h>
 #include <interfaces/pm.h>
+#include <interfaces/waveform-source.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 #include <services/gui-launcher/gui-launcher.h>
@@ -61,6 +62,9 @@ struct gui_wm_fs_conf {
 
 	Sensor *bat_soc;
 	Sensor *bat_current;
+
+	/** Accelerometer read continuously by the accelerometer task (optional, may be NULL). */
+	WaveformSource *accel;
 };
 
 typedef struct {
@@ -86,6 +90,11 @@ typedef struct {
 	/* Event source handed to the compositor. Its listen() pumps conf.event in the compositor input
 	 * task's context, consumes global keys and forwards the rest to the top-level window. */
 	Event event;
+
+	/* Task reading the accelerometer continuously, spawned only if conf.accel is set. */
+	TaskHandle_t accel_task;
+	volatile bool accel_can_run;
+	volatile bool accel_running;
 } GuiWmFs;
 
 

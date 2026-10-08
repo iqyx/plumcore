@@ -145,6 +145,91 @@ static const struct event_vmt gui_wm_fs_event_vmt = {
 
 
 /*********************************************************************************************************************
+ * Accelerometer
+ *********************************************************************************************************************/
+
+#define GUI_WM_FS_ACCEL_PERIOD_MS 100
+#define GUI_WM_FS_ACCEL_SAMPLES 8
+#define GUI_WM_FS_ACCEL_WINDOW_S 0.5f
+#define GUI_WM_FS_ACCEL_THRESHOLD_LSB 250.0f
+#define GUI_WM_FS_ACCEL_QUIET_WINDOWS 6
+
+/* Detect the device being handled. Samples are accumulated over a tumbling window, at its end the per-axis
+ * variances are summed into the variance of the acceleration vector. The mean removes gravity, so the result
+ * does not depend on the device orientation. Above the threshold the device is moving, it is considered still
+ * again only after several consecutive quiet windows. */
+static void gui_wm_fs_accel_task(void *p) {
+	GuiWmFs *self = (GuiWmFs *)p;
+
+	self->accel_running = true;
+	self->conf.accel->vmt->start(self->conf.accel);
+
+	float sample_rate_Hz = 0.0f;
+	self->conf.accel->vmt->get_sample_rate(self->conf.accel, &sample_rate_Hz);
+
+	float n = 0.0f;
+	float s[3] = {0};
+	float q[3] = {0};
+	uint32_t quiet = GUI_WM_FS_ACCEL_QUIET_WINDOWS;
+	while (self->accel_can_run) {
+		/* Samples are X, Y, Z triplets of signed 16 bit values. */
+		int16_t buf[GUI_WM_FS_ACCEL_SAMPLES][3];
+		size_t read = 0;
+		do {
+			if (self->conf.accel->vmt->read(self->conf.accel, buf, GUI_WM_FS_ACCEL_SAMPLES, &read) != WAVEFORM_SOURCE_RET_OK) {
+				break;
+			}
+			for (size_t i = 0; i < read; i++) {
+				for (size_t a = 0; a < 3; a++) {
+					s[a] += (float)buf[i][a];
+					q[a] += (float)buf[i][a] * (float)buf[i][a];
+				}
+				n++;
+			}
+		} while (read == GUI_WM_FS_ACCEL_SAMPLES);
+
+		if (n > 0.0f && n >= sample_rate_Hz * GUI_WM_FS_ACCEL_WINDOW_S) {
+			float var = 0.0f;
+			for (size_t a = 0; a < 3; a++) {
+				var += q[a] / n - (s[a] / n) * (s[a] / n);
+				s[a] = 0.0f;
+				q[a] = 0.0f;
+			}
+			n = 0.0f;
+
+			if (var > GUI_WM_FS_ACCEL_THRESHOLD_LSB * GUI_WM_FS_ACCEL_THRESHOLD_LSB) {
+				if (quiet >= GUI_WM_FS_ACCEL_QUIET_WINDOWS) {
+					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("accel: device is moving"));
+				}
+				quiet = 0;
+
+				/* Movement counts as user activity like a key press. Not in the off state, waking from it
+				 * reboots the device and only the onoff key may do that. */
+				enum pm_state state = PM_STATE_NONE;
+				if (self->conf.pm != NULL) {
+					self->conf.pm->vmt->pm_get_state(self->conf.pm, &state);
+					if (state != self->conf.off_state) {
+						self->conf.pm->vmt->pm_set_state(self->conf.pm, PM_STATE_D0);
+					}
+				}
+			} else if (quiet < GUI_WM_FS_ACCEL_QUIET_WINDOWS) {
+				quiet++;
+				if (quiet == GUI_WM_FS_ACCEL_QUIET_WINDOWS) {
+					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("accel: device is still"));
+				}
+			}
+		}
+
+		vTaskDelay(pdMS_TO_TICKS(GUI_WM_FS_ACCEL_PERIOD_MS));
+	}
+	self->conf.accel->vmt->stop(self->conf.accel);
+	self->accel_running = false;
+
+	vTaskDelete(NULL);
+}
+
+
+/*********************************************************************************************************************
  * Public API
  *********************************************************************************************************************/
 
@@ -219,6 +304,16 @@ gui_wm_fs_ret_t gui_wm_fs_init(GuiWmFs *self, const struct gui_wm_fs_conf *conf)
 	/* Bring the launcher up right away so it is the top-level window after startup. */
 	gui_launcher_show(&self->launcher);
 
+	if (self->conf.accel != NULL) {
+		self->accel_can_run = true;
+		xTaskCreate(gui_wm_fs_accel_task, "gui-accel", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &self->accel_task);
+		if (self->accel_task == NULL) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create the accelerometer task"));
+			self->accel_can_run = false;
+			goto err;
+		}
+	}
+
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("init ok"));
 	return GUI_WM_FS_RET_OK;
 err:
@@ -227,6 +322,12 @@ err:
 
 
 gui_wm_fs_ret_t gui_wm_fs_free(GuiWmFs *self) {
+	/* Stop the accelerometer task first, it stops the accelerometer on its way out. */
+	self->accel_can_run = false;
+	while (self->accel_running) {
+		vTaskDelay(100);
+	}
+
 	/* Tear the overlays down before the compositor, they destroy their windows through the factory. */
 	if (self->launcher_up) {
 		gui_launcher_free(&self->launcher);
