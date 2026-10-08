@@ -129,6 +129,7 @@ static sampling_ret_t discover_channels(Sampling *self) {
 		struct mq_compensation_channel_conf conf = {
 			.x_ref = 0.0f,
 			.c = {0.0f, 1.0f},
+			.exp = 1.0f,
 			.t_ref = MQ_COMPENSATION_DEFAULT_TEMP_C,
 			.tc1 = 0.0f,
 			.tc2 = 0.0f,

@@ -39,12 +39,20 @@ typedef enum {
  * Configuration for a single compensation channel, including routing topics, a human-readable
  * name, and the calibration coefficients.
  *
- * The measured value @p x is first centered around @p x_ref and corrected by the polynomial
+ * If @p reciprocal is set, the measured value is first replaced by its reciprocal (x = 1/x), eg. to
+ * convert a resistance to a conductance. A zero input yields FLT_MAX (saturated). The value @p x is
+ * then centered around @p x_ref and corrected by the polynomial
  *
  *     y = c[0] + c[1]*(x - x_ref) + c[2]*(x - x_ref)^2 + ... + c[N]*(x - x_ref)^N
  *
  * where c[0] absorbs the offset error, c[1] the gain error and the higher order terms the
- * nonlinearity. The result is then divided by a quadratic temperature factor
+ * nonlinearity. The result is raised to the power of @p exp (sign-preserving, sign(y)*|y|^exp, so a
+ * negative polynomial output does not produce NaN). Use exp = 1.0 to disable it. Together with the
+ * reciprocal this models hyperbolic/power-law curves, eg. a force sensing resistor:
+ *
+ *     F = (k/R + c)^d    (reciprocal = true, x_ref = 0, c[0] = c, c[1] = k, exp = d)
+ *
+ * The result is then divided by a quadratic temperature factor
  *
  *     y /= 1 + tc1*(T - t_ref) + tc2*(T - t_ref)^2
  *
@@ -57,9 +65,15 @@ struct mq_compensation_channel_conf {
 	char input_topic[MQ_COMPENSATION_MAX_TOPIC_LEN];
 	char output_topic[MQ_COMPENSATION_MAX_TOPIC_LEN];
 
+	/* Replace the input value by its reciprocal before the polynomial. */
+	bool reciprocal;
+
 	/* Value polynomial reference point and coefficients. */
 	float x_ref;
 	float c[MQ_COMPENSATION_MAX_ORDER + 1];
+
+	/* Exponent applied to the polynomial output, 1.0 to disable. */
+	float exp;
 
 	/* Quadratic temperature compensation reference and coefficients. */
 	float t_ref;
@@ -73,8 +87,10 @@ struct mq_compensation_channel {
 
 	/* Configuration subtree exposing the coefficients of this channel. */
 	ConfiglibValue channel_conf;
+	ConfiglibValue reciprocal_conf;
 	ConfiglibValue x_ref_conf;
 	ConfiglibValue c_conf[MQ_COMPENSATION_MAX_ORDER + 1];
+	ConfiglibValue exp_conf;
 	ConfiglibValue t_ref_conf;
 	ConfiglibValue tc1_conf;
 	ConfiglibValue tc2_conf;

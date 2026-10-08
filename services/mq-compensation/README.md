@@ -16,14 +16,27 @@ Raw sensor readings (ADC counts, uncalibrated pressure, etc.) usually carry thre
 - **nonlinearity** (the reading-to-value relationship is curved).
 
 On top of that, many sensors **drift with temperature**. This service corrects all of the above
-with a polynomial (offset + gain + nonlinearity) followed by a quadratic temperature factor.
+with a polynomial (offset + gain + nonlinearity) followed by a quadratic temperature factor. An optional
+input reciprocal and an output exponent extend the polynomial to hyperbolic and power-law curves (eg. a
+force sensing resistor).
 
 ## The math
 
 For a measured raw value `x` and a current temperature `T` (in °C), the compensated value `y` is
-computed in two stages.
+computed in four stages.
 
-### 1. Value polynomial
+### 1. Input reciprocal (optional)
+
+If `reciprocal` is set, the raw value is replaced by its reciprocal before anything else:
+
+```
+x = 1 / x
+```
+
+This turns eg. a resistance into a conductance. A zero input saturates to `FLT_MAX` instead of producing
+an infinity (and a NaN later in the polynomial).
+
+### 2. Value polynomial
 
 The raw value is first centered around the calibration reference point `x_ref`:
 
@@ -56,9 +69,20 @@ for (int i = MAX_ORDER; i >= 0; i--) {
 Centering around `x_ref` keeps the float coefficients well conditioned around the operating point:
 without centering, the high-order terms of `x` would span a huge dynamic range and lose precision.
 
-### 2. Temperature compensation
+### 3. Output exponent
 
-The polynomial output is then divided by a quadratic temperature factor, centered around the
+The polynomial output is raised to the power of `exp`, preserving its sign so a negative output does not
+produce a NaN for a non-integer exponent:
+
+```
+y = sign(y) · |y|^exp
+```
+
+The stage is skipped for `exp = 1.0`, which must be set for channels not using it.
+
+### 4. Temperature compensation
+
+The result is then divided by a quadratic temperature factor, centered around the
 temperature reference `t_ref`:
 
 ```
@@ -81,8 +105,24 @@ at which the value polynomial was calibrated.
 ### Putting it together
 
 ```
-y(x, T) = ( c0 + c1·(x - x_ref) + … + cN·(x - x_ref)ᴺ ) / ( 1 + tc1·(T - t_ref) + tc2·(T - t_ref)² )
+y(x, T) = ( c0 + c1·(x - x_ref) + … + cN·(x - x_ref)ᴺ )^exp / ( 1 + tc1·(T - t_ref) + tc2·(T - t_ref)² )
 ```
+
+with `x` replaced by `1/x` if `reciprocal` is set.
+
+### Example: force sensing resistor
+
+The resistance of a force sensing resistor drops roughly as a power of the applied force, so its
+conductance `1/R` is a power of the force. The force is then modelled as a shifted power law in conductance:
+
+```
+F = (k/R + c)^d
+```
+
+where `k` is the conductance gain, `c` absorbs the leakage (zero load) conductance and `d` the power-law
+curvature (typically 1 to 1.5). It maps onto the channel coefficients as `reciprocal = true`, `x_ref = 0`,
+`c0 = c`, `c1 = k`, higher coefficients `0` and `exp = d`. A model written as `(a/R·b + c)^d` has the same
+form with `k = a·b` (only the product of `a` and `b` can be determined).
 
 ## Configuration coefficients
 
@@ -91,8 +131,10 @@ Each channel exposes a configuration subtree named after the channel, under the 
 
 | Node     | Meaning                                                        |
 |----------|---------------------------------------------------------------|
+| `reciprocal` | use the reciprocal of the raw value (`true`/`false`)      |
 | `x_ref`  | value polynomial reference point (raw units)                  |
 | `c0`…`cN`| value polynomial coefficients (`N = MQ_COMPENSATION_MAX_ORDER`)|
+| `exp`    | exponent applied to the polynomial output (`1.0` disables it) |
 | `t_ref`  | temperature reference point (°C)                              |
 | `tc1`    | linear temperature coefficient (per °C)                       |
 | `tc2`    | quadratic temperature coefficient (per °C²)                   |

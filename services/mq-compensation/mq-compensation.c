@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
+#include <float.h>
 
 #include "config.h"
 #include "FreeRTOS.h"
@@ -40,6 +41,11 @@ static const char *mq_compensation_coef_names[] = {
 /* Compute the compensated value for a single channel from the raw value @p x and the current
  * temperature @p temp_c. See the description of struct mq_compensation_channel_conf for the model. */
 static float mq_compensation_apply(const struct mq_compensation_channel *ch, float x, float temp_c) {
+	/* Optionally work with the reciprocal of the input (eg. conductance instead of resistance). */
+	if (ch->conf.reciprocal) {
+		x = (x != 0.0f) ? 1.0f / x : FLT_MAX;
+	}
+
 	/* Center the input around the calibration reference point. */
 	float xr = x - ch->conf.x_ref;
 
@@ -47,6 +53,11 @@ static float mq_compensation_apply(const struct mq_compensation_channel *ch, flo
 	float y = 0.0f;
 	for (int i = MQ_COMPENSATION_MAX_ORDER; i >= 0; i--) {
 		y = y * xr + ch->conf.c[i];
+	}
+
+	/* Raise to the configured power, preserving the sign to avoid NaN for a negative output. */
+	if (ch->conf.exp != 1.0f) {
+		y = copysignf(powf(fabsf(y), ch->conf.exp), y);
 	}
 
 	/* Apply the quadratic temperature compensation. */
@@ -222,7 +233,7 @@ mq_compensation_ret_t mq_compensation_init(MqCompensation *self, Mq *mq) {
 	self->mq = mq;
 	self->temp_c = MQ_COMPENSATION_DEFAULT_TEMP_C;
 
-	configlib_init_map(&self->root_conf, "compensation", NULL, CONF_SUBTREE);
+	configlib_init_map(&self->root_conf, "channels", NULL, CONF_SUBTREE);
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 	return MQ_COMPENSATION_RET_OK;
@@ -263,13 +274,26 @@ mq_compensation_ret_t mq_compensation_add_channel(MqCompensation *self, const st
 	 * name and holds the reference points and polynomial coefficients. */
 	configlib_init_map_append(&ch->channel_conf, ch->conf.name, NULL, CONF_SUBTREE, &self->root_conf, CONF_DIR_CHILD);
 
+	configlib_init_map_append(&ch->reciprocal_conf, "reciprocal", &ch->conf.reciprocal, CONF_B, &ch->channel_conf, CONF_DIR_CHILD);
 	configlib_init_map_append(&ch->x_ref_conf, "x_ref", &ch->conf.x_ref, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
 	for (size_t i = 0; i <= MQ_COMPENSATION_MAX_ORDER; i++) {
 		configlib_init_map_append(&ch->c_conf[i], mq_compensation_coef_names[i], &ch->conf.c[i], CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
 	}
+	configlib_init_map_append(&ch->exp_conf, "exp", &ch->conf.exp, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
 	configlib_init_map_append(&ch->t_ref_conf, "t_ref", &ch->conf.t_ref, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
 	configlib_init_map_append(&ch->tc1_conf, "tc1", &ch->conf.tc1, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
 	configlib_init_map_append(&ch->tc2_conf, "tc2", &ch->conf.tc2, CONF_F, &ch->channel_conf, CONF_DIR_CHILD);
+
+	/* All values are configuration, mark them readable and writable so they are saved and loaded. */
+	ch->reciprocal_conf.flags = CONF_READ | CONF_WRITE;
+	ch->x_ref_conf.flags = CONF_READ | CONF_WRITE;
+	for (size_t i = 0; i <= MQ_COMPENSATION_MAX_ORDER; i++) {
+		ch->c_conf[i].flags = CONF_READ | CONF_WRITE;
+	}
+	ch->exp_conf.flags = CONF_READ | CONF_WRITE;
+	ch->t_ref_conf.flags = CONF_READ | CONF_WRITE;
+	ch->tc1_conf.flags = CONF_READ | CONF_WRITE;
+	ch->tc2_conf.flags = CONF_READ | CONF_WRITE;
 
 	/* And append it to the linked list. */
 	ch->next = self->first_channel;
