@@ -17,9 +17,13 @@
  *
  * Wire protocol (all CBOR):
  *
- *   request:  { "a": <ack_seq>, "m": <max_batches> }
+ *   request:  { "a": <ack_seq>, "m": <max_batches>, "t": <topic> }
  *       "a" is the highest sequence number the client has durably received; the server retires every
- *       retained batch up to and including it. "m" caps how many batches the reply may carry.
+ *       retained batch up to and including it. "m" caps how many batches the reply may carry. The
+ *       optional "t" is a topic filter replacing the message queue subscription (initially the
+ *       configured topic), so values not matching it are never received nor buffered. Batches already
+ *       buffered are still delivered. The subscription is shared by all clients of the service, the last
+ *       requested filter applies. Without "t" (or with a filter too long) the subscription is unchanged.
  *
  *   reply:    { "h": <device>, "p": <pending>, "q": <buffering>, "b": [ <batch>, <batch>, ... ] }
  *       "b" holds the lowest-sequence retained batches not yet acknowledged, in ascending order and
@@ -261,11 +265,13 @@ static void rx_task(void *p) {
  * NBUS poll request servicing task
  **********************************************************************************************************************/
 
-/* Parse a poll request into the acknowledged cursor and the maximum number of batches to return. A
- * malformed or empty request degrades gracefully to "acknowledge nothing, return the default max". */
-static void parse_request(NbusMqPoll *self, const uint8_t *buf, size_t len, uint32_t *ack, size_t *max) {
+/* Parse a poll request into the acknowledged cursor, the maximum number of batches to return and the
+ * requested topic filter (left empty if absent or too long). A malformed or empty request degrades
+ * gracefully to "acknowledge nothing, return the default max, keep the subscription". */
+static void parse_request(NbusMqPoll *self, const uint8_t *buf, size_t len, uint32_t *ack, size_t *max, char *topic) {
 	*ack = 0;
 	*max = NBUS_MQ_POLL_MSG_BUFFERS;
+	topic[0] = '\0';
 
 	CborParser parser;
 	CborValue root;
@@ -286,6 +292,21 @@ static void parse_request(NbusMqPoll *self, const uint8_t *buf, size_t len, uint
 			*max = (size_t)u;
 		}
 	}
+	if (cbor_value_map_find_value(&root, "t", &v) == CborNoError && cbor_value_is_text_string(&v)) {
+		size_t topic_len = NBUS_MQ_POLL_MAX_TOPIC_LEN;
+		if (cbor_value_copy_text_string(&v, topic, &topic_len, NULL) != CborNoError) {
+			topic[0] = '\0';
+		}
+	}
+}
+
+
+/* Replace the message queue subscription with @p topic. */
+static void set_topic(NbusMqPoll *self, const char *topic) {
+	self->mqc->vmt->unsubscribe(self->mqc, self->topic);
+	strlcpy(self->topic, topic, NBUS_MQ_POLL_MAX_TOPIC_LEN);
+	self->mqc->vmt->subscribe(self->mqc, self->topic);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("subscribed to '%s'"), self->topic);
 }
 
 
@@ -386,7 +407,11 @@ static void nbus_task(void *p) {
 
 		uint32_t ack = 0;
 		size_t max = 0;
-		parse_request(self, self->nbus_buf, len, &ack, &max);
+		char topic[NBUS_MQ_POLL_MAX_TOPIC_LEN];
+		parse_request(self, self->nbus_buf, len, &ack, &max, topic);
+		if (topic[0] != '\0' && strcmp(topic, self->topic)) {
+			set_topic(self, topic);
+		}
 
 		/* Retained batches are copied into the private tx buffer under the lock, so the reply can be
 		 * sent without holding it (the datagram write may block) and without racing the reception task. */

@@ -67,7 +67,8 @@ struct nbus_mq_poll_conf {
 	Mq *mq;
 	/** Datagram (a bound nbus2 socket) the poll requests are received on and answered to. */
 	Datagram *d;
-	/** Topic subscribed to; matching values are serialised and batched for polling. */
+	/** Topic subscribed to initially; matching values are serialised and batched for polling. A client
+	 *  may replace it with the "t" field of a poll request. */
 	const char *topic;
 	/** Device name emitted in the "h" header field of every batch. */
 	const char *device_name;
