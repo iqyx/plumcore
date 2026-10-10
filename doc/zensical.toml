@@ -93,6 +93,7 @@ nav = [
     { "Interfaces" = [
         "interfaces/index.md",
         "interfaces/power.md",
+        "interfaces/remote-interface.md",
     ] },
     { "Applications" = "applications.md" },
     { "Applets" = "applets.md" },
