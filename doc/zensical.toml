@@ -73,6 +73,7 @@ nav = [
             "services/mqtt-tcpip.md",
             "services/nbus.md",
             "services/nbus2.md",
+            "services/remote-interface-proxy.md",
         ] },
         { "Communication server/clients" = [
             "services/mqtt-file-download.md",

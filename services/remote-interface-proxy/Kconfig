@@ -1,0 +1,3 @@
+config SERVICE_REMOTE_INTERFACE_PROXY
+	bool "Proxy exporting legacy Datagram protocol handlers as a RemoteInterface"
+	default n
