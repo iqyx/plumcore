@@ -276,6 +276,73 @@ static nbus_flash_ret_t process_cc_read(NbusFlash *self, CborValue *imap, CborEn
 }
 
 
+/* Estimate usage of the opened flash partition. Each bit of the returned bitmap "b" represents "ba" consecutive erase
+ * blocks (block n maps to bit (n / ba) % 8 of byte (n / ba) / 8, LSB first). A bit is 0 only if all its erase blocks
+ * are erased. A block is considered erased if its first 32 bit word reads as 0xffffffff. "ba" is chosen as the smallest
+ * value which lets the bitmap fit in NBUS_FLASH_BLOCK_LEN bytes. */
+static nbus_flash_ret_t process_cc_usage(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
+	uint32_t sid;
+	if (!cbor_map_get_uint(imap, "sid", &sid) || self->flash == NULL || sid != self->sid) {
+		cbor_encode_text_stringz(omap, "err");
+		cbor_encode_text_stringz(omap, "session error");
+		return NBUS_FLASH_RET_FAILED;
+	}
+
+	if (self->flash->vmt->get_size == NULL || self->flash->vmt->read == NULL) {
+		cbor_encode_text_stringz(omap, "err");
+		cbor_encode_text_stringz(omap, "not supported");
+		return NBUS_FLASH_RET_FAILED;
+	}
+
+	/* Level 0 is the whole partition, the last level supporting erase is the smallest erase block. */
+	size_t part_size = 0;
+	size_t erase_size = 0;
+	size_t size = 0;
+	flash_block_ops_t ops;
+	for (uint32_t i = 0; self->flash->vmt->get_size(self->flash, i, &size, &ops) == FLASH_RET_OK; i++) {
+		if (i == 0) {
+			part_size = size;
+		}
+		if (ops & FLASH_BLOCK_OPS_ERASE) {
+			erase_size = size;
+		}
+	}
+	if (erase_size == 0 || part_size < erase_size) {
+		cbor_encode_text_stringz(omap, "err");
+		cbor_encode_text_stringz(omap, "bad flash geometry");
+		return NBUS_FLASH_RET_FAILED;
+	}
+
+	uint32_t blocks = part_size / erase_size;
+	uint32_t ba = (blocks + NBUS_FLASH_BLOCK_LEN * 8 - 1) / (NBUS_FLASH_BLOCK_LEN * 8);
+
+	uint8_t bitmap[NBUS_FLASH_BLOCK_LEN] = {0};
+	for (uint32_t i = 0; i < blocks; i++) {
+		uint32_t bit = i / ba;
+		if (bitmap[bit / 8] & (1 << (bit % 8))) {
+			/* Already marked as used by another block in the same group, no need to read. */
+			continue;
+		}
+		uint32_t word = 0;
+		if (self->flash->vmt->read(self->flash, i * erase_size, &word, sizeof(word)) != FLASH_RET_OK) {
+			cbor_encode_text_stringz(omap, "err");
+			cbor_encode_text_stringz(omap, "reading failed");
+			return NBUS_FLASH_RET_FAILED;
+		}
+		if (word != 0xffffffff) {
+			bitmap[bit / 8] |= 1 << (bit % 8);
+		}
+	}
+
+	cbor_encode_text_stringz(omap, "ba");
+	cbor_encode_uint(omap, ba);
+	cbor_encode_text_stringz(omap, "b");
+	cbor_encode_byte_string(omap, bitmap, ((blocks + ba - 1) / ba + 7) / 8);
+
+	return NBUS_FLASH_RET_OK;
+}
+
+
 static nbus_flash_ret_t process_cc_reset(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
 	(void)self;
 	(void)imap;
@@ -325,6 +392,8 @@ static nbus_flash_ret_t process_main_ep(NbusFlash *self, uint8_t *buf, size_t le
 				ret = process_cc_write(self, &map, &encoder_map);
 			} else if (!strcmp(s, "read")) {
 				ret = process_cc_read(self, &map, &encoder_map);
+			} else if (!strcmp(s, "usage")) {
+				ret = process_cc_usage(self, &map, &encoder_map);
 			} else if (!strcmp(s, "reset")) {
 				ret = process_cc_reset(self, &map, &encoder_map);
 			};
