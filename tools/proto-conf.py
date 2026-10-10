@@ -2,6 +2,8 @@
 
 import sys
 import os
+import logging
+import datetime
 from colorama import init as colorama_init, Fore, Back, Style
 import argparse
 import cbor2
@@ -57,20 +59,47 @@ CONF_DETAIL = (1 << 4)
 CONF_CREATE = (1 << 5)
 
 
+class CustomLogFormatter(logging.Formatter):
+
+	color_codes = {
+		'DEBUG': Style.BRIGHT + Fore.GREEN,
+		'INFO': Style.BRIGHT + Fore.BLUE,
+		'WARNING': Style.BRIGHT + Fore.YELLOW,
+		'ERROR': Style.BRIGHT + Fore.RED,
+		'CRITICAL': Style.BRIGHT + Fore.MAGENTA,
+	}
+
+	def format(self, record):
+		levelname = CustomLogFormatter.color_codes.get(record.levelname, '') + f'{record.levelname:10}'
+		asctime = datetime.datetime.fromtimestamp(record.created).isoformat()
+		return f'[{Style.DIM}{Fore.WHITE}{asctime}{Style.NORMAL}] {levelname}{Style.RESET_ALL} {Fore.YELLOW}{Style.NORMAL}{record.module}:{record.name}:{Style.RESET_ALL} {record.getMessage()}'
+
+
+def init_logging():
+	l = logging.INFO
+	if args.debug:
+		l = logging.DEBUG
+
+	logging.basicConfig(level=l)
+	logging.getLogger().handlers[0].setFormatter(CustomLogFormatter())
+
+
 def init_args():
 	parser = argparse.ArgumentParser(
 		description="plumCore proto-conf over nbus2 configuration tree tool",
-		epilog="example: proto-conf.py udp6:///00010002/3 --walk\n\n(c) 2026 Marek Koza <qyx@krtko.org>",
+		epilog="example: proto-conf.py udp6:///00010002/3 --walk\n         proto-conf.py rible://nwdaq-hh1/conf --walk\n\n(c) 2026 Marek Koza <qyx@krtko.org>",
 		formatter_class=argparse.RawDescriptionHelpFormatter
 	)
 
-	parser.add_argument('uri', type=str, help='nbus2 connection URI carrying the destination, e.g. udp6:///<sid>/<ep>')
+	parser.add_argument('uri', type=str, help='nbus2 connection URI carrying the destination, e.g. udp6:///<sid>/<ep> or rible://<device>/<interface>')
+	parser.add_argument('-L', '--list', action='store_true', help='list the interfaces exported by the device (rible:// only)')
 	parser.add_argument('-w', '--walk', type=str, nargs='?', const='', default=None, metavar='PATH', help='walk and show the configuration tree at PATH, slash separated (default: root)')
 	parser.add_argument('-r', '--read', type=str, default=None, metavar='PATH', help='read the value of the conf node at PATH and print it (script-friendly)')
 	parser.add_argument('-W', '--write', type=str, nargs=2, default=None, metavar=('PATH', 'VALUE'), help='write VALUE to the conf node at PATH (slash separated)')
 	parser.add_argument('-l', '--load', action='store_true', help='load the stored configuration on the device and wait for it to finish')
 	parser.add_argument('-s', '--save', action='store_true', help='save the configuration on the device and wait for it to finish')
 	parser.add_argument('-v', '--verbose', action='store_true', help='log all nbus2 protocol calls and responses')
+	parser.add_argument('--debug', action='store_true', help='DEBUG level logging')
 
 	return parser.parse_args()
 
@@ -256,8 +285,15 @@ if __name__ == "__main__":
 
 	colorama_init()
 	args = init_args()
+	init_logging()
 
 	with pynbus2.connect(args.uri) as nbus:
+		if args.list:
+			for name, desc in nbus.walk():
+				pv = desc.get('pv')
+				print(f'{Fore.BLUE}{Style.BRIGHT}{name!r}{Style.RESET_ALL} {desc.get("p")}' + (f' {pv}' if pv else '') + f' {Style.DIM}(mtu {desc.get("mtu")}, max sessions {desc.get("ms")}){Style.RESET_ALL}')
+			sys.exit(0)
+
 		sock = nbus.socket()
 		if not sock._connected:
 			print(f'the URI must carry a destination, e.g. udp6:///<sid>/<ep>', file=sys.stderr)
