@@ -155,6 +155,51 @@ with pynbus2.connect('dgble://nwdaq-hh1/00010002/3?scan=8000') as nbus:
 Endpoint numbers are 16-bit (matching proto-dgble), unlike the 4-bit nbus2 endpoints of the other
 transports.
 
+### `rible://` — RemoteInterface over BLE (remote-interface-ble)
+
+Opens a session on a RemoteInterface exported by the firmware `services/remote-interface-ble` service.
+The device exposes a single GATT service with a control and a data characteristic. The interface is
+selected by the name it was advertised with in the firmware service locator, sessions are opened and
+closed through the control characteristic and the messages are fragmented over the data
+characteristic. Needs the `ble` extra (SimplePyBLE, sync API, cbor2).
+
+```
+rible://<device-name-or-mac>[/<path>/<to>/<interface>][?adapter=...]
+```
+
+| part / query | meaning | default |
+|--------------|---------|---------|
+| host         | bonded device to connect to, matched against its name or MAC address | — (required) |
+| path         | interface name, the path components are joined with spaces (`/card1/flash` is `"card1 flash"`) | discover the interfaces |
+| `adapter`    | Bluetooth adapter to use, by identifier or address | first available |
+
+On connect the transport checks the GATT service is present, queries the interface with the `desc`
+control command and logs its description (protocol, version, MTU, maximum sessions). `nbus.socket()`
+opens a session on the interface and returns it already connected, closing the socket closes the
+session.
+
+```python
+with pynbus2.connect('rible://nwdaq-hh1/conf') as nbus:
+    sock = nbus.socket()
+    reply = sock.request(cbor2.dumps({'c': 'stat', 'p': []}))
+```
+
+Without a path the transport walks all interfaces exported by the device and logs their descriptions.
+The root interface `""`, if the device has one, becomes the default destination, otherwise
+`nbus.socket()` returns an unconnected socket. The same list is returned by `nbus.walk()` as
+`(name, desc)` tuples on any `rible://` connection (other transports raise `NbusError`):
+
+```python
+with pynbus2.connect('rible://nwdaq-hh1') as nbus:
+    for name, desc in nbus.walk():
+        print(repr(name), desc['p'], desc.get('pv'), desc['mtu'], desc['ms'])
+```
+
+`tools/proto-conf.py rible://nwdaq-hh1 --list` prints the same list.
+
+The service UUIDs are the first 15 bytes of `sha256("RemoteInterfaceBle")` followed by an attribute
+selector: `…e700` service, `…e701` control, `…e702` data.
+
 ## Extending
 
 New transports subclass `pynbus2.transport.base.Transport` / `SocketBackend` and register for a

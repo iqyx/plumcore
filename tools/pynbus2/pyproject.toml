@@ -13,7 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 serial = ["pyserial>=3.4"]
-ble = ["simplepyble>=0.7"]
+ble = ["simplepyble>=0.7", "cbor2>=5"]
 
 [project.urls]
 Homepage = "https://krtko.org"

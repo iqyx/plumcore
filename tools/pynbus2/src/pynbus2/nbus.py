@@ -129,6 +129,11 @@ class Nbus:
 
 		return sock
 
+	def walk(self):
+		"""Discover the interfaces reachable over the transport, a list of (name, desc) tuples. Raises
+		NbusError if the transport does not support discovery."""
+		return self._transport.walk()
+
 	def close(self):
 		"""Close all sockets created on this connection and release the transport."""
 		for sock in self._sockets:

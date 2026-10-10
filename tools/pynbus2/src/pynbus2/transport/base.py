@@ -15,6 +15,8 @@ the subclass for a URI scheme in :mod:`pynbus2.transport`.
 
 import abc
 
+from ..errors import NbusError
+
 
 class SocketBackend(abc.ABC):
 	"""A single bidirectional datagram channel towards one nbus2 endpoint."""
@@ -64,6 +66,15 @@ class Transport(abc.ABC):
 	@abc.abstractmethod
 	def from_uri(cls, uri):
 		"""Build a transport from a parsed :class:`pynbus2.uri.Uri`."""
+
+	def walk(self):
+		"""Discover the interfaces reachable over this transport.
+
+		Returns a list of (name, desc) tuples, desc being a map describing the interface (protocol "p",
+		protocol version "pv", "mtu" and maximum sessions "ms"). Only transports exporting named interfaces
+		(rible) support it.
+		"""
+		raise NbusError('the transport does not support interface discovery')
 
 	@abc.abstractmethod
 	def open_socket(self):
