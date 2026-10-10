@@ -16,7 +16,7 @@ counter.
 
 The packet protection (BLAKE2s-SIV) is done here on the host, so this transport needs the preshared
 key. The framing is supplied as a framer object, so the same transport works for any line/datagram
-framing; today it is wired up for dgtext.
+framing (dgtext and dgstream, see :mod:`pynbus2.transport.framing`).
 
 Multicast packets are never handed to the (unicast) sockets, mirroring the firmware socket rule. The
 descriptor advertisements services multicast periodically go to the transport's advertisement handler

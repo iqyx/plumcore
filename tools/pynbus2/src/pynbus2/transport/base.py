@@ -67,6 +67,25 @@ class Transport(abc.ABC):
 	def from_uri(cls, uri):
 		"""Build a transport from a parsed :class:`pynbus2.uri.Uri`."""
 
+	@classmethod
+	def probe(cls, uri):
+		"""Enumerate more complete connection URIs reachable from the (possibly incomplete) ``uri``.
+
+		``uri`` is a parsed :class:`pynbus2.uri.Uri` whose scheme has already selected this transport;
+		its remaining parts (host, destination) may still be missing. The transport inspects what is
+		present and returns a list of URI *strings* filling in the next level of detail using whatever
+		discovery method is specific to it. E.g. a serial transport probed with just its scheme lists
+		the serial ports (``dgtext+serial:///dev/ttyUSB0`` ...), probed with a port it lists the
+		services advertising behind it. The returned URIs may themselves be incomplete: probe again with
+		one of them to refine further, or pass a complete one to :func:`pynbus2.connect`. A URI naming
+		a service may carry its protocol name and version as ``p`` and ``pv`` query parameters, for
+		display only. Returns an empty list when there is nothing to enumerate.
+
+		Probing may block (opening a port, listening for advertisements, connecting a BLE device), so
+		interactive callers should run it off their UI thread. The default enumerates nothing.
+		"""
+		return []
+
 	def walk(self):
 		"""Discover the interfaces reachable over this transport.
 

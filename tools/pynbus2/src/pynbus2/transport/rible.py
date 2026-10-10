@@ -37,10 +37,11 @@ becomes the default destination if the device has one. Only **bonded** periphera
 import logging
 import queue
 import threading
+from urllib.parse import urlencode
 
 from .base import Transport, SocketBackend
-from .dgble import DgbleTransport, _device_matches
-from ..errors import NbusError, UriError
+from . import ble
+from ..errors import NbusError
 
 logger = logging.getLogger(__name__)
 
@@ -74,42 +75,27 @@ class RibleTransport(Transport):
 		self._rx_buf = bytearray()
 
 	@classmethod
-	def from_uri(cls, uri):
-		try:
-			import simplepyble
-		except ImportError as e:
-			raise ImportError(
-				'the rible transport requires SimplePyBLE; install it with "pip install simplepyble" '
-				'or "pip install pynbus2[ble]"') from e
+	def _connect(cls, uri):
+		"""Connect the device the URI names and set up the control and data channels."""
 		try:
 			import cbor2
 		except ImportError as e:
-			raise ImportError('the rible transport requires cbor2; install it with "pip install cbor2"') from e
+			raise ImportError('the rible transport requires cbor2; install it with "pip install cbor2" '
+			                  'or "pip install pynbus2[ble]"') from e
 
-		if not uri.host:
-			raise UriError('the rible URI must name a device by name or MAC, '
-						   'e.g. rible://AA:BB:CC:DD:EE:FF/<path>/<to>/<interface>')
-
-		adapter = DgbleTransport._pick_adapter(simplepyble, uri.get('adapter'))
-
-		paired = adapter.get_paired_peripherals()
-		listing = ', '.join('%s [%s]' % (p.identifier() or '(no name)', p.address()) for p in paired)
-		logger.info('bonded device(s) on adapter %s: %s', adapter.identifier(), listing or 'none')
-
-		peripheral = next((p for p in paired if _device_matches(uri.host, p)), None)
-		if peripheral is None:
-			raise NbusError('no bonded BLE device matching %r; pair and trust the device first '
-							'(e.g. with bluetoothctl), then retry. bonded device(s): %s'
-							% (uri.host, listing or 'none'))
-
-		logger.info('connecting to %s [%s]', peripheral.identifier() or '(no name)', peripheral.address())
-		peripheral.connect()
-		logger.info('connected to %s [%s]', peripheral.identifier() or '(no name)', peripheral.address())
-
-		transport = cls(peripheral)
+		transport = cls(ble.connect_bonded(uri))
 		transport._cbor = cbor2
 		try:
 			transport._setup()
+		except Exception:
+			transport.close()
+			raise
+		return transport
+
+	@classmethod
+	def from_uri(cls, uri):
+		transport = cls._connect(uri)
+		try:
 			# The interface name is carried as the default destination, the endpoint is not used.
 			if uri.path_segments:
 				name = ' '.join(uri.path_segments)
@@ -126,6 +112,32 @@ class RibleTransport(Transport):
 			transport.close()
 			raise
 		return transport
+
+	@classmethod
+	def probe(cls, uri):
+		"""Enumerate the bonded devices, then the interfaces one exports.
+
+		Probed with just the scheme it lists the bonded devices as ``rible://<mac>``. Probed with a
+		device it walks the interfaces and returns one ``rible://<device>/<path>/<to>/<interface>`` URI
+		per interface, carrying its protocol name and version as ``p``/``pv``. The root interface
+		``""``, if present, is the device URI itself.
+		"""
+		if not uri.host:
+			return ble.device_uris(uri)
+
+		transport = cls._connect(uri)
+		try:
+			interfaces = transport.walk()
+		finally:
+			transport.close()
+
+		params = [(k, v) for k, values in uri.query.items() if k not in ('p', 'pv') for v in values]
+		uris = []
+		for name, desc in interfaces:
+			query = params + [(k, desc[k]) for k in ('p', 'pv') if desc.get(k) is not None]
+			path = ''.join('/' + part for part in name.split(' ') if part)
+			uris.append('rible://%s%s%s' % (uri.host, path, '?' + urlencode(query) if query else ''))
+		return uris
 
 	def _setup(self):
 		try:
@@ -245,10 +257,7 @@ class RibleTransport(Transport):
 		return RibleSocket(self)
 
 	def close(self):
-		if self._peripheral is not None and self._peripheral.is_connected():
-			logger.info('disconnecting from %s [%s]',
-						self._peripheral.identifier() or '(no name)', self._peripheral.address())
-			self._peripheral.disconnect()
+		ble.disconnect(self._peripheral)
 
 
 class RibleSocket(SocketBackend):

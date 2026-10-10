@@ -23,7 +23,7 @@ A default destination may instead be carried in the URI path (``udp6:///00010002
 import logging
 
 from .uri import parse_uri
-from .transport import build_transport
+from .transport import build_transport, transport_for, schemes
 from .errors import NotConnectedError
 
 logger = logging.getLogger(__name__)
@@ -152,3 +152,22 @@ def connect(uri):
 	"""Connect to an nbus2 service identified by ``uri`` and return an :class:`Nbus`."""
 	transport = build_transport(parse_uri(uri))
 	return Nbus(transport, transport.default_dst)
+
+
+def probe(uri=''):
+	"""Discover connection URIs, refining an incomplete one a step at a time.
+
+	``uri`` may be any prefix of a full connection URI: empty, a bare scheme (``'dgtext+serial://'``) or
+	a scheme with a host but no destination. The transport selected by the scheme enumerates the next
+	level of detail with its own discovery method (see :meth:`pynbus2.transport.base.Transport.probe`)
+	and a list of (possibly still incomplete) URI strings is returned. Probe again with one of them to
+	refine further, or pass a complete one to :func:`connect`. With an empty URI the registered schemes
+	are returned as the starting points, e.g. ``['dgble://', 'dgstream+serial://', ...]``.
+
+	Probing may block for seconds (opening a port and listening for advertisements, connecting a BLE
+	device), run it off a UI thread.
+	"""
+	if uri is None or not str(uri).strip():
+		return ['%s://' % scheme for scheme in schemes()]
+	parsed = parse_uri(uri)
+	return transport_for(parsed.scheme).probe(parsed)

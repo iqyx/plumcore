@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# dgtext datagram framing over a byte Stream
+# dgtext and dgstream datagram framing over a byte Stream
 #
 # Copyright (c) 2026, Marek Koza (qyx@krtko.org)
 # All rights reserved.
 
-"""Framing of whole datagrams as printable text lines, matching the firmware ``proto-dgtext`` service.
+"""Framing of whole datagrams over a byte :class:`~pynbus2.transport.stream.Stream`.
 
-Each datagram is one line::
+Two framings are provided, matching the firmware services of the same name.
+
+``proto-dgtext`` (:class:`DgtextFramer`) sends each datagram as one printable text line::
 
     $<base64 payload>*<checksum>\\n
 
@@ -16,6 +18,12 @@ trailing checksum, and the checksum is the first 4 bytes of a BLAKE2s digest of 
 lowercase hex (8 chars). The receiver discards everything until a ``$``; a stray ``$`` mid-line
 resynchronises to the new frame. Every byte on the wire is printable ASCII, so it survives text-only
 transports. See services/proto-dgtext/proto-dgtext.{h,rst}.
+
+``proto-dgstream`` (:class:`DgstreamFramer`) sends the raw datagram verbatim in a single burst, with no
+framing bytes, length prefix or escaping. A short idle period on the medium afterwards delimits it from
+the next one, so the receiver accumulates bytes until a read times out. This pairs naturally with
+half-duplex links (RS485, CAN PHY) where the line idles between bursts. See
+services/proto-dgstream/proto-dgstream.{h,c}.
 """
 
 import base64
@@ -95,3 +103,46 @@ class DgtextFramer:
 		if got_cksum.lower() != _checksum(payload):
 			return None
 		return payload
+
+
+#: Inter-frame idle gap delimiting dgstream datagrams, in seconds (matches the firmware's
+#: CONFIG_SERVICE_PROTO_DGSTREAM_RX_TIMEOUT_MS default).
+DEFAULT_FRAME_GAP = 0.02
+
+
+class DgstreamFramer:
+	"""Reads and writes raw datagrams delimited by an idle gap over a :class:`~pynbus2.transport.stream.Stream`."""
+
+	def __init__(self, stream, frame_gap=DEFAULT_FRAME_GAP, read_slice=0.05):
+		self._stream = stream
+		self._frame_gap = frame_gap
+		self._read_slice = read_slice
+
+	def write_datagram(self, data):
+		"""Write one datagram as a single burst; the idle gap afterwards terminates it."""
+		self._stream.write(data)
+
+	def read_datagram(self, timeout):
+		"""Read one datagram, or return ``None`` if none starts within ``timeout`` seconds.
+
+		Once the first byte arrives the frame is read to its end (the medium idling for the frame gap)
+		regardless of ``timeout``.
+		"""
+		deadline = (time.monotonic() + timeout) if timeout is not None else None
+		frame = bytearray()
+		while True:
+			if frame:
+				chunk = self._stream.read_some(self._frame_gap)
+				if not chunk:
+					return bytes(frame)
+				frame += chunk
+				continue
+
+			slice_timeout = self._read_slice
+			if deadline is not None:
+				remaining = deadline - time.monotonic()
+				if remaining <= 0:
+					return None
+				slice_timeout = min(slice_timeout, remaining)
+
+			frame += self._stream.read_some(slice_timeout)

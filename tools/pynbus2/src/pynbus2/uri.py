@@ -17,7 +17,7 @@ default destination as ``/<sid>`` or ``/<sid>/<ep>``; when present, :func:`pynbu
 sockets already connected to it.
 """
 
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, urlencode
 
 from .errors import UriError
 
@@ -39,6 +39,10 @@ class Uri:
 		if not values:
 			return default
 		return values[-1]
+
+	def query_string(self):
+		"""The query re-encoded as a string (without the leading ``?``), empty when there is none."""
+		return urlencode(self.query, doseq=True)
 
 	@property
 	def dst_sid(self):
@@ -78,3 +82,34 @@ def parse_uri(uri):
 	query = parse_qs(split.query, keep_blank_values=True)
 
 	return Uri(split.scheme, host, port, split.path, segments, query)
+
+
+def split_serial_path(uri):
+	"""Split a serial transport's URI into the device path and an optional ``(sid, ep)`` destination.
+
+	The device occupies the path, so a default destination is carried as the last two path
+	components after it. They are only treated as a destination when they parse as a service ID and
+	endpoint, so a deep device path (e.g. ``/dev/serial/by-id/...``) without a trailing destination is
+	left intact. The device path is the host (if any, e.g. ``COM3``) followed by the remaining leading
+	components.
+	"""
+	from .addressing import parse_id, parse_ep
+
+	segments = list(uri.path_segments)
+	dst = None
+	if len(segments) >= 2:
+		sid, ep = segments[-2], segments[-1]
+		try:
+			parse_id(sid)
+			parse_ep(ep)
+		except (ValueError, TypeError):
+			pass
+		else:
+			dst = (sid, ep)
+			segments = segments[:-2]
+
+	if uri.host:
+		device = '/'.join([uri.host] + segments)
+	else:
+		device = '/' + '/'.join(segments) if segments else ''
+	return device, dst

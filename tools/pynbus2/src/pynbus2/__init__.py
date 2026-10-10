@@ -14,7 +14,7 @@
         reply = sock.request(b'ping')
 """
 
-from .nbus import connect, Nbus, NbusSocket
+from .nbus import connect, probe, Nbus, NbusSocket
 from .errors import NbusError, UriError, NotConnectedError
 from .transport import register
 from .blake2s_siv import derive_keys
@@ -25,6 +25,7 @@ __version__ = '0.1.0'
 
 __all__ = [
 	'connect',
+	'probe',
 	'Nbus',
 	'NbusSocket',
 	'NbusError',

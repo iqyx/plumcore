@@ -29,14 +29,14 @@ The device (name or MAC) occupies the host and the service ID plus endpoint foll
 **bonded** peripherals are used: the firmware requires authenticated pairing, so the device must be
 paired and trusted out of band first (e.g. with ``bluetoothctl``). :func:`from_uri` looks the device up
 among the adapter's paired peripherals, connects over the stored bond, enumerates its GATT services and
-checks that the selected service ID (SID) is present, raising if it is not. No scanning is done - it is
-avoided on purpose, as BlueZ does not re-report an already-known device to a fresh scan. This transport
-uses the synchronous SimplePyBLE API only.
+checks that the selected service ID (SID) is present, raising if it is not. No scanning is done (see
+:mod:`pynbus2.transport.ble`). This transport uses the synchronous SimplePyBLE API only.
 """
 
 import logging
 import queue
 
+from . import ble
 from .base import Transport, SocketBackend
 from ..addressing import parse_id
 from ..errors import NbusError, UriError
@@ -55,6 +55,15 @@ def _make_uuid(group, tail):
 	return '%s%02x%08x' % (_UUID_PREFIX, group & 0xff, tail & 0xffffffff)
 
 
+def _parse_uuid(uuid, group):
+	"""The 32 bit tail of a proto-dgble UUID of the given group, or ``None`` for any other UUID."""
+	head = '%s%02x' % (_UUID_PREFIX, group)
+	uuid = uuid.lower()
+	if not uuid.startswith(head) or len(uuid) != len(head) + 8:
+		return None
+	return int(uuid[len(head):], 16)
+
+
 def _sid_to_int(sid):
 	"""Normalise a service ID (hex string, int or 4 bytes) to a 32 bit int for the UUID tail."""
 	return int.from_bytes(parse_id(sid), 'big')
@@ -68,22 +77,6 @@ def _parse_ep(value):
 	return ep
 
 
-def _normalise_mac(text):
-	"""Strip separators and case so MAC addresses compare regardless of formatting."""
-	return text.lower().replace(':', '').replace('-', '')
-
-
-def _device_matches(target, peripheral):
-	"""Whether ``target`` (a name or a MAC in any separator style) identifies this peripheral."""
-	name = peripheral.identifier()
-	address = peripheral.address()
-	if name and target.lower() == name.lower():
-		return True
-	if address and _normalise_mac(target) == _normalise_mac(address):
-		return True
-	return False
-
-
 class DgbleTransport(Transport):
 
 	def __init__(self, peripheral, service_uuids):
@@ -93,37 +86,13 @@ class DgbleTransport(Transport):
 
 	@classmethod
 	def from_uri(cls, uri):
-		try:
-			import simplepyble
-		except ImportError as e:
-			raise ImportError(
-				'the dgble transport requires SimplePyBLE; install it with "pip install simplepyble" '
-				'or "pip install pynbus2[ble]"') from e
-
 		if not uri.host:
 			raise UriError('the dgble URI must name a device by name or MAC, '
 						   'e.g. dgble://AA:BB:CC:DD:EE:FF/<sid>/<ep>')
 		if uri.dst_sid is None:
 			raise UriError('the dgble URI must carry a service ID, e.g. dgble://<device>/<sid>/<ep>')
 
-		adapter = cls._pick_adapter(simplepyble, uri.get('adapter'))
-
-		# Only bonded peripherals are used: the device requires authenticated pairing, and a bonded
-		# peripheral can be connected over its stored bond without scanning. Scanning is avoided on
-		# purpose, as BlueZ does not re-report an already-known device to a fresh scan.
-		paired = adapter.get_paired_peripherals()
-		listing = ', '.join('%s [%s]' % (p.identifier() or '(no name)', p.address()) for p in paired)
-		logger.info('bonded device(s) on adapter %s: %s', adapter.identifier(), listing or 'none')
-
-		peripheral = next((p for p in paired if _device_matches(uri.host, p)), None)
-		if peripheral is None:
-			raise NbusError('no bonded BLE device matching %r; pair and trust the device first '
-							'(e.g. with bluetoothctl), then retry. bonded device(s): %s'
-							% (uri.host, listing or 'none'))
-
-		logger.info('connecting to %s [%s]', peripheral.identifier() or '(no name)', peripheral.address())
-		peripheral.connect()
-		logger.info('connected to %s [%s]', peripheral.identifier() or '(no name)', peripheral.address())
+		peripheral = ble.connect_bonded(uri)
 
 		# The ATT MTU exchange may only be started by the client, and the peripheral's notifications are
 		# capped at MTU minus 3 bytes: a link left at the 23 byte default can only push 20 byte
@@ -152,29 +121,40 @@ class DgbleTransport(Transport):
 		transport.default_dst = (uri.dst_sid, uri.dst_ep)
 		return transport
 
-	@staticmethod
-	def _pick_adapter(simplepyble, wanted):
-		"""Select the Bluetooth adapter, by identifier or address when ``wanted`` is given."""
-		adapters = simplepyble.Adapter.get_adapters()
-		if not adapters:
-			raise NbusError('no Bluetooth adapter available')
-		if wanted is None:
-			return adapters[0]
-		want = wanted.lower()
-		for adapter in adapters:
-			if want in (adapter.identifier().lower(), adapter.address().lower()):
-				return adapter
-		raise NbusError('no Bluetooth adapter matching %r (available: %s)'
-						% (wanted, ', '.join(adapter.identifier() for adapter in adapters)))
+	@classmethod
+	def probe(cls, uri):
+		"""Enumerate the bonded devices, then the endpoints one exposes.
+
+		Probed with just the scheme it lists the bonded devices as ``dgble://<mac>``. Probed with a
+		device it connects it and returns one ``dgble://<device>/<sid>/<ep>`` URI per endpoint
+		characteristic of every proto-dgble service found.
+		"""
+		if not uri.host:
+			return ble.device_uris(uri)
+
+		peripheral = ble.connect_bonded(uri)
+		try:
+			services = peripheral.services()
+		finally:
+			ble.disconnect(peripheral)
+
+		query = uri.query_string()
+		uris = []
+		for service in services:
+			sid = _parse_uuid(service.uuid(), _GROUP_SERVICE)
+			if sid is None:
+				continue
+			for char in service.characteristics():
+				ep = _parse_uuid(char.uuid(), _GROUP_ENDPOINT)
+				if ep is not None:
+					uris.append('dgble://%s/%08x/%d%s' % (uri.host, sid, ep, '?' + query if query else ''))
+		return uris
 
 	def open_socket(self):
 		return DgbleSocket(self._peripheral, self._service_uuids)
 
 	def close(self):
-		if self._peripheral is not None and self._peripheral.is_connected():
-			logger.info('disconnecting from %s [%s]',
-						self._peripheral.identifier() or '(no name)', self._peripheral.address())
-			self._peripheral.disconnect()
+		ble.disconnect(self._peripheral)
 
 
 class DgbleSocket(SocketBackend):

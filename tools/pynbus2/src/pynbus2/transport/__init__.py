@@ -7,21 +7,22 @@
 
 """Registry mapping a URI scheme to the :class:`~pynbus2.transport.base.Transport` that handles it.
 
-Additional connection methods register themselves here. Only the UDP/IPv6 bridge transport is
-provided today; a direct serial transport (which would have to implement the nbus2 wire crypto) is a
-possible future addition.
+Additional connection methods register themselves here with :func:`register`. The transports import
+their optional third party dependencies (pyserial, SimplePyBLE, cbor2) only when used.
 """
 
 from ..errors import UriError
 from .base import Transport, SocketBackend
 from .udp6 import Udp6Transport
 from .serial_dgtext import SerialDgtextTransport
+from .serial_dgstream import SerialDgstreamTransport
 from .dgble import DgbleTransport
 from .rible import RibleTransport
 
 _REGISTRY = {
 	'udp6': Udp6Transport,
 	'dgtext+serial': SerialDgtextTransport,
+	'dgstream+serial': SerialDgstreamTransport,
 	'dgble': DgbleTransport,
 	'rible': RibleTransport,
 }
@@ -32,13 +33,23 @@ def register(scheme, transport_cls):
 	_REGISTRY[scheme] = transport_cls
 
 
-def build_transport(uri):
-	"""Instantiate the transport selected by a parsed :class:`~pynbus2.uri.Uri`."""
-	transport_cls = _REGISTRY.get(uri.scheme)
+def schemes():
+	"""The URI schemes that have a registered transport."""
+	return sorted(_REGISTRY)
+
+
+def transport_for(scheme):
+	"""The transport class handling ``scheme``, or raise :class:`~pynbus2.errors.UriError` if none does."""
+	transport_cls = _REGISTRY.get(scheme)
 	if transport_cls is None:
 		raise UriError('unsupported transport scheme %r (known: %s)'
-		               % (uri.scheme, ', '.join(sorted(_REGISTRY))))
-	return transport_cls.from_uri(uri)
+		               % (scheme, ', '.join(sorted(_REGISTRY))))
+	return transport_cls
 
 
-__all__ = ['Transport', 'SocketBackend', 'register', 'build_transport']
+def build_transport(uri):
+	"""Instantiate the transport selected by a parsed :class:`~pynbus2.uri.Uri`."""
+	return transport_for(uri.scheme).from_uri(uri)
+
+
+__all__ = ['Transport', 'SocketBackend', 'register', 'schemes', 'transport_for', 'build_transport']
