@@ -8,7 +8,7 @@
 """Registry mapping a URI scheme to the :class:`~pynbus2.transport.base.Transport` that handles it.
 
 Additional connection methods register themselves here with :func:`register`. The transports import
-their optional third party dependencies (pyserial, SimplePyBLE, cbor2) only when used.
+their optional third party dependencies (pyserial, SimplePyBLE, pyocd, cbor2) only when used.
 """
 
 from ..errors import UriError
@@ -18,6 +18,7 @@ from .serial_dgtext import SerialDgtextTransport
 from .serial_dgstream import SerialDgstreamTransport
 from .dgble import DgbleTransport
 from .rible import RibleTransport
+from .swd import SwdTransport
 
 _REGISTRY = {
 	'udp6': Udp6Transport,
@@ -25,6 +26,7 @@ _REGISTRY = {
 	'dgstream+serial': SerialDgstreamTransport,
 	'dgble': DgbleTransport,
 	'rible': RibleTransport,
+	'swd': SwdTransport,
 }
 
 

@@ -91,7 +91,7 @@ class Transport(abc.ABC):
 
 		Returns a list of (name, desc) tuples, desc being a map describing the interface (protocol "p",
 		protocol version "pv", "mtu" and maximum sessions "ms"). Only transports exporting named interfaces
-		(rible) support it.
+		(rible, swd) support it.
 		"""
 		raise NbusError('the transport does not support interface discovery')
 
