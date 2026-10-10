@@ -9,11 +9,18 @@ license = { text = "GPL-3.0-or-later" }
 readme = "README.md"
 requires-python = ">=3.8"
 keywords = ["nbus2", "plumcore", "embedded", "messaging"]
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 dependencies = []
 
 [project.optional-dependencies]
-serial = ["pyserial>=3.4"]
+serial = ["pyserial>=3.4", "cbor2>=5"]
 ble = ["simplepyble>=0.7", "cbor2>=5"]
+swd = ["pyocd>=0.36", "cbor2>=5"]
+all = ["pynbus2[serial,ble,swd]"]
 
 [project.urls]
 Homepage = "https://krtko.org"
@@ -27,4 +34,10 @@ distribution = true
 
 [tool.pdm.build]
 package-dir = "src"
-source-includes = ["README.md"]
+source-includes = ["README.md", "LICENSE", "tests/"]
+
+[tool.pdm.dev-dependencies]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

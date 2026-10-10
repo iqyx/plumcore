@@ -10,15 +10,28 @@ sockets to individual services, and read/write datagrams on them.
 
 ```sh
 cd tools/pynbus2
-pdm install          # for development
-# or build a source distribution:
-pdm build            # produces dist/pynbus2-<version>.tar.gz
+pdm install -G :all  # for development, with all the transports
+pdm run pytest       # run the tests
+# or build the distributions:
+pdm build            # produces dist/pynbus2-<version>.tar.gz and the wheel
 ```
 
-The UDP/IPv6 transport is pure standard library. The serial transport additionally needs
-`pyserial`; install it with the `serial` extra: `pip install pynbus2[serial]` (or `pdm install -G serial`).
-The BLE transport needs `simplepyble`; install it with the `ble` extra: `pip install pynbus2[ble]`
-(or `pdm install -G ble`).
+The core library and the UDP/IPv6 transport are pure standard library. The other transports need
+optional dependencies, installed with an extra (`pip install pynbus2[<extra>]`, or
+`pdm install -G <extra>`):
+
+| extra    | transports                          | installs           |
+|----------|-------------------------------------|--------------------|
+| `serial` | `dgtext+serial`, `dgstream+serial`  | pyserial, cbor2    |
+| `ble`    | `dgble`, `rible`                    | SimplePyBLE, cbor2 |
+| `swd`    | `swd`                               | pyocd, cbor2       |
+| `all`    | all of the above                    |                    |
+
+Another project can depend on the built sdist directly, e.g. with pdm:
+
+```sh
+pdm add "pynbus2[serial,swd] @ file:///path/to/plumcore/tools/pynbus2/dist/pynbus2-0.2.0.tar.gz"
+```
 
 ## Usage
 
@@ -111,11 +124,23 @@ with pynbus2.connect('dgtext+serial:///dev/ttyUSB0') as nbus:
 ```
 
 A background reader thread decrypts and demultiplexes incoming packets to the matching sockets, so
-several sockets can share one serial line.
+several sockets can share one serial line. Multicast packets are never delivered to sockets. The
+descriptor advertisements services multicast every couple of seconds are logged at DEBUG level and used
+for discovery (see below).
 
 > The host-side BLAKE2s-SIV protection interoperates with the device only when the firmware emits
 > that scheme. The legacy ChaCha20+halfsiphash scheme is not decoded host-side (no standard library
 > provides ChaCha20-128); `decode` is built to try schemes newest-first so it can be added later.
+
+### `dgstream+serial://` — serial line, framed by idle gaps
+
+The same as `dgtext+serial://`, with the same URI form and query parameters, but framed as the firmware
+`proto-dgstream` service does: each datagram is written verbatim in a single burst and a short idle
+period on the line (20 ms) delimits it from the next one. Suits half-duplex links (RS485, CAN PHY).
+
+```
+dgstream+serial://<device>[/<sid>/<ep>][?baudrate=...&key=...&self=...]
+```
 
 ### `dgble://` — BLE GATT tunnel (proto-dgble)
 
@@ -187,7 +212,7 @@ with pynbus2.connect('rible://nwdaq-hh1/conf') as nbus:
 Without a path the transport walks all interfaces exported by the device and logs their descriptions.
 The root interface `""`, if the device has one, becomes the default destination, otherwise
 `nbus.socket()` returns an unconnected socket. The same list is returned by `nbus.walk()` as
-`(name, desc)` tuples on any `rible://` connection (other transports raise `NbusError`):
+`(name, desc)` tuples on any `rible://` or `swd://` connection (other transports raise `NbusError`):
 
 ```python
 with pynbus2.connect('rible://nwdaq-hh1') as nbus:
@@ -200,8 +225,67 @@ with pynbus2.connect('rible://nwdaq-hh1') as nbus:
 The service UUIDs are the first 15 bytes of `sha256("RemoteInterfaceBle")` followed by an attribute
 selector: `…e700` service, `…e701` control, `…e702` data.
 
+### `swd://` — debug probe, virtual services
+
+Drives the target directly through an SWD debug probe (pyocd), without any firmware running. The
+transport serves *virtual* interfaces on the host instead, implemented on top of the debug access, and
+they are used exactly like interfaces reached over the other transports. Like `rible://`, they are
+selected by name, the path components are joined with spaces. Today the only interface is `flash`: the
+target's raw flash exported through the standard flash protocol (the firmware `services/nbus-flash`
+protocol, see `pynbus2.services.flash`). Every pyocd flash region becomes a volume, named `flash0`,
+`flash1`, ... in address order. Regions which only alias another one (e.g. the secure alias of the flash
+on TrustZone devices) are skipped. `nbus.walk()` lists the interfaces. Needs the `swd` extra.
+
+```
+swd://<probe-unique-id>[/<path>/<to>/<interface>][?target=...&pack=...&frequency=...]
+```
+
+| part / query | meaning | default |
+|--------------|---------|---------|
+| host         | unique ID of the debug probe, a case-insensitive substring match | — (required) |
+| path         | interface name, the path components are joined with spaces | `flash` |
+| `target`     | pyocd target type | autodetected by pyocd |
+| `pack`       | path to the CMSIS pack providing the target and its flash algorithm | none |
+| `frequency`  | SWD clock frequency in Hz | pyocd default |
+
+`tools/proto-nbus-flash.py` works over it unchanged, e.g. to recover a target with a broken
+bootloader:
+
+```sh
+tools/proto-nbus-flash.py 'swd://066DFF555187534867173540?target=stm32g491ccux&pack=Keil.STM32G4xx_DFP.2.0.0.pack' --list
+```
+
+The target is reset and halted when its flash is first erased or programmed (the flash algorithm runs
+in the target RAM), the flash `reset` command or closing the connection resumes it.
+
+## Discovery
+
+`pynbus2.probe(uri)` discovers connection URIs a step at a time. It takes any prefix of a URI and
+returns a list of more complete ones, using the discovery method of the transport the scheme selects.
+Probe again with one of the results to refine it further, or pass a complete one to `connect()`. A
+URI naming a service may carry its protocol name and version as `p`/`pv` query parameters, a BLE device
+URI the device name as `name`, for display only.
+
+```python
+pynbus2.probe('')                           # ['dgble://', 'dgstream+serial://', 'dgtext+serial://', ...]
+pynbus2.probe('dgtext+serial://')           # ['dgtext+serial:///dev/ttyUSB0', ...]
+pynbus2.probe('dgtext+serial:///dev/ttyUSB0')
+# ['dgtext+serial:///dev/ttyUSB0/00010002/1?p=flash&pv=1.0.0', ...]
+```
+
+| transport         | scheme only         | with a device |
+|-------------------|---------------------|---------------|
+| `dgtext+serial`, `dgstream+serial` | serial ports | services heard advertising within 5 s |
+| `dgble`           | bonded BLE devices  | the proto-dgble service endpoints |
+| `rible`           | bonded BLE devices  | the exported interfaces |
+| `swd`             | debug probes        | the virtual interfaces |
+| `udp6`            | not implemented     | not implemented |
+
+Probing can block for seconds, run it off a UI thread.
+
 ## Extending
 
 New transports subclass `pynbus2.transport.base.Transport` / `SocketBackend` and register for a
-scheme via `pynbus2.register(scheme, TransportClass)`. A direct serial transport (dgstream/dgtext)
-would additionally need the nbus2 wire cipher (ChaCha20-128 + halfsiphash) and is not implemented.
+scheme via `pynbus2.register(scheme, TransportClass)`. A transport may implement the `probe()`
+classmethod to take part in discovery. A direct serial transport speaking the legacy nbus2 wire cipher
+(ChaCha20-128 + halfsiphash) is not implemented.
