@@ -667,6 +667,7 @@ menu "Communication protocols"
 		source "services/proto-dgstream/Kconfig"
 		source "services/proto-dgble/Kconfig"
 		source "services/remote-interface-proxy/Kconfig"
+		source "services/remote-interface-ble/Kconfig"
 	endmenu
 
 	menu "Application layer protocols"

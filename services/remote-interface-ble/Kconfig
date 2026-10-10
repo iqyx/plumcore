@@ -1,0 +1,19 @@
+config SERVICE_REMOTE_INTERFACE_BLE
+	bool "BLE GATT transport for RemoteInterface services"
+	default n
+
+	config SERVICE_REMOTE_INTERFACE_BLE_DEBUG
+		bool "Enable debug logging of control requests and data traffic"
+		default n
+		depends on SERVICE_REMOTE_INTERFACE_BLE
+
+	config SERVICE_REMOTE_INTERFACE_BLE_CHANNELS
+		int "Number of data channels (concurrently open sessions)"
+		default 4
+		range 1 63
+		depends on SERVICE_REMOTE_INTERFACE_BLE
+
+	config SERVICE_REMOTE_INTERFACE_BLE_RX_QUEUE_LEN
+		int "Number of inbound data fragments buffered"
+		default 8
+		depends on SERVICE_REMOTE_INTERFACE_BLE

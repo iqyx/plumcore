@@ -74,6 +74,7 @@ nav = [
             "services/nbus.md",
             "services/nbus2.md",
             "services/remote-interface-proxy.md",
+            "services/remote-interface-ble.md",
         ] },
         { "Communication server/clients" = [
             "services/mqtt-file-download.md",
