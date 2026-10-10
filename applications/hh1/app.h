@@ -27,10 +27,11 @@
 #include <services/fb-painter/fb-painter.h>
 #include <services/gui-wm-fs/gui-wm-fs.h>
 #include <interfaces/datagram.h>
-#include <services/proto-dgble/proto-dgble.h>
+#include <services/remote-interface-ble/remote-interface-ble.h>
+#include <services/remote-interface-proxy/remote-interface-proxy.h>
+#include <services/proto-conf/proto-conf.h>
 #include <services/nbus-flash/nbus-flash.h>
 #include <services/nbus-mq-poll/nbus-mq-poll.h>
-#include <services/proto-conf/proto-conf.h>
 #include <services/conf-cbor/conf-cbor.h>
 #if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 	#include <interfaces/mq.h>
@@ -82,29 +83,30 @@ typedef struct {
 	/* Generic BLE device advertised by the port and the GATT server built on top of it (see ble.c). */
 	Ble *ble;
 
-	/* Datagram-over-BLE tunnel built on the same device and the flash endpoint's Datagram. */
-	ProtoDgble dgble;
-	Datagram *dgble_flash;
-	/* nbus-flash access service served over the flash tunnel endpoint. */
-	NbusFlash dgble_nbus_flash;
+	/* RemoteInterface transport owning the BLE device, exporting every advertised RemoteInterface. */
+	RemoteInterfaceBle ri_ble;
+
+	/* Remote configuration protocol exported as a single-session RemoteInterface. proto-conf runs with a
+	 * NULL root, so it exposes every Conf tree advertised via the service locator, each mounted under its
+	 * (space-delimited) name. */
+	RemoteInterfaceProxy conf_proxy;
+	ProtoConf proto_conf;
+
+	/* This device's own flash served by nbus-flash, exported as "flash". */
+	RemoteInterfaceProxy flash_proxy;
+	NbusFlash nbus_flash;
+
+	/* The local message queue served by the nbus-mq-poll bridge, exported as "mq", so a BLE client can poll
+	 * the values published there (eg. the measurement card's values when an application profile pulls them
+	 * in). */
+	RemoteInterfaceProxy mq_proxy;
+	NbusMqPoll nbus_mq_poll;
 
 	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
-		/* Second endpoint (ep 2) on the dgble tunnel above, proxied to the measurement card's nbus-flash
-		 * service over the backplane. Exposed on the same tunnel because the ST67W611 does not reliably
-		 * route peer writes to a second GATT service. */
-		Datagram *dgble_proxy_flash;
+		/* The measurement card's flash exported as "ff14 flash". The nbus-flash-proxy relaying its session to
+		 * the card's nbus-flash service is wired in app_setup_backplane, once the nbus2 stack is up. */
+		RemoteInterfaceProxy ff14_flash_proxy;
 	#endif
-
-	/* Third endpoint (ep 3) on the dgble tunnel above and the nbus-mq-poll bridge serving the local
-	 * message queue over it, so a BLE client can poll the values pulled in from the measurement card. */
-	Datagram *dgble_mq_poll;
-	NbusMqPoll dgble_nbus_mq_poll;
-
-	/* Fourth endpoint (ep 4) on the dgble tunnel above and the remote configuration protocol served
-	 * over it. It runs with a NULL root, so it exposes every Conf tree advertised via the service
-	 * locator, each mounted under its (space-delimited) name. */
-	Datagram *dgble_conf;
-	ProtoConf dgble_proto_conf;
 
 	/* Pairing dialog: a hidden compositor window brought on top while a passkey is being entered,
 	 * painted through its own painter. The passkey is kept as a preformatted six digit string. */
@@ -133,8 +135,8 @@ typedef struct {
 		struct nbus_socket *nbus_mq_socket;
 		NbusMqClient nbus_mq;
 
-		/* Socket connected to the measurement card's nbus-flash service and the proxy relaying the BLE
-		 * flash tunnel endpoint to it. */
+		/* Socket connected to the measurement card's nbus-flash service and the proxy relaying the
+		 * "ff14 flash" RemoteInterface session to it. */
 		struct nbus_socket *nbus_flash_socket;
 		NbusFlashProxy nbus_flash_proxy;
 
@@ -147,8 +149,8 @@ typedef struct {
 /**
  * @brief Discover the BLE device advertised by the port and build the GATT server on it.
  *
- * Sets up the event handler, device name, pairing security, the datagram-over-BLE tunnel and its
- * endpoints, the GAP appearance and starts advertising. Implemented in ble.c.
+ * Sets up the event handler, device name, pairing security, the RemoteInterface transport and the
+ * interfaces exported over it, the GAP appearance and starts advertising. Implemented in ble.c.
  *
  * @param self Instance of the application
  * @return APP_RET_FAILED if the BLE device was not found or setup failed,

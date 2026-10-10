@@ -322,10 +322,10 @@ static app_ret_t app_setup_backplane(App *self) {
 	nbus_socket_bind(self->nbus_flash_socket, local_id, 2);
 	nbus_socket_connect(self->nbus_flash_socket, flash_id, 1);
 
-	/* Relay the BLE flash proxy tunnel endpoint (BLE service 0x00000020) to the remote nbus-flash
-	 * service over this socket, so a BLE client transparently accesses the measurement card's flash. */
+	/* Relay the "ff14 flash" RemoteInterface session (created in ble.c) to the remote nbus-flash service
+	 * over this socket, so a BLE client transparently accesses the measurement card's flash. */
 	const struct nbus_flash_proxy_conf flash_proxy_conf = {
-		.client = self->dgble_proxy_flash,
+		.client = &self->ff14_flash_proxy.sessions[0].dgram,
 		.remote = &self->nbus_flash_socket->datagram,
 	};
 	nbus_flash_proxy_init(&self->nbus_flash_proxy, &flash_proxy_conf);

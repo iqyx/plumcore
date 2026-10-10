@@ -168,100 +168,112 @@ app_ret_t app_ble_init(App *self) {
 	self->ble->vmt->start(self->ble);
 	self->ble->vmt->set_device_name(self->ble, "nwdaq-main-hh1");
 
-	/* Tunnel datagrams over the same device. proto-dgble owns the device event callback (it needs the
-	 * peer write events), so the application handler is forwarded to it rather than registered directly.
-	 * Its GATT service and characteristics are built here, before the server is registered below. */
-	/* A single dgble tunnel (BLE service ID 0x00000010) carries both flash endpoints. The ST67W611 does
-	 * not reliably route peer writes to a second GATT service, so the proxy is exposed as a second
-	 * endpoint on this one tunnel rather than as its own service. */
-	const struct proto_dgble_config dgble_config = {
-		.ble = self->ble,
-		.service_id = 0x00000010,
-		.event_cb = app_ble_event_handler,
-		.event_cb_ctx = self,
-	};
-	if (proto_dgble_init(&self->dgble, &dgble_config) != PROTO_DGBLE_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the datagram-over-BLE tunnel"));
+	/* Export the remote configuration protocol as a single-session RemoteInterface. proto-conf predates
+	 * RemoteInterface, so it is wired to the proxy's session Datagram. It runs with a NULL root, exposing
+	 * every Conf tree advertised via the service locator, each mounted under its (space-delimited) name. The
+	 * load and save commands run the conf-cbor jobs. */
+	if (remote_interface_proxy_init(&self->conf_proxy, &(const struct remote_interface_proxy_conf) {
+		.desc = {
+			.protocol = "conf",
+			.protocol_version = "1.0.0",
+			.mtu = CONFIG_SERVICE_PROTO_CONF_MAX_DATAGRAM_LEN,
+			.max_sessions = 1,
+			.session_idle_ms = 0,
+		},
+		.queue_len = 2,
+	}) != REMOTE_INTERFACE_PROXY_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the conf proxy"));
 		return APP_RET_FAILED;
 	}
-
-	static const struct proto_dgble_descriptor dgble_flash_desc = {
-		.protocol = "flash",
-		.protocol_version = "1.0.0",
-	};
-
-	/* Endpoint 1: this device's own flash, served by the local nbus-flash service below. */
-	if (proto_dgble_add_endpoint(&self->dgble, 1, &dgble_flash_desc, &self->dgble_flash) != PROTO_DGBLE_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot add the flash tunnel endpoint"));
-		return APP_RET_FAILED;
-	}
-
-	/* Endpoint 2: proxied to the measurement card's nbus-flash service over the backplane (the proxy
-	 * itself is wired in app_setup_backplane, once the nbus2 stack is up). */
-	//if (proto_dgble_add_endpoint(&self->dgble, 2, &dgble_flash_desc, &self->dgble_proxy_flash) != PROTO_DGBLE_RET_OK) {
-		//u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot add the flash proxy tunnel endpoint"));
-		//return APP_RET_FAILED;
-	//}
-
-	/* Endpoint 3: this device's local message queue, served through the nbus-mq-poll bridge below so a
-	 * BLE client can poll the values pulled in from the measurement card. */
-	static const struct proto_dgble_descriptor dgble_mq_desc = {
-		.protocol = "mq",
-		.protocol_version = "1.0.0",
-	};
-	if (proto_dgble_add_endpoint(&self->dgble, 3, &dgble_mq_desc, &self->dgble_mq_poll) != PROTO_DGBLE_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot add the mq poll tunnel endpoint"));
-		return APP_RET_FAILED;
-	}
-
-	/* Endpoint 4: remote configuration tree access, served by the local proto-conf service below. */
-	static const struct proto_dgble_descriptor dgble_conf_desc = {
-		.protocol = "conf",
-		.protocol_version = "1.0.0",
-	};
-	if (proto_dgble_add_endpoint(&self->dgble, 4, &dgble_conf_desc, &self->dgble_conf) != PROTO_DGBLE_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot add the conf tunnel endpoint"));
-		return APP_RET_FAILED;
-	}
-
-	/* Finalize the tunnel: create the read-only descriptor characteristic last (ST67W611 quirk: it fails
-	 * to route write events to any characteristic that follows a read-only one, so both writable endpoint
-	 * characteristics must precede it). Must run before the GATT server is registered. */
-	proto_dgble_start(&self->dgble);
-
-	/* Serve the nbus-flash access protocol over endpoint 1 (this device's own flash). */
-	if (nbus_flash_init(&self->dgble_nbus_flash, self->dgble_flash) != NBUS_FLASH_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start nbus-flash on the tunnel endpoint"));
-	}
-
-	/* Serve the local message queue over endpoint 3 (nbus-mq-poll bridge). The queue holds whatever the
-	 * nbus-mq-client republishes from the measurement card under the "ff14" prefix, so a BLE client can
-	 * poll those values. */
-	Mq *mq = NULL;
-	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_MQ, 0, (Interface **)&mq) == ISERVICELOCATOR_RET_OK) {
-		const struct nbus_mq_poll_conf mq_poll_conf = {
-			.mq = mq,
-			.d = self->dgble_mq_poll,
-			.topic = "#",
-			.device_name = "nwdaq-main-hh1",
-		};
-		nbus_mq_poll_init(&self->dgble_nbus_mq_poll, &mq_poll_conf);
-		nbus_mq_poll_start(&self->dgble_nbus_mq_poll);
-	} else {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no message queue, mq poll endpoint not served"));
-	}
-
-	/* Serve the remote configuration protocol over endpoint 4. A NULL root exposes every Conf tree
-	 * advertised via the service locator, each mounted under its (space-delimited) name. The load and
-	 * save commands run the conf-cbor jobs. */
-	const struct proto_conf_conf proto_conf_conf = {
-		.d = self->dgble_conf,
+	if (proto_conf_init(&self->proto_conf, &(const struct proto_conf_conf) {
+		.d = &self->conf_proxy.sessions[0].dgram,
 		.root = NULL,
 		.load = &self->conf_cbor.jobs.load.job,
 		.save = &self->conf_cbor.jobs.save.job,
-	};
-	if (proto_conf_init(&self->dgble_proto_conf, &proto_conf_conf) != PROTO_CONF_RET_OK) {
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start proto-conf on the tunnel endpoint"));
+	}) != PROTO_CONF_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start proto-conf"));
+		return APP_RET_FAILED;
+	}
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_REMOTE_INTERFACE, (Interface *)&self->conf_proxy.iface, "conf");
+
+	/* Export this device's own flash, served by nbus-flash, as "flash". */
+	if (remote_interface_proxy_init(&self->flash_proxy, &(const struct remote_interface_proxy_conf) {
+		.desc = {
+			.protocol = "flash",
+			.protocol_version = "1.0.0",
+			.mtu = NBUS_FLASH_RX_BUF_LEN,
+			.max_sessions = 1,
+			.session_idle_ms = 0,
+		},
+		.queue_len = 2,
+	}) != REMOTE_INTERFACE_PROXY_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the flash proxy"));
+		return APP_RET_FAILED;
+	}
+	if (nbus_flash_init(&self->nbus_flash, &self->flash_proxy.sessions[0].dgram) != NBUS_FLASH_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start nbus-flash"));
+		return APP_RET_FAILED;
+	}
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_REMOTE_INTERFACE, (Interface *)&self->flash_proxy.iface, "flash");
+
+	/* Export the local message queue, served by the nbus-mq-poll bridge, as "mq". */
+	Mq *mq = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_MQ, 0, (Interface **)&mq) == ISERVICELOCATOR_RET_OK) {
+		if (remote_interface_proxy_init(&self->mq_proxy, &(const struct remote_interface_proxy_conf) {
+			.desc = {
+				.protocol = "mq",
+				.protocol_version = "1.0.0",
+				.mtu = NBUS_MQ_POLL_NBUS_BUF_LEN,
+				.max_sessions = 1,
+				.session_idle_ms = 0,
+			},
+			.queue_len = 2,
+		}) != REMOTE_INTERFACE_PROXY_RET_OK) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the mq proxy"));
+			return APP_RET_FAILED;
+		}
+		nbus_mq_poll_init(&self->nbus_mq_poll, &(const struct nbus_mq_poll_conf) {
+			.mq = mq,
+			.d = &self->mq_proxy.sessions[0].dgram,
+			.topic = "#",
+			.device_name = "nwdaq-main-hh1",
+		});
+		nbus_mq_poll_start(&self->nbus_mq_poll);
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_REMOTE_INTERFACE, (Interface *)&self->mq_proxy.iface, "mq");
+	} else {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no message queue, mq not exported"));
+	}
+
+	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
+		/* Export the measurement card's flash as "ff14 flash". The nbus-flash-proxy relaying the session to
+		 * the card is wired in app_setup_backplane, once the nbus2 stack is up. */
+		if (remote_interface_proxy_init(&self->ff14_flash_proxy, &(const struct remote_interface_proxy_conf) {
+			.desc = {
+				.protocol = "flash",
+				.protocol_version = "1.0.0",
+				.mtu = NBUS_FLASH_PROXY_BUF_LEN,
+				.max_sessions = 1,
+				.session_idle_ms = 0,
+			},
+			.queue_len = 2,
+		}) != REMOTE_INTERFACE_PROXY_RET_OK) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the ff14 flash proxy"));
+			return APP_RET_FAILED;
+		}
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_REMOTE_INTERFACE, (Interface *)&self->ff14_flash_proxy.iface, "ff14 flash");
+	#endif
+
+	/* Export all advertised RemoteInterfaces over BLE. The transport is the only user of the device and owns
+	 * its event callback, the application handler is forwarded to it. Its GATT service is built here, before
+	 * the server is registered below. */
+	if (remote_interface_ble_init(&self->ri_ble, &(const struct remote_interface_ble_conf) {
+		.ble = self->ble,
+		.event_cb = app_ble_event_handler,
+		.event_cb_ctx = self,
+	}) != REMOTE_INTERFACE_BLE_RET_OK ||
+	    remote_interface_ble_start(&self->ri_ble) != REMOTE_INTERFACE_BLE_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the RemoteInterface BLE transport"));
+		return APP_RET_FAILED;
 	}
 
 	/* Enable authenticated pairing with Passkey Entry: this device only has a display (DISPLAY_ONLY), so
@@ -269,7 +281,7 @@ app_ret_t app_ble_init(App *self) {
 	 * in. */
 	self->ble->vmt->set_security(self->ble, BLE_IO_CAP_DISPLAY_ONLY, BLE_SEC_LEVEL_AUTH);
 
-	/* Register the GATT server (the dgble tunnel service built above). */
+	/* Register the GATT server (the RemoteInterface transport service built above). */
 	self->ble->vmt->server_start(self->ble);
 
 	/* Override the module's default GAP appearance (0x0341, "Heart Rate Sensor") with 0x1480
