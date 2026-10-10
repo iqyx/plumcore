@@ -17,6 +17,11 @@ counter.
 The packet protection (BLAKE2s-SIV) is done here on the host, so this transport needs the preshared
 key. The framing is supplied as a framer object, so the same transport works for any line/datagram
 framing; today it is wired up for dgtext.
+
+Multicast packets are never handed to the (unicast) sockets, mirroring the firmware socket rule. The
+descriptor advertisements services multicast periodically go to the transport's advertisement handler
+instead: logged at DEBUG by default, or passed to ``on_advertisement`` as parsed
+:class:`~pynbus2.advertisement.Advertisement` tuples (used for service discovery).
 """
 
 import abc
@@ -25,6 +30,7 @@ import threading
 
 from .base import Transport, SocketBackend
 from .. import packet
+from ..advertisement import is_advertisement, parse_advertisement, log_advertisement
 from ..addressing import parse_id, parse_ep, format_id
 
 
@@ -82,7 +88,8 @@ class StreamTransport(Transport):
 	"""
 
 	def __init__(self, stream, framer, ke, km, self_id, scheme=packet.Blake2sSiv,
-	             schemes=packet.DEFAULT_SCHEMES, rx_tick=0.2):
+	             schemes=packet.DEFAULT_SCHEMES, rx_tick=0.2, on_advertisement=None):
+		self._on_advertisement = on_advertisement
 		self._stream = stream
 		self._framer = framer
 		self._ke = ke
@@ -145,7 +152,20 @@ class StreamTransport(Transport):
 			pkt = packet.decode(raw, self._ke, self._km, self._schemes)
 			if pkt is None:
 				continue
-			self._dispatch(pkt)
+			if pkt.multicast:
+				self._multicast(pkt)
+			else:
+				self._dispatch(pkt)
+
+	def _multicast(self, pkt):
+		if not is_advertisement(pkt):
+			return
+		if self._on_advertisement is None:
+			log_advertisement(pkt)
+			return
+		adv = parse_advertisement(pkt)
+		if adv is not None:
+			self._on_advertisement(adv)
 
 	def _dispatch(self, pkt):
 		with self._sock_lock:

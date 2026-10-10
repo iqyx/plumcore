@@ -19,6 +19,7 @@ from .errors import NbusError, UriError, NotConnectedError
 from .transport import register
 from .blake2s_siv import derive_keys
 from . import packet
+from . import advertisement
 
 __version__ = '0.1.0'
 
@@ -32,5 +33,6 @@ __all__ = [
 	'register',
 	'derive_keys',
 	'packet',
+	'advertisement',
 	'__version__',
 ]

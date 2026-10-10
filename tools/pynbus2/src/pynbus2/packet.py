@@ -15,7 +15,7 @@ Packet layout (see services/nbus2/nbus2.c)::
     10      2     payload length (big endian) │
     12      2     tx counter (big endian)     │ 16-byte fixed header
     14      1     (dst_ep << 4) | src_ep      │  (encrypted)
-    15      1     flags                       │
+    15      1     flags (bit 0 multicast)     │
     16      4     destination id              │
     20      4     source id                  ┘
     24      ...   payload                       (encrypted)
@@ -35,11 +35,15 @@ from . import blake2s_siv
 HEADER_LEN = 24
 _MAGIC = b'n2'
 
-#: A decoded packet: 4-byte ids, endpoints and the raw payload.
-Packet = collections.namedtuple('Packet', 'dst_id dst_ep src_id src_ep payload')
+#: Bit flags carried in the header flags field (offset 15), mirroring ``enum nbus_flags`` in nbus2.h.
+#: The only flag defined is multicast: the packet is delivered to multicast sockets only.
+FLAG_MULTICAST = 1 << 0
+
+#: A decoded packet: 4-byte ids, endpoints, the multicast flag and the raw payload.
+Packet = collections.namedtuple('Packet', 'dst_id dst_ep src_id src_ep multicast payload')
 
 
-def _assemble(payload, dst_id, dst_ep, src_id, src_ep, counter):
+def _assemble(payload, dst_id, dst_ep, src_id, src_ep, counter, multicast=False):
 	"""Build the cleartext packet buffer with the fixed header filled in and the SIV slot blank."""
 	plen = len(payload)
 	buf = bytearray(HEADER_LEN + plen)
@@ -49,7 +53,7 @@ def _assemble(payload, dst_id, dst_ep, src_id, src_ep, counter):
 	buf[12] = (counter >> 8) & 0xff
 	buf[13] = counter & 0xff
 	buf[14] = ((dst_ep & 0x0f) << 4) | (src_ep & 0x0f)
-	buf[15] = 0
+	buf[15] = FLAG_MULTICAST if multicast else 0
 	buf[16:20] = dst_id
 	buf[20:24] = src_id
 	buf[24:] = payload
@@ -72,6 +76,7 @@ def _parse(body):
 		dst_ep=body[6] >> 4,
 		src_id=bytes(body[12:16]),
 		src_ep=body[6] & 0x0f,
+		multicast=bool(body[7] & FLAG_MULTICAST),
 		payload=bytes(body[16:16 + plen]),
 	)
 
@@ -119,9 +124,9 @@ def _equal(a, b):
 DEFAULT_SCHEMES = (Blake2sSiv,)
 
 
-def encode(payload, dst_id, dst_ep, src_id, src_ep, counter, ke, km, scheme=Blake2sSiv):
+def encode(payload, dst_id, dst_ep, src_id, src_ep, counter, ke, km, scheme=Blake2sSiv, multicast=False):
 	"""Build, authenticate and encrypt one nbus2 packet under ``scheme``, returning the wire bytes."""
-	buf = _assemble(payload, dst_id, dst_ep, src_id, src_ep, counter)
+	buf = _assemble(payload, dst_id, dst_ep, src_id, src_ep, counter, multicast)
 	scheme.protect(buf, ke, km)
 	return bytes(buf)
 
