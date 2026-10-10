@@ -87,3 +87,31 @@ def test_reset(service):
 	call(service, {'c': 'open', 'n': 'ram'})
 	assert call(service, {'c': 'reset'}) == {'ret': 'ok'}
 	assert service.resets == [True]
+
+
+def test_usage(service):
+	assert call(service, {'c': 'usage', 'sid': 1}) == {'err': 'session error'}
+	sid = call(service, {'c': 'open', 'n': 'ram'})['sid']
+	assert call(service, {'c': 'usage', 'sid': sid}) == {'ba': 1, 'b': b'\x00'}
+	call(service, {'c': 'write', 'sid': sid, 'addr': 2 * SECTOR, 'len': 1, 'd': b'\x00'})
+	# Only the first word of a block is checked.
+	call(service, {'c': 'write', 'sid': sid, 'addr': SECTOR + 4, 'len': 1, 'd': b'\x00'})
+	assert call(service, {'c': 'usage', 'sid': sid}) == {'ba': 1, 'b': b'\x04'}
+
+
+def test_usage_aggregation():
+	# 4096 blocks of 4 bytes do not fit 2048 bits, two blocks per bit are needed.
+	class BigVolume(RamVolume):
+		def __init__(self):
+			super().__init__()
+			self.mem = bytearray(b'\xff' * 16384)
+
+		def sizes(self):
+			return [(16384, flash.OPS_ERASE), (4, flash.OPS_ERASE)]
+
+	service = flash.FlashService([BigVolume()])
+	sid = call(service, {'c': 'open', 'n': 'ram'})['sid']
+	service._volume.mem[5 * 4] = 0
+	resp = call(service, {'c': 'usage', 'sid': sid})
+	assert resp['ba'] == 2
+	assert resp['b'] == b'\x04' + b'\x00' * (flash.BLOCK_LEN - 1)

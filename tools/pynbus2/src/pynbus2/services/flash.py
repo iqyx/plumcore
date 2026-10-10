@@ -21,12 +21,16 @@ Requests and replies are CBOR maps, the command is carried in ``"c"``::
     erase  sid, addr, len             {"ret": "ok"}
     write  sid, addr, len, d          {"ret": "ok"}
     read   sid, addr, len             {"addr": <addr>, "d": <data>}
+    usage  sid                        {"ba": <aggregation>, "b": <bitmap>}
     reset                             {"ret": "ok"}
 
 Errors are reported as ``{"err": <message>}`` with the same messages the firmware uses. Addresses are
 relative to the start of the volume. ``sizes`` lists the volume size first, then the erase block sizes
 from the largest to the smallest and the program page size last, each with the operations it supports
-(``OPS_*``). Unlike the firmware, which resets without answering, ``reset`` is answered.
+(``OPS_*``). ``usage`` estimates which erase blocks are in use: bit ``n / ba`` of the bitmap (LSB first in
+each byte) is 0 only if all ``ba`` erase blocks it covers are erased, a block counts as erased if its first
+32 bit word reads ``0xffffffff``. ``ba`` is the smallest aggregation fitting the bitmap in ``BLOCK_LEN``
+bytes; if it is missing, it is 1. Unlike the firmware, which resets without answering, ``reset`` is answered.
 """
 
 import abc
@@ -202,6 +206,30 @@ class FlashService:
 			return {'err': 'reading failed'}
 		# Echo the requested address so the host can match the reply to its request.
 		return {'addr': addr, 'd': bytes(data)}
+
+	def _cc_usage(self, req):
+		if not self._session_ok(req):
+			return {'err': 'session error'}
+		sizes = self._volume.sizes()
+		erase_sizes = [size for size, ops in sizes if ops & OPS_ERASE]
+		if not erase_sizes or sizes[0][0] < erase_sizes[-1]:
+			return {'err': 'bad flash geometry'}
+		erase_size = erase_sizes[-1]
+		blocks = sizes[0][0] // erase_size
+		ba = -(-blocks // (BLOCK_LEN * 8))
+		bitmap = bytearray((-(-blocks // ba) + 7) // 8)
+		for i in range(blocks):
+			bit = i // ba
+			if bitmap[bit // 8] & (1 << (bit % 8)):
+				continue
+			try:
+				word = self._volume.read(i * erase_size, 4)
+			except FlashError as e:
+				logger.error('reading block at 0x%08x failed: %s', i * erase_size, e)
+				return {'err': 'reading failed'}
+			if bytes(word) != b'\xff\xff\xff\xff':
+				bitmap[bit // 8] |= 1 << (bit % 8)
+		return {'ba': ba, 'b': bytes(bitmap)}
 
 	def _cc_reset(self, req):
 		self.close()
