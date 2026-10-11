@@ -68,6 +68,9 @@ class RibleTransport(Transport):
 
 		self._control_lock = threading.Lock()
 		self._control_queue = queue.Queue()
+		# BlueZ refuses a GATT write while another one is in progress, and the fragments of a message must
+		# not interleave with those of another one, so the writes from all the sockets are serialized.
+		self._write_lock = threading.Lock()
 
 		# Inbound messages per open data channel, and the reassembly of the message in progress.
 		self._channels = {}
@@ -187,7 +190,8 @@ class RibleTransport(Transport):
 			except queue.Empty:
 				pass
 			logger.debug('control request: %s', req)
-			self._peripheral.write_request(_SERVICE_UUID, _CONTROL_UUID, self._cbor.dumps(req))
+			with self._write_lock:
+				self._peripheral.write_request(_SERVICE_UUID, _CONTROL_UUID, self._cbor.dumps(req))
 			try:
 				resp = self._cbor.loads(self._control_queue.get(timeout=_CONTROL_TIMEOUT))
 			except queue.Empty:
@@ -226,6 +230,10 @@ class RibleTransport(Transport):
 
 	def send_message(self, ch, data):
 		"""Send a message on a data channel, split into fragments."""
+		with self._write_lock:
+			self._send_fragments(ch, data)
+
+	def _send_fragments(self, ch, data):
 		frag_max = self._fragment_max()
 		pos = 0
 		while True:

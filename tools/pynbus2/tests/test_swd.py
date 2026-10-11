@@ -89,3 +89,16 @@ def test_volumes_skip_aliases_and_are_numbered_by_address():
 	target = types.SimpleNamespace(memory_map=types.SimpleNamespace(regions=[secure, bank2, ram, ns]))
 	transport = SwdTransport(types.SimpleNamespace(target=target))
 	assert [(v.name, v._region.start) for v in transport._volumes] == [('flash0', 0x08000000), ('flash1', 0x08100000)]
+
+
+def test_flash_interface_takes_whole_algorithm_pages():
+	import types
+	from pynbus2.transport import swd
+
+	region = FakeRegion()
+	region.is_flash = True
+	target = types.SimpleNamespace(memory_map=types.SimpleNamespace(regions=[region]))
+	transport = swd.SwdTransport(types.SimpleNamespace(target=target))
+	assert transport._interfaces['flash'].block_len >= region.page_size
+	[(name, desc)] = transport.walk()
+	assert desc['mtu'] > transport._interfaces['flash'].block_len

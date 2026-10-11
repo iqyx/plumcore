@@ -21,7 +21,7 @@ from .blake2s_siv import derive_keys
 from . import packet
 from . import advertisement
 
-__version__ = '0.2.0'
+__version__ = '0.2.1'
 
 __all__ = [
 	'connect',

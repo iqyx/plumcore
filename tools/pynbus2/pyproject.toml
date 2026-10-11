@@ -1,6 +1,6 @@
 [project]
 name = "pynbus2"
-version = "0.2.0"
+version = "0.2.1"
 description = "Python client library for the plumCore nbus2 messaging bus"
 authors = [
     { name = "Marek Koza", email = "qyx@krtko.org" },

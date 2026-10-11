@@ -29,8 +29,8 @@ relative to the start of the volume. ``sizes`` lists the volume size first, then
 from the largest to the smallest and the program page size last, each with the operations it supports
 (``OPS_*``). ``usage`` estimates which erase blocks are in use: bit ``n / ba`` of the bitmap (LSB first in
 each byte) is 0 only if all ``ba`` erase blocks it covers are erased, a block counts as erased if its first
-32 bit word reads ``0xffffffff``. ``ba`` is the smallest aggregation fitting the bitmap in ``BLOCK_LEN``
-bytes; if it is missing, it is 1. Unlike the firmware, which resets without answering, ``reset`` is answered.
+32 bit word reads ``0xffffffff``. ``ba`` is the smallest aggregation fitting the bitmap in a block
+(``BLOCK_LEN`` bytes by default); if it is missing, it is 1. Unlike the firmware, which resets without answering, ``reset`` is answered.
 """
 
 import abc
@@ -45,7 +45,7 @@ PROTOCOL_VERSION = '1.0.0'
 #: Endpoint the firmware service listens on (NBUS_FLASH_MAIN_EP).
 MAIN_EP = 1
 
-#: Largest read/write block accepted (NBUS_FLASH_BLOCK_LEN).
+#: Largest read/write block the firmware accepts (NBUS_FLASH_BLOCK_LEN), the default of a FlashService.
 BLOCK_LEN = 256
 
 #: Block operation flags (flash_block_ops_t in services/interfaces/flash.h).
@@ -88,15 +88,18 @@ class FlashService:
 	"""Serves the nbus-flash protocol for a list of :class:`FlashVolume` objects.
 
 	Like the firmware, a single session is supported: opening a volume replaces the previous session.
-	``reset`` is an optional callable resetting the target, called on the ``reset`` command.
+	``reset`` is an optional callable resetting the target, called on the ``reset`` command. ``block_len``
+	is the largest read/write block accepted, a service without the firmware's buffer limits may accept
+	larger ones, e.g. to program whole flash algorithm pages over a debug probe.
 	"""
 
-	def __init__(self, volumes, reset=None):
+	def __init__(self, volumes, reset=None, block_len=BLOCK_LEN):
 		import cbor2
 
 		self._cbor = cbor2
 		self._volumes = {volume.name: volume for volume in volumes}
 		self._reset = reset
+		self.block_len = block_len
 		self._volume = None
 		self._sid = 0
 		self._next_sid = 1
@@ -183,7 +186,7 @@ class FlashService:
 		if not self._session_ok(req):
 			return {'err': 'session error'}
 		addr, length, data = self._uint(req, 'addr'), self._uint(req, 'len'), req.get('d')
-		if (not isinstance(data, bytes) or length is None or len(data) != length or length > BLOCK_LEN
+		if (not isinstance(data, bytes) or length is None or len(data) != length or length > self.block_len
 		    or not self._range_ok(addr, length)):
 			return {'err': 'bad arguments'}
 		try:
@@ -197,7 +200,7 @@ class FlashService:
 		if not self._session_ok(req):
 			return {'err': 'session error'}
 		addr, length = self._uint(req, 'addr'), self._uint(req, 'len')
-		if length is None or length > BLOCK_LEN or not self._range_ok(addr, length):
+		if length is None or length > self.block_len or not self._range_ok(addr, length):
 			return {'err': 'bad arguments'}
 		try:
 			data = self._volume.read(addr, length)
@@ -216,7 +219,7 @@ class FlashService:
 			return {'err': 'bad flash geometry'}
 		erase_size = erase_sizes[-1]
 		blocks = sizes[0][0] // erase_size
-		ba = -(-blocks // (BLOCK_LEN * 8))
+		ba = -(-blocks // (self.block_len * 8))
 		bitmap = bytearray((-(-blocks // ba) + 7) // 8)
 		for i in range(blocks):
 			bit = i // ba

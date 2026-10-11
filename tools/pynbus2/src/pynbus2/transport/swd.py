@@ -49,8 +49,13 @@ logger = logging.getLogger(__name__)
 #: The interface selected when the URI has no path.
 DEFAULT_INTERFACE = 'flash'
 
-#: Largest message an interface accepts, reported by :meth:`SwdTransport.walk` (NBUS_FLASH_RX_BUF_LEN).
-_MTU = 320
+#: Largest read/write block of the flash interface. The flash algorithms program whole pages (e.g. 1 KiB on
+#: the STM32U5) and the service runs on the host, so it takes larger blocks than the firmware (BLOCK_LEN).
+_BLOCK_LEN = 4096
+
+#: Largest message an interface accepts, reported by :meth:`SwdTransport.walk`. The block and the request
+#: framing, the same headroom as the firmware has (NBUS_FLASH_RX_BUF_LEN - NBUS_FLASH_BLOCK_LEN).
+_MTU = _BLOCK_LEN + 64
 
 
 def _import_pyocd():
@@ -148,7 +153,7 @@ class SwdTransport(Transport):
 		                  if region.is_flash and getattr(region, 'alias', None) is None), key=lambda r: r.start)
 		self._volumes = [SwdFlashVolume(target, region, 'flash%d' % i) for i, region in enumerate(regions)]
 		self._interfaces = {
-			'flash': flash_service.FlashService(self._volumes, reset=self._reset),
+			'flash': flash_service.FlashService(self._volumes, reset=self._reset, block_len=_BLOCK_LEN),
 		}
 		for volume, region in zip(self._volumes, regions):
 			logger.info('flash volume %r: region %r at 0x%08x, %s', volume.name, region.name, region.start,

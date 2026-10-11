@@ -115,3 +115,12 @@ def test_usage_aggregation():
 	resp = call(service, {'c': 'usage', 'sid': sid})
 	assert resp['ba'] == 2
 	assert resp['b'] == b'\x04' + b'\x00' * (flash.BLOCK_LEN - 1)
+
+
+def test_block_len():
+	service = flash.FlashService([RamVolume()], block_len=SECTOR)
+	sid = call(service, {'c': 'open', 'n': 'ram'})['sid']
+	data = bytes(range(256)) * (SECTOR // 256)
+	assert call(service, {'c': 'write', 'sid': sid, 'addr': 0, 'len': SECTOR, 'd': data}) == {'ret': 'ok'}
+	assert call(service, {'c': 'read', 'sid': sid, 'addr': 0, 'len': SECTOR}) == {'addr': 0, 'd': data}
+	assert call(service, {'c': 'read', 'sid': sid, 'addr': 0, 'len': SECTOR + 1}) == {'err': 'bad arguments'}
