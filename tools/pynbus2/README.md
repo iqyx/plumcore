@@ -287,13 +287,20 @@ thus starts with `//`:
 | `command`  | remote command, only when the proxy is not the login shell of the remote user | none |
 | others     | passed to the remote URI | |
 
-Each socket is a proxy session, all the sockets of a connection share one SSH connection. `nbus.socket()`
-opens the remote URI, `nbus.socket(<sid>, <ep>)` appends `/<sid>/<ep>` to it:
+The connection holds the remote transport connection the remote URI names, each socket is a proxy session
+to a destination on it and all of them share one SSH connection. It behaves as the remote URI connected
+directly: `nbus.socket()` connects to the destination the remote URI names (or the default of the remote
+transport, e.g. the root interface of a `rible` device), `nbus.socket(<sid>, <ep>)` to a service ID or an
+interface name, and `nbus.walk()` discovers the interfaces:
 
 ```python
 with pynbus2.connect('ssh://daq') as nbus:      # a proxy started with -t udp6
     a = nbus.socket('00000010', 1)       # udp6:///00000010/1
     b = nbus.socket('00000011', 1)       # udp6:///00000011/1
+
+with pynbus2.connect('ssh://nbus@daq/nwdaq-main-hh1') as nbus:  # -t rible
+    print(nbus.walk())                   # the interfaces the device exports
+    conf = nbus.socket('conf', 0)        # rible://nwdaq-main-hh1/conf
 ```
 
 ## Discovery
@@ -347,26 +354,34 @@ a greeting wrapped in the CBOR self-describe tag, so its first bytes are always 
 skip anything sshd printed before it (motd, banners):
 
 ```
-55799({"c": "hello", "p": "nbus2-ssh-proxy", "pv": "1.0.0", "t": <transport scheme>})
+55799({"c": "hello", "p": "nbus2-ssh-proxy", "pv": "1.1.0", "t": <transport scheme>})
 ```
 
 Requests carry the command in `c` and an optional request ID in `id`. Each request is answered in order with
 one map echoing `id` and carrying either the result or `err`:
 
-| request                          | response               |
-|----------------------------------|------------------------|
-| `{"c": "probe", "u": <prefix>}`  | `{"u": [<uri>, ...]}`  |
-| `{"c": "open", "u": <uri>}`      | `{"s": <session>}`     |
-| `{"c": "close", "s": <session>}` | `{}`                   |
-| `{"c": "send", "s": <session>, "d": <bytes>}` | `{}`      |
+| request                                              | response                                   |
+|------------------------------------------------------|--------------------------------------------|
+| `{"c": "probe", "u": <prefix>}`                      | `{"u": [<uri>, ...]}`                      |
+| `{"c": "connect", "u": <uri>}`                       | `{"t": <connection>, "d": [<sid>, <ep>] or null}` |
+| `{"c": "disconnect", "t": <connection>}`             | `{}`                                       |
+| `{"c": "walk", "t": <connection>}`                   | `{"i": [[<name>, <desc>], ...]}`           |
+| `{"c": "open", "u": <uri>}`                          | `{"s": <session>}`                         |
+| `{"c": "open", "t": <connection>, "d": [<sid>, <ep>]}` | `{"s": <session>}`                       |
+| `{"c": "close", "s": <session>}`                     | `{}`                                       |
+| `{"c": "send", "s": <session>, "d": <bytes>}`        | `{}`                                       |
 
 URIs are those of the proxied transport without their `<scheme>://` prefix, e.g. `nwdaq-main-hh1/conf` for
 `rible://nwdaq-main-hh1/conf` or `/00000010/1` for `udp6:///00000010/1`. `probe` works exactly as
-`pynbus2.probe()`, an empty prefix probes the bare scheme (e.g. lists the bonded devices for `rible`). `open`
-opens a socket to the destination a complete URI names.
+`pynbus2.probe()`, an empty prefix probes the bare scheme (e.g. lists the bonded devices for `rible`).
+`connect` opens the transport connection a URI names and holds it until `disconnect`, returning its number and
+the destination the URI names, or the default one of the transport (e.g. the root interface of a `rible`
+device), `null` if there is none. `walk` discovers the interfaces of a connection as `Nbus.walk()` does.
+`open` opens a socket either to the destination a complete URI names, or to the destination `d` (a service ID
+or an interface name, and an endpoint) on a connection.
 Any number of sessions may be open at once, sessions to URIs differing only in their destinations (e.g.
 `udp6:///00000010/1` and `udp6:///00000011/1`, or two services behind one serial port) share one transport
-connection, closed with the last of them. Received datagrams and failed sessions are reported by events
+connection with each other and with `connect`, it is closed with the last of them. Received datagrams and failed sessions are reported by events
 carrying `c` and no `id`:
 
 ```

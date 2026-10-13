@@ -32,25 +32,37 @@ Both directions carry a sequence of CBOR items (RFC 8742) with no further framin
 The proxy starts with a greeting wrapped in the self-describe tag 55799, so its first bytes are always
 ``d9 d9 f7``. A client skips anything preceding them (e.g. a motd printed by sshd)::
 
-    55799({"c": "hello", "p": "nbus2-ssh-proxy", "pv": "1.0.0", "t": <transport scheme>})
+    55799({"c": "hello", "p": "nbus2-ssh-proxy", "pv": "1.1.0", "t": <transport scheme>})
 
 Requests carry the command in ``"c"`` and an optional request ID in ``"id"``. Every request is answered with
 one response map in the order the requests were received. A response echoes ``"id"`` and carries either the
 result fields or ``"err"`` with an error message. It never contains ``"c"``::
 
-    probe  u=<uri prefix>         {"u": [<uri>, ...]}
-    open   u=<uri>                {"s": <session>}
-    close  s=<session>            {}
-    send   s=<session>, d=<data>  {}
+    probe       u=<uri prefix>                   {"u": [<uri>, ...]}
+    connect     u=<uri>                          {"t": <connection>, "d": [<sid>, <ep>] | null}
+    disconnect  t=<connection>                   {}
+    walk        t=<connection>                   {"i": [[<name>, <desc>], ...]}
+    open        u=<uri>                          {"s": <session>}
+    open        t=<connection>, d=[<sid>, <ep>]  {"s": <session>}
+    close       s=<session>                      {}
+    send        s=<session>, d=<data>            {}
 
 URIs are those of the proxied transport without their ``<scheme>://`` prefix, e.g. ``nwdaq-main-hh1/conf``
 for ``rible://nwdaq-main-hh1/conf`` or ``/00000010/1`` for ``udp6:///00000010/1``. ``probe`` refines an
 incomplete URI exactly as :func:`pynbus2.probe` does, an empty or missing ``"u"`` probes the bare scheme
-(e.g. lists the bonded BLE devices for ``rible``). ``open`` opens a socket to the destination a complete URI names and returns a session
-number. Any number of sessions may be open at once. Sessions to URIs differing only in their destinations
-(e.g. ``udp6:///00000010/1`` and ``udp6:///00000011/1``, or two services behind one serial port) share one
-transport connection, which is closed with the last of them. ``send`` sends one datagram (a byte string) on
-a session.
+(e.g. lists the bonded BLE devices for ``rible``).
+
+``connect`` opens the transport connection a URI names and holds it until ``disconnect``, returning a
+connection number and the destination the URI names (or the transport default, e.g. the root interface of a
+``rible`` device), ``null`` if there is none. ``walk`` discovers the interfaces of a connection as
+:meth:`pynbus2.Nbus.walk` does, each desc is the map describing the interface (``p``, ``pv``, ``mtu``, ``ms``).
+
+``open`` opens a socket and returns a session number, either to the destination a complete URI names, or to
+the destination ``d`` (a service ID or an interface name, and an endpoint) on a connection. Any number of
+sessions may be open at once. Sessions to URIs differing only in their destinations (e.g.
+``udp6:///00000010/1`` and ``udp6:///00000011/1``, or two services behind one serial port) share one
+transport connection with each other and with ``connect``, it is closed with the last of them. ``send``
+sends one datagram (a byte string) on a session.
 
 Events are sent by the proxy on its own and carry ``"c"`` and no ``"id"``::
 
@@ -137,11 +149,17 @@ class Proxy:
 		self._tx_lock = threading.Lock()
 		self._sessions = {}
 		self._connections = {}
+		# The connections held by connect, by their numbers, as (key, connection).
+		self._held = {}
+		self._next_held = 1
 		# Guards the sessions and the connections, the session readers close the sessions failing.
 		self._lock = threading.Lock()
 		self._next_session = 1
 		self._commands = {
 			'probe': self._cmd_probe,
+			'connect': self._cmd_connect,
+			'disconnect': self._cmd_disconnect,
+			'walk': self._cmd_walk,
 			'open': self._cmd_open,
 			'close': self._cmd_close,
 			'send': self._cmd_send,
@@ -168,32 +186,61 @@ class Proxy:
 		self._write(reply)
 
 	def close(self):
-		"""Close all the sessions."""
+		"""Close all the sessions and release the connections held."""
 		with self._lock:
 			sessions = list(self._sessions.values())
 			self._sessions.clear()
+			held = list(self._held.values())
+			self._held.clear()
 		for session in sessions:
 			self._close_session(session)
+		for key, _ in held:
+			self._release(key)
 
 	def _cmd_probe(self, req):
 		prefix = '%s://' % self._scheme
 		return {'u': [u[len(prefix):] if u.startswith(prefix) else u for u in probe(self._uri(req.get('u')))]}
 
-	def _cmd_open(self, req):
+	def _cmd_connect(self, req):
 		uri = self._uri(req.get('u'))
-		parsed = parse_uri(uri)
-		key, dst = transport_for(parsed.scheme).split_uri(parsed)
-
+		key, dst, connection = self._acquire(uri)
+		try:
+			if dst is None:
+				dst = connection.transport.default_dst
+		except Exception:
+			self._release(key)
+			raise
 		with self._lock:
-			connection = self._connections.get(key)
-			if connection is not None:
-				connection.refs += 1
-		if connection is None:
-			connection = Connection(build_transport(parsed))
-			connection.refs = 1
+			number = self._next_held
+			self._next_held += 1
+			self._held[number] = (key, connection)
+		logger.info('connection %d held', number)
+		return {'t': number, 'd': list(dst) if dst is not None else None}
+
+	def _cmd_disconnect(self, req):
+		with self._lock:
+			key, _ = self._held.pop(req.get('t'), (None, None))
+		if key is None:
+			raise ProxyError('no such connection')
+		self._release(key)
+		return {}
+
+	def _cmd_walk(self, req):
+		_, connection = self._held_connection(req)
+		return {'i': [[name, desc] for name, desc in connection.transport.walk()]}
+
+	def _cmd_open(self, req):
+		if 't' in req:
+			dst = req.get('d')
+			if not isinstance(dst, list) or len(dst) != 2:
+				raise ProxyError('the destination must be a [sid, ep] array')
+			key, connection = self._held_connection(req)
 			with self._lock:
-				self._connections[key] = connection
-			logger.info('connection to %s opened', uri)
+				connection.refs += 1
+			what = 'connection %d %r' % (req['t'], dst)
+		else:
+			what = self._uri(req.get('u'))
+			key, dst, connection = self._acquire(what)
 
 		try:
 			if dst is None:
@@ -214,8 +261,33 @@ class Proxy:
 			number = self._next_session
 			self._next_session += 1
 			self._sessions[number] = Session(self, number, key, sock)
-		logger.info('session %d opened to %s', number, uri)
+		logger.info('session %d opened to %s', number, what)
 		return {'s': number}
+
+	def _acquire(self, uri):
+		"""Take a reference to the connection ``uri`` names, opening it if needed. Returns the connection key,
+		the destination the URI names (``None`` if it names none) and the connection."""
+		parsed = parse_uri(uri)
+		key, dst = transport_for(parsed.scheme).split_uri(parsed)
+
+		with self._lock:
+			connection = self._connections.get(key)
+			if connection is not None:
+				connection.refs += 1
+		if connection is None:
+			connection = Connection(build_transport(parsed))
+			connection.refs = 1
+			with self._lock:
+				self._connections[key] = connection
+			logger.info('connection to %s opened', uri)
+		return key, dst, connection
+
+	def _held_connection(self, req):
+		with self._lock:
+			held = self._held.get(req.get('t'))
+		if held is None:
+			raise ProxyError('no such connection')
+		return held
 
 	def _cmd_close(self, req):
 		with self._lock:

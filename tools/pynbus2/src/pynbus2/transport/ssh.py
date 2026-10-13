@@ -9,8 +9,8 @@
 
 The OpenSSH client is started as a subprocess, the proxy is the login shell of the remote user (see
 :mod:`pynbus2.ssh_proxy` for the setup and the protocol). The proxy serves a single transport chosen when it
-is started, so the remote URI carries no scheme. Every socket is a proxy session to a remote URI, the sockets
-of a transport share the one SSH connection.
+is started, so the remote URI carries no scheme. The transport holds the remote transport connection the
+remote URI names, every socket is a proxy session to a destination on it, sharing the one SSH connection.
 
 URI form::
 
@@ -26,8 +26,10 @@ remote URI, except ``identity`` (the private key file, ``ssh -i``) and ``command
 only when the proxy is not the login shell of the remote user). Other SSH options are taken from
 ``~/.ssh/config``.
 
-Without an explicit destination a socket connects to the remote URI. ``nbus.socket(<sid>, <ep>)`` appends
-``/<sid>/<ep>`` to its path instead.
+Without an explicit destination a socket connects to the destination the remote URI names, or the default
+destination of the remote transport (e.g. the root interface of a ``rible`` device). ``nbus.socket(<sid>,
+<ep>)`` connects to the service (or the interface name) ``<sid>`` on the remote connection instead, and
+``nbus.walk()`` discovers its interfaces, as if the remote URI was connected directly.
 """
 
 import itertools
@@ -39,14 +41,13 @@ import threading
 from urllib.parse import urlencode
 
 from .base import Transport, SocketBackend, connection_key
-from ..addressing import parse_id, parse_ep, format_id
 from ..errors import NbusError, UriError
 
 logger = logging.getLogger(__name__)
 
 #: Protocol name and version of the proxy (pynbus2-ssh-proxy).
 PROTOCOL = 'nbus2-ssh-proxy'
-PROTOCOL_VERSION = '1.0.0'
+PROTOCOL_VERSION = '1.1.0'
 
 #: CBOR self-describe tag, the magic preceding the proxy greeting. Its encoding is the first bytes it sends.
 SELF_DESCRIBE_TAG = 55799
@@ -76,10 +77,6 @@ def _netloc(uri):
 	return '%s%s%s' % (uri.username + '@' if uri.username else '', host, ':%d' % uri.port if uri.port else '')
 
 
-class _Remote(str):
-	"""A remote URI given as a socket destination, told apart from a service ID."""
-
-
 def _remote_parts(uri):
 	"""Split an ssh URI into the remote URI after its ``scheme://`` without the query, and the query string."""
 	rest = uri.path[1:] if uri.path.startswith('/') else uri.path
@@ -88,7 +85,7 @@ def _remote_parts(uri):
 
 
 def _join_remote(rest, query):
-	return _Remote('%s%s' % (rest, '?' + query if query else ''))
+	return '%s%s' % (rest, '?' + query if query else '')
 
 
 def _config_hosts():
@@ -118,6 +115,9 @@ class SshTransport(Transport):
 		self._pending = {}
 		self._sessions = {}
 		self._closed = False
+		# The number of the remote transport connection held by the proxy, connected on its first use.
+		self._connection = None
+		self._connection_lock = threading.Lock()
 
 		cmd = ['ssh', '-T', '-e', 'none']
 		if uri.port:
@@ -146,16 +146,19 @@ class SshTransport(Transport):
 		if not uri.host:
 			raise UriError('the ssh URI must name a host, e.g. ssh://<host>//<sid>/<ep>')
 		transport = cls(uri, _import_cbor2())
+		# A remote URI without a host (e.g. udp6://) is connected when a socket names the destination.
 		if transport._remote[0]:
-			transport.default_dst = (_join_remote(*transport._remote), 0)
+			try:
+				transport.remote_connection()
+			except Exception:
+				transport.close()
+				raise
 		return transport
 
 	@classmethod
 	def split_uri(cls, uri):
-		# The path is the remote URI, it is the destination.
-		rest, query = _remote_parts(uri)
-		dst = (_join_remote(rest, query), 0) if rest else None
-		return connection_key(uri), dst
+		# Only the proxied transport knows which part of the remote URI is the destination.
+		return connection_key(uri, _join_remote(*_remote_parts(uri))), None
 
 	@classmethod
 	def probe(cls, uri):
@@ -183,12 +186,21 @@ class SshTransport(Transport):
 			uris.append('%s%s%s' % (base, '/' + rest if rest else '', '?' + query if query else ''))
 		return uris
 
-	def remote_uri(self, id, ep):
-		"""The remote URI (after its ``scheme://``) a socket connected to (id, ep) opens."""
-		if isinstance(id, _Remote):
-			return str(id)
-		rest, query = self._remote
-		return str(_join_remote('%s/%s/%d' % (rest, format_id(parse_id(id)), parse_ep(ep)), query))
+	def remote_connection(self):
+		"""The number of the remote transport connection held by the proxy, connecting it on the first call.
+		Sets the default destination to the one the remote URI names, or the default of the remote transport."""
+		with self._connection_lock:
+			if self._connection is None:
+				resp = self.request({'c': 'connect', 'u': _join_remote(*self._remote)})
+				self._connection = resp['t']
+				if resp.get('d') is not None:
+					self.default_dst = tuple(resp['d'])
+				logger.info('remote connection %d, default destination %r', self._connection, self.default_dst)
+			return self._connection
+
+	def walk(self):
+		"""The interfaces the remote transport connection discovers, a list of (name, desc) tuples."""
+		return [(name, desc) for name, desc in self.request({'c': 'walk', 't': self.remote_connection()})['i']]
 
 	def request(self, req, timeout=_REQUEST_TIMEOUT):
 		"""Send a request to the proxy and return its response map. Raises NbusError on an error response."""
@@ -216,12 +228,14 @@ class SshTransport(Transport):
 		# Not waiting for the response, a failure is only logged when it arrives.
 		self._write({'c': 'send', 's': session, 'd': data})
 
-	def open_session(self, remote_uri):
-		number = self.request({'c': 'open', 'u': remote_uri})['s']
+	def open_session(self, id, ep):
+		"""Open a session to the destination (id, ep) on the remote connection, id is a service ID or an
+		interface name."""
+		number = self.request({'c': 'open', 't': self.remote_connection(), 'd': [id, ep]})['s']
 		# The session queue may exist already, if a datagram arrived before the response.
 		with self._lock:
 			q = self._sessions.setdefault(number, queue.Queue())
-		logger.info('session %d opened to %s', number, remote_uri)
+		logger.info('session %d opened to %r', number, (id, ep))
 		return number, q
 
 	def close_session(self, number):
@@ -271,8 +285,14 @@ class SshTransport(Transport):
 		hello = self._cbor.CBORDecoder(stdout).decode()
 		if not isinstance(hello, dict) or hello.get('c') != 'hello' or hello.get('p') != PROTOCOL:
 			raise NbusError('unexpected proxy greeting %r' % (hello,))
-		if str(hello.get('pv', '')).split('.')[0] != PROTOCOL_VERSION.split('.')[0]:
+		try:
+			version = tuple(int(n) for n in str(hello.get('pv')).split('.')[:2])
+		except ValueError:
 			raise NbusError('unsupported proxy protocol version %s' % hello.get('pv'))
+		major, minor = (int(n) for n in PROTOCOL_VERSION.split('.')[:2])
+		if version[0] != major or version[1:] < (minor,):
+			raise NbusError('unsupported proxy protocol version %s, %d.%d needed, update pynbus2 on the remote host'
+			                % (hello.get('pv'), major, minor))
 		logger.info('connected to %s %s', hello['p'], hello['pv'])
 
 	def _rx_loop(self):
@@ -325,7 +345,7 @@ class SshTransport(Transport):
 
 
 class SshSocket(SocketBackend):
-	"""A proxy session to a remote URI."""
+	"""A proxy session to a destination on the remote connection."""
 
 	# A round trip over the SSH connection and the remote transport.
 	request_timeout = 1.00
@@ -340,7 +360,7 @@ class SshSocket(SocketBackend):
 		pass
 
 	def connect(self, id, ep):
-		self._session, self._queue = self._transport.open_session(self._transport.remote_uri(id, ep))
+		self._session, self._queue = self._transport.open_session(id, ep)
 
 	def flush(self):
 		dropped = 0
