@@ -24,6 +24,7 @@ the source for sockets that are not explicitly bound. A concrete transport only 
 import time
 from urllib.parse import urlencode
 
+from .base import connection_key
 from .stream import StreamTransport, SerialStream
 from ..addressing import parse_id, format_id
 from ..blake2s_siv import derive_keys
@@ -74,6 +75,11 @@ class SerialStreamTransport(StreamTransport):
 	@classmethod
 	def from_uri(cls, uri):
 		return cls._open(uri)
+
+	@classmethod
+	def split_uri(cls, uri):
+		device, dst = split_serial_path(uri)
+		return connection_key(uri, device), dst
 
 	@classmethod
 	def probe(cls, uri):

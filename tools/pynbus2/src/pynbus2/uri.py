@@ -25,13 +25,14 @@ from .errors import UriError
 class Uri:
 	"""A parsed connection URI."""
 
-	def __init__(self, scheme, host, port, path, path_segments, query):
+	def __init__(self, scheme, host, port, path, path_segments, query, username=None):
 		self.scheme = scheme
 		self.host = host
 		self.port = port
 		self.path = path
 		self.path_segments = path_segments
 		self.query = query
+		self.username = username
 
 	def get(self, name, default=None):
 		"""Return a single query parameter value, or ``default`` if absent."""
@@ -81,7 +82,7 @@ def parse_uri(uri):
 	segments = [s for s in split.path.split('/') if s]
 	query = parse_qs(split.query, keep_blank_values=True)
 
-	return Uri(split.scheme, host, port, split.path, segments, query)
+	return Uri(split.scheme, host, port, split.path, segments, query, split.username)
 
 
 def split_serial_path(uri):

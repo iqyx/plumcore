@@ -17,6 +17,16 @@ import abc
 
 from ..errors import NbusError
 
+#: Query parameters only describing a URI for display (see :meth:`Transport.probe`), not selecting a connection.
+DISPLAY_PARAMS = ('p', 'pv', 'name')
+
+
+def connection_key(uri, *extra):
+	"""A hashable key identifying the connection ``uri`` names: its scheme, host, port and query without the
+	display only parameters, followed by ``extra``."""
+	query = tuple(sorted((k, tuple(v)) for k, v in uri.query.items() if k not in DISPLAY_PARAMS))
+	return (uri.scheme, uri.host, uri.port, query) + extra
+
 
 class SocketBackend(abc.ABC):
 	"""A single bidirectional datagram channel towards one nbus2 endpoint."""
@@ -85,6 +95,18 @@ class Transport(abc.ABC):
 		interactive callers should run it off their UI thread. The default enumerates nothing.
 		"""
 		return []
+
+	@classmethod
+	def split_uri(cls, uri):
+		"""Split a parsed :class:`pynbus2.uri.Uri` into the connection it names and its destination.
+
+		Returns ``(key, dst)``. URIs differing only in their destinations give the same hashable ``key``, so
+		the sockets to all of them can share one transport. ``dst`` is the (sid, ep) destination, or ``None``
+		when the URI carries none. The default takes the destination from the path (``/<sid>[/<ep>]``),
+		transports using the path for something else override it.
+		"""
+		dst = (uri.dst_sid, uri.dst_ep) if uri.dst_sid is not None else None
+		return connection_key(uri), dst
 
 	def walk(self):
 		"""Discover the interfaces reachable over this transport.

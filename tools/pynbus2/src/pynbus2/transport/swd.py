@@ -40,7 +40,7 @@ import logging
 import queue
 import threading
 
-from .base import Transport, SocketBackend
+from .base import Transport, SocketBackend, connection_key
 from ..errors import NbusError, UriError
 from ..services import flash as flash_service
 
@@ -202,6 +202,12 @@ class SwdTransport(Transport):
 		# The interface name is carried as the default destination, the endpoint is not used.
 		transport.default_dst = (' '.join(uri.path_segments) or DEFAULT_INTERFACE, 0)
 		return transport
+
+	@classmethod
+	def split_uri(cls, uri):
+		# The path is the interface name, it is the destination.
+		dst = (' '.join(uri.path_segments) or DEFAULT_INTERFACE, 0)
+		return connection_key(uri), dst
 
 	@classmethod
 	def probe(cls, uri):

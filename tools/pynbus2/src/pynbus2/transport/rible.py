@@ -39,7 +39,7 @@ import queue
 import threading
 from urllib.parse import urlencode
 
-from .base import Transport, SocketBackend
+from .base import Transport, SocketBackend, connection_key
 from . import ble
 from ..errors import NbusError
 
@@ -115,6 +115,12 @@ class RibleTransport(Transport):
 			transport.close()
 			raise
 		return transport
+
+	@classmethod
+	def split_uri(cls, uri):
+		# The path is the interface name, it is the destination.
+		dst = (' '.join(uri.path_segments), 0) if uri.path_segments else None
+		return connection_key(uri), dst
 
 	@classmethod
 	def probe(cls, uri):
