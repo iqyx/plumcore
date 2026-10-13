@@ -1,6 +1,6 @@
 [project]
 name = "pynbus2"
-version = "0.2.1"
+dynamic = ["version"]
 description = "Python client library for the plumCore nbus2 messaging bus"
 authors = [
     { name = "Marek Koza", email = "qyx@krtko.org" },
@@ -20,7 +20,12 @@ dependencies = []
 serial = ["pyserial>=3.4", "cbor2>=5"]
 ble = ["simplepyble>=0.7", "cbor2>=5"]
 swd = ["pyocd>=0.36", "cbor2>=5"]
-all = ["pynbus2[serial,ble,swd]"]
+proxy = ["cbor2>=5"]
+ssh = ["cbor2>=5"]
+all = ["pynbus2[serial,ble,swd,proxy,ssh]"]
+
+[project.scripts]
+pynbus2-ssh-proxy = "pynbus2.ssh_proxy:main"
 
 [project.urls]
 Homepage = "https://krtko.org"
@@ -31,6 +36,10 @@ build-backend = "pdm.backend"
 
 [tool.pdm]
 distribution = true
+
+[tool.pdm.version]
+source = "file"
+path = "src/pynbus2/__init__.py"
 
 [tool.pdm.build]
 package-dir = "src"

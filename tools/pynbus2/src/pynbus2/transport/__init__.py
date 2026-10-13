@@ -19,6 +19,7 @@ from .serial_dgstream import SerialDgstreamTransport
 from .dgble import DgbleTransport
 from .rible import RibleTransport
 from .swd import SwdTransport
+from .ssh import SshTransport
 
 _REGISTRY = {
 	'udp6': Udp6Transport,
@@ -27,6 +28,7 @@ _REGISTRY = {
 	'dgble': DgbleTransport,
 	'rible': RibleTransport,
 	'swd': SwdTransport,
+	'ssh': SshTransport,
 }
 
 

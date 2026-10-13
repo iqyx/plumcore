@@ -25,6 +25,8 @@ optional dependencies, installed with an extra (`pip install pynbus2[<extra>]`, 
 | `serial` | `dgtext+serial`, `dgstream+serial`  | pyserial, cbor2    |
 | `ble`    | `dgble`, `rible`                    | SimplePyBLE, cbor2 |
 | `swd`    | `swd`                               | pyocd, cbor2       |
+| `ssh`    | `ssh` (needs the OpenSSH client)    | cbor2              |
+| `proxy`  | the `pynbus2-ssh-proxy` service     | cbor2              |
 | `all`    | all of the above                    |                    |
 
 Another project can depend on the built sdist directly, e.g. with pdm:
@@ -258,6 +260,42 @@ tools/proto-nbus-flash.py 'swd://066DFF555187534867173540?target=stm32g491ccux&p
 The target is reset and halted when its flash is first erased or programmed (the flash algorithm runs
 in the target RAM), the flash `reset` command or closing the connection resumes it.
 
+### `ssh://` — remote transports over SSH (pynbus2-ssh-proxy)
+
+Reaches a transport of a remote host, typically a Linux DAQ controller with a plumCore device attached,
+through the `pynbus2-ssh-proxy` running there as the login shell of a dedicated user (see
+[SSH proxy](#ssh-proxy)). The proxy serves the one transport it was started with (`-t`), so the remote URI
+carries no scheme. The OpenSSH client `ssh` is run as a subprocess, so authentication and any other
+SSH options are taken from `~/.ssh/config` and the SSH agent. Needs the `ssh` extra.
+
+```
+ssh://[<user>@]<host>[:<port>][/<remote URI after its scheme://>][?identity=...&command=...&...]
+```
+
+The path without its leading `/` is the remote URI after its `<scheme>://`. A remote URI with an empty host
+thus starts with `//`:
+
+| ssh URI | proxy | remote URI |
+|---------|-------|------------|
+| `ssh://10.0.0.1:23//00000010/1` | `-t udp6` | `udp6:///00000010/1` |
+| `ssh://nbus@10.0.0.1:23/nwdaq-main-hh1/conf` | `-t rible` | `rible://nwdaq-main-hh1/conf` |
+| `ssh://daq//dev/ttyUSB0/00010002/3?baudrate=1000000` | `-t dgstream+serial` | `dgstream+serial:///dev/ttyUSB0/00010002/3?baudrate=1000000` |
+
+| query      | meaning | default |
+|------------|---------|---------|
+| `identity` | private key file (`ssh -i`) | from the SSH config |
+| `command`  | remote command, only when the proxy is not the login shell of the remote user | none |
+| others     | passed to the remote URI | |
+
+Each socket is a proxy session, all the sockets of a connection share one SSH connection. `nbus.socket()`
+opens the remote URI, `nbus.socket(<sid>, <ep>)` appends `/<sid>/<ep>` to it:
+
+```python
+with pynbus2.connect('ssh://daq') as nbus:      # a proxy started with -t udp6
+    a = nbus.socket('00000010', 1)       # udp6:///00000010/1
+    b = nbus.socket('00000011', 1)       # udp6:///00000011/1
+```
+
 ## Discovery
 
 `pynbus2.probe(uri)` discovers connection URIs a step at a time. It takes any prefix of a URI and
@@ -279,13 +317,70 @@ pynbus2.probe('dgtext+serial:///dev/ttyUSB0')
 | `dgble`           | bonded BLE devices  | the proto-dgble service endpoints |
 | `rible`           | bonded BLE devices  | the exported interfaces |
 | `swd`             | debug probes        | the virtual interfaces |
+| `ssh`             | hosts in `~/.ssh/config` | whatever the proxied transport probes (e.g. the BLE devices for `rible`) |
 | `udp6`            | not implemented     | not implemented |
 
 Probing can block for seconds, run it off a UI thread.
 
+## SSH proxy
+
+When the plumCore device is attached to a Linux DAQ controller, `pynbus2-ssh-proxy` makes the controller's
+nbus2 network (e.g. its `udp6://` bridge or the BLE devices it is bonded with) reachable over SSH. It is
+installed as the login shell of a dedicated user, sshd starts it once the connection is authenticated and it
+speaks a CBOR protocol on its stdin/stdout, bridging it to the single pynbus2 transport selected by
+`-t`/`--transport`. Needs the `proxy` extra and the extra of the proxied transport.
+
+sshd runs the login shell without arguments, a small wrapper script selects the transport:
+
+```sh
+python3 -m venv /opt/pynbus2
+/opt/pynbus2/bin/pip install 'pynbus2[proxy,ble]'
+printf '#!/bin/sh\nexec /opt/pynbus2/bin/pynbus2-ssh-proxy -t rible "$@"\n' > /usr/local/bin/nbus-rible-proxy
+chmod 755 /usr/local/bin/nbus-rible-proxy
+echo /usr/local/bin/nbus-rible-proxy >> /etc/shells
+useradd -m -s /usr/local/bin/nbus-rible-proxy nbus
+# add the client public key to ~nbus/.ssh/authorized_keys
+```
+
+Both directions carry a sequence of CBOR maps (RFC 8742) without any further framing. The proxy starts with
+a greeting wrapped in the CBOR self-describe tag, so its first bytes are always `d9 d9 f7` and a client can
+skip anything sshd printed before it (motd, banners):
+
+```
+55799({"c": "hello", "p": "nbus2-ssh-proxy", "pv": "1.0.0", "t": <transport scheme>})
+```
+
+Requests carry the command in `c` and an optional request ID in `id`. Each request is answered in order with
+one map echoing `id` and carrying either the result or `err`:
+
+| request                          | response               |
+|----------------------------------|------------------------|
+| `{"c": "probe", "u": <prefix>}`  | `{"u": [<uri>, ...]}`  |
+| `{"c": "open", "u": <uri>}`      | `{"s": <session>}`     |
+| `{"c": "close", "s": <session>}` | `{}`                   |
+| `{"c": "send", "s": <session>, "d": <bytes>}` | `{}`      |
+
+URIs are those of the proxied transport without their `<scheme>://` prefix, e.g. `nwdaq-main-hh1/conf` for
+`rible://nwdaq-main-hh1/conf` or `/00000010/1` for `udp6:///00000010/1`. `probe` works exactly as
+`pynbus2.probe()`, an empty prefix probes the bare scheme (e.g. lists the bonded devices for `rible`). `open`
+opens a socket to the destination a complete URI names.
+Any number of sessions may be open at once, sessions to URIs differing only in their destinations (e.g.
+`udp6:///00000010/1` and `udp6:///00000011/1`, or two services behind one serial port) share one transport
+connection, closed with the last of them. Received datagrams and failed sessions are reported by events
+carrying `c` and no `id`:
+
+```
+{"c": "recv", "s": <session>, "d": <bytes>}
+{"c": "closed", "s": <session>, "err": <message>}
+```
+
+Closing stdin (ending the SSH session) closes all sessions. The proxy logs to stderr, `--log-level DEBUG`
+is useful when running it by hand.
+
 ## Extending
 
 New transports subclass `pynbus2.transport.base.Transport` / `SocketBackend` and register for a
-scheme via `pynbus2.register(scheme, TransportClass)`. A transport may implement the `probe()`
+scheme via `pynbus2.register(scheme, TransportClass)`. A transport using the URI path for anything else than
+a `/<sid>/<ep>` destination overrides the `split_uri()` classmethod, so connections can be shared. A transport may implement the `probe()`
 classmethod to take part in discovery. A direct serial transport speaking the legacy nbus2 wire cipher
 (ChaCha20-128 + halfsiphash) is not implemented.
