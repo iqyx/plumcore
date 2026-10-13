@@ -1,21 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# ssh transport tests against a local pynbus2-ssh-proxy serving a fake transport
+# ssh transport tests against a local SSH server running the pynbus2-ssh-proxy of a fake transport
 #
 # Copyright (c) 2026, Marek Koza (qyx@krtko.org)
 # All rights reserved.
 
-import os
 import queue
-import stat
-import sys
+import socket
+import threading
 
 import pytest
 
 pytest.importorskip('cbor2')
+paramiko = pytest.importorskip('paramiko')
 
 import pynbus2
-from pynbus2.transport import register
+from pynbus2.transport import register, ssh
 from pynbus2.transport.base import Transport, SocketBackend
 
 
@@ -75,50 +75,115 @@ class FakeSocket(SocketBackend):
 		pass
 
 
-def serve():
-	"""The fake ``ssh`` command: the proxy of the fake transport on stdio."""
-	from pynbus2.ssh_proxy import main
-	register('fake', FakeTransport)
-	sys.exit(main(['-t', 'fake']))
+
+class FakeSshServer(paramiko.ServerInterface):
+	"""A local SSH server with a password login, the shell session runs the proxy of the fake transport."""
+
+	USER = 'nbus'
+	PASSWORD = 'secret'
+
+	def __init__(self):
+		self.key = paramiko.ECDSAKey.generate()
+		self._sock = socket.socket()
+		self._sock.bind(('127.0.0.1', 0))
+		self._sock.listen()
+		self.port = self._sock.getsockname()[1]
+		threading.Thread(target=self._accept_loop, daemon=True).start()
+
+	def uri(self, path=''):
+		return 'ssh://%s@127.0.0.1:%d%s' % (self.USER, self.port, path)
+
+	def close(self):
+		self._sock.close()
+
+	def _accept_loop(self):
+		while True:
+			try:
+				conn, _ = self._sock.accept()
+			except OSError:
+				return
+			transport = paramiko.Transport(conn)
+			transport.add_server_key(self.key)
+			try:
+				transport.start_server(server=self)
+			except (paramiko.SSHException, OSError):
+				# The client hung up, e.g. refusing the host key.
+				transport.close()
+
+	def get_allowed_auths(self, username):
+		return 'password'
+
+	def check_auth_password(self, username, password):
+		ok = username == self.USER and password == self.PASSWORD
+		return paramiko.AUTH_SUCCESSFUL if ok else paramiko.AUTH_FAILED
+
+	def check_channel_request(self, kind, chanid):
+		return paramiko.OPEN_SUCCEEDED
+
+	def check_channel_shell_request(self, channel):
+		threading.Thread(target=self._shell, args=(channel,), daemon=True).start()
+		return True
+
+	def _shell(self, channel):
+		from pynbus2.ssh_proxy import serve
+		serve(channel.makefile('rb'), channel.makefile('wb'), 'fake')
+		channel.send_exit_status(0)
+		channel.close()
 
 
 @pytest.fixture
-def fake_ssh(tmp_path, monkeypatch):
-	"""An ``ssh`` command on the PATH running the proxy locally, ignoring its arguments."""
-	ssh = tmp_path / 'ssh'
-	tests = os.path.dirname(os.path.abspath(__file__))
-	ssh.write_text('#!/bin/sh\necho motd\nexec %s -c "import sys; sys.path.insert(0, %r); '
-	               'import test_ssh; test_ssh.serve()"\n' % (sys.executable, tests))
-	ssh.chmod(ssh.stat().st_mode | stat.S_IEXEC)
-	monkeypatch.setenv('PATH', '%s%s%s' % (tmp_path, os.pathsep, os.environ['PATH']))
+def ssh_home(tmp_path, monkeypatch):
+	"""An empty home directory without SSH keys, known hosts or an agent, and no prompts."""
+	monkeypatch.setenv('HOME', str(tmp_path))
+	monkeypatch.delenv('SSH_AUTH_SOCK', raising=False)
+	monkeypatch.delenv(ssh.PASSWORD_ENV, raising=False)
+	monkeypatch.delenv(ssh.TRUST_NEW_ENV, raising=False)
+	register('fake', FakeTransport)
+	yield tmp_path
+	ssh.set_prompts()
 
 
-def test_probe(fake_ssh):
-	assert pynbus2.probe('ssh://nbus@daq:23') == ['ssh://nbus@daq:23/dev1?name=Device', 'ssh://nbus@daq:23/dev2']
+@pytest.fixture
+def server(ssh_home):
+	server = FakeSshServer()
+	yield server
+	server.close()
 
 
-def test_default_destination(fake_ssh):
-	with pynbus2.connect('ssh://daq/dev1?name=Device') as nbus:
+@pytest.fixture
+def trusted(server, monkeypatch):
+	"""The server with its password in the environment and its host key trusted."""
+	monkeypatch.setenv(ssh.PASSWORD_ENV, server.PASSWORD)
+	monkeypatch.setenv(ssh.TRUST_NEW_ENV, '1')
+	return server
+
+
+def test_probe(trusted):
+	assert pynbus2.probe(trusted.uri()) == [trusted.uri('/dev1?name=Device'), trusted.uri('/dev2')]
+
+
+def test_default_destination(trusted):
+	with pynbus2.connect(trusted.uri('/dev1?name=Device')) as nbus:
 		sock = nbus.socket()
 		sock.send(b'x')
 		assert sock.recv(2.0) == b':x'
 
 
-def test_uri_destination(fake_ssh):
-	with pynbus2.connect('ssh://daq/dev1/conf') as nbus:
+def test_uri_destination(trusted):
+	with pynbus2.connect(trusted.uri('/dev1/conf')) as nbus:
 		sock = nbus.socket()
 		sock.send(b'x')
 		assert sock.recv(2.0) == b'conf:x'
 
 
-def test_no_default_destination(fake_ssh):
-	with pynbus2.connect('ssh://daq/dev1?root=0') as nbus:
+def test_no_default_destination(trusted):
+	with pynbus2.connect(trusted.uri('/dev1?root=0')) as nbus:
 		with pytest.raises(pynbus2.NotConnectedError):
 			nbus.socket().send(b'x')
 
 
-def test_walk_and_named_interfaces(fake_ssh):
-	with pynbus2.connect('ssh://daq/dev1') as nbus:
+def test_walk_and_named_interfaces(trusted):
+	with pynbus2.connect(trusted.uri('/dev1')) as nbus:
 		assert nbus.walk() == list(FakeTransport.INTERFACES.items())
 		root = nbus.socket()
 		conf = nbus.socket('conf', 0)
@@ -128,3 +193,57 @@ def test_walk_and_named_interfaces(fake_ssh):
 		assert root.recv(2.0) == b':b'
 		with pytest.raises(pynbus2.NbusError, match='no interface'):
 			nbus.socket('missing', 0)
+
+
+def test_unknown_host_key_refused(server, ssh_home, monkeypatch):
+	monkeypatch.setenv(ssh.PASSWORD_ENV, server.PASSWORD)
+	with pytest.raises(pynbus2.NbusError, match='is not known'):
+		pynbus2.connect(server.uri('/dev1'))
+	assert not (ssh_home / '.ssh' / 'known_hosts').exists()
+
+
+def test_trusted_host_key_remembered(trusted, ssh_home, monkeypatch):
+	pynbus2.connect(trusted.uri('/dev1')).close()
+	known = (ssh_home / '.ssh' / 'known_hosts').read_text()
+	assert known.startswith('[127.0.0.1]:%d ecdsa-sha2-nistp256 ' % trusted.port)
+	# Known now, no longer trusted by the environment.
+	monkeypatch.delenv(ssh.TRUST_NEW_ENV)
+	pynbus2.connect(trusted.uri('/dev1')).close()
+
+
+def test_host_key_prompt(server, monkeypatch):
+	monkeypatch.setenv(ssh.PASSWORD_ENV, server.PASSWORD)
+	asked = []
+	ssh.set_prompts(host_key=lambda host, key_type, fp: asked.append((host, key_type, fp)) or True)
+	pynbus2.connect(server.uri('/dev1')).close()
+	assert asked == [('[127.0.0.1]:%d' % server.port, 'ecdsa-sha2-nistp256', ssh.fingerprint(server.key))]
+
+
+def test_host_key_prompt_refused(server, monkeypatch):
+	monkeypatch.setenv(ssh.PASSWORD_ENV, server.PASSWORD)
+	ssh.set_prompts(host_key=lambda host, key_type, fp: False)
+	with pytest.raises(pynbus2.NbusError, match='is not known'):
+		pynbus2.connect(server.uri('/dev1'))
+
+
+def test_password_missing(server, monkeypatch):
+	monkeypatch.setenv(ssh.TRUST_NEW_ENV, '1')
+	with pytest.raises(pynbus2.NbusError, match=ssh.PASSWORD_ENV):
+		pynbus2.connect(server.uri('/dev1'))
+
+
+def test_password_prompt(server, monkeypatch):
+	monkeypatch.setenv(ssh.TRUST_NEW_ENV, '1')
+	answers = ['wrong', server.PASSWORD]
+	prompts = []
+	ssh.set_prompts(password=lambda prompt: prompts.append(prompt) or answers.pop(0))
+	pynbus2.connect(server.uri('/dev1')).close()
+	assert prompts == ['Password of nbus@127.0.0.1:', 'Not accepted, try again. Password of nbus@127.0.0.1:']
+
+
+def test_password_prompt_cancelled(server, monkeypatch):
+	monkeypatch.setenv(ssh.TRUST_NEW_ENV, '1')
+	ssh.set_prompts(password=lambda prompt: None)
+	with pytest.raises(pynbus2.NbusError, match='cancelled'):
+		pynbus2.connect(server.uri('/dev1'))
+

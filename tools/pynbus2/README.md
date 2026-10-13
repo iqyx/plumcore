@@ -25,7 +25,7 @@ optional dependencies, installed with an extra (`pip install pynbus2[<extra>]`, 
 | `serial` | `dgtext+serial`, `dgstream+serial`  | pyserial, cbor2    |
 | `ble`    | `dgble`, `rible`                    | SimplePyBLE, cbor2 |
 | `swd`    | `swd`                               | pyocd, cbor2       |
-| `ssh`    | `ssh` (needs the OpenSSH client)    | cbor2              |
+| `ssh`    | `ssh`                               | paramiko, cbor2    |
 | `proxy`  | the `pynbus2-ssh-proxy` service     | cbor2              |
 | `all`    | all of the above                    |                    |
 
@@ -265,8 +265,27 @@ in the target RAM), the flash `reset` command or closing the connection resumes 
 Reaches a transport of a remote host, typically a Linux DAQ controller with a plumCore device attached,
 through the `pynbus2-ssh-proxy` running there as the login shell of a dedicated user (see
 [SSH proxy](#ssh-proxy)). The proxy serves the one transport it was started with (`-t`), so the remote URI
-carries no scheme. The OpenSSH client `ssh` is run as a subprocess, so authentication and any other
-SSH options are taken from `~/.ssh/config` and the SSH agent. Needs the `ssh` extra.
+carries no scheme. The SSH connection is made with paramiko, needs the `ssh` extra.
+
+The host name, user, port and identity files of a host alias are taken from `~/.ssh/config`, the keys of the
+SSH agent and those in `~/.ssh` are tried. The host key must be in `~/.ssh/known_hosts`, a changed one is
+always refused. Without a terminal to ask on, the environment answers what the SSH client would ask:
+
+| variable                    | meaning |
+|-----------------------------|---------|
+| `PYNBUS2_SSH_PASSWORD`      | the password, or the passphrase of a private key, used when one is needed |
+| `PYNBUS2_SSH_TRUST_NEW=1`   | trust an unknown host key on first use, it is added to `~/.ssh/known_hosts` |
+
+An application asks the user instead by installing callbacks, called from the thread connecting:
+
+```python
+from pynbus2.transport import ssh
+
+ssh.set_prompts(
+    password=lambda prompt: ...,                     # the password, None cancels connecting
+    host_key=lambda host, key_type, fingerprint: ...,  # True trusts the unknown host key
+)
+```
 
 ```
 ssh://[<user>@]<host>[:<port>][/<remote URI after its scheme://>][?identity=...&command=...&...]
@@ -283,7 +302,7 @@ thus starts with `//`:
 
 | query      | meaning | default |
 |------------|---------|---------|
-| `identity` | private key file (`ssh -i`) | from the SSH config |
+| `identity` | private key file | from the SSH config |
 | `command`  | remote command, only when the proxy is not the login shell of the remote user | none |
 | others     | passed to the remote URI | |
 

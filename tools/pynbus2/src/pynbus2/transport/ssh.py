@@ -7,7 +7,7 @@
 
 """The ``ssh`` transport: reach the transports of a remote host through its ``pynbus2-ssh-proxy``.
 
-The OpenSSH client is started as a subprocess, the proxy is the login shell of the remote user (see
+The SSH connection is made with paramiko, the proxy is the login shell of the remote user (see
 :mod:`pynbus2.ssh_proxy` for the setup and the protocol). The proxy serves a single transport chosen when it
 is started, so the remote URI carries no scheme. The transport holds the remote transport connection the
 remote URI names, every socket is a proxy session to a destination on it, sharing the one SSH connection.
@@ -23,8 +23,13 @@ URI form::
 The path without its leading ``/`` is the remote URI after its ``scheme://``. A remote URI with an empty host
 therefore starts with ``//`` (``ssh://daq//00000010/1`` is ``udp6:///00000010/1``). The query is passed to the
 remote URI, except ``identity`` (the private key file, ``ssh -i``) and ``command`` (a remote command, needed
-only when the proxy is not the login shell of the remote user). Other SSH options are taken from
-``~/.ssh/config``.
+only when the proxy is not the login shell of the remote user).
+
+The host name, user, port and identity files of a host alias are taken from ``~/.ssh/config``, the keys of the
+SSH agent and those in ``~/.ssh`` are tried. The host key must be in ``~/.ssh/known_hosts``. An unknown one is
+trusted (and added there) when ``PYNBUS2_SSH_TRUST_NEW=1`` is set or the host key prompt accepts it, a changed
+one is always refused. A password (or the passphrase of a private key) is taken from ``PYNBUS2_SSH_PASSWORD``
+or asked by the password prompt. Applications install the prompts with :func:`set_prompts`.
 
 Without an explicit destination a socket connects to the destination the remote URI names, or the default
 destination of the remote transport (e.g. the root interface of a ``rible`` device). ``nbus.socket(<sid>,
@@ -32,11 +37,13 @@ destination of the remote transport (e.g. the root interface of a ``rible`` devi
 ``nbus.walk()`` discovers its interfaces, as if the remote URI was connected directly.
 """
 
+import base64
+import getpass
+import hashlib
 import itertools
 import logging
 import os
 import queue
-import subprocess
 import threading
 from urllib.parse import urlencode
 
@@ -62,6 +69,36 @@ _GREETING_MAX_SKIP = 65536
 #: How long a request may take, probing and opening (BLE scans, connecting a device) can take seconds.
 _REQUEST_TIMEOUT = 30.0
 
+#: Environment variable with the password, or the passphrase of a private key, used when one is needed.
+PASSWORD_ENV = 'PYNBUS2_SSH_PASSWORD'
+
+#: Environment variable trusting unknown host keys (on first use, they are added to known_hosts) when set to 1.
+TRUST_NEW_ENV = 'PYNBUS2_SSH_TRUST_NEW'
+
+KNOWN_HOSTS = '~/.ssh/known_hosts'
+SSH_CONFIG = '~/.ssh/config'
+
+_CONNECT_TIMEOUT = 10.0
+
+#: How many times a password is asked for again when it is not accepted.
+_PASSWORD_RETRIES = 2
+
+_password_prompt = None
+_host_key_prompt = None
+
+
+def set_prompts(password=None, host_key=None):
+	"""Install the callbacks asking the user, they are called from the thread connecting.
+
+	``password(prompt)`` returns the password or passphrase ``prompt`` asks for, ``None`` cancels connecting.
+	``host_key(host, key_type, fingerprint)`` returns whether to trust the unknown host key, it is added to
+	known_hosts then. Without a callback the environment is used, see :data:`PASSWORD_ENV` and
+	:data:`TRUST_NEW_ENV`.
+	"""
+	global _password_prompt, _host_key_prompt
+	_password_prompt = password
+	_host_key_prompt = host_key
+
 
 def _import_cbor2():
 	try:
@@ -70,6 +107,115 @@ def _import_cbor2():
 		raise ImportError('the ssh transport requires cbor2; install it with "pip install cbor2" '
 		                  'or "pip install pynbus2[ssh]"') from e
 	return cbor2
+
+
+def _import_paramiko():
+	try:
+		import paramiko
+	except ImportError as e:
+		raise ImportError('the ssh transport requires paramiko; install it with "pip install paramiko" '
+		                  'or "pip install pynbus2[ssh]"') from e
+	return paramiko
+
+
+def fingerprint(key):
+	"""The SHA256 fingerprint of a paramiko key, as OpenSSH shows it."""
+	return 'SHA256:' + base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+
+
+def _remember_host_key(paramiko, host, key):
+	path = os.path.expanduser(KNOWN_HOSTS)
+	try:
+		os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+		with open(path, 'a') as f:
+			f.write(paramiko.hostkeys.HostKeyEntry([host], key).to_line())
+	except OSError as e:
+		logger.warning('cannot add the host key of %s to %s: %s', host, path, e)
+
+
+def _host_key_policy(paramiko):
+	class Policy(paramiko.MissingHostKeyPolicy):
+		"""Trusts an unknown host key if the environment or the host key prompt says so."""
+
+		def missing_host_key(self, client, host, key):
+			fp = fingerprint(key)
+			if os.environ.get(TRUST_NEW_ENV) == '1':
+				logger.warning('trusting the unknown %s host key %s of %s', key.get_name(), fp, host)
+			elif _host_key_prompt is None or not _host_key_prompt(host, key.get_name(), fp):
+				raise NbusError('the %s host key %s of %s is not known (set %s=1 to trust it)'
+				                % (key.get_name(), fp, host, TRUST_NEW_ENV))
+			client.get_host_keys().add(host, key.get_name(), key)
+			_remember_host_key(paramiko, host, key)
+
+	return Policy()
+
+
+def _ssh_config(paramiko, host):
+	path = os.path.expanduser(SSH_CONFIG)
+	if not os.path.exists(path):
+		return {}
+	try:
+		return paramiko.SSHConfig.from_path(path).lookup(host)
+	except Exception as e:
+		logger.warning('cannot read %s: %s', path, e)
+		return {}
+
+
+def _secret_needed(paramiko, e, password):
+	"""Whether the authentication failure ``e`` may be fixed by a password or a passphrase."""
+	if isinstance(e, paramiko.BadAuthenticationType):
+		return password is None and bool({'password', 'keyboard-interactive'} & set(e.allowed_types))
+	# paramiko raises a plain SSHException when nothing (no key, no password) could be tried.
+	return isinstance(e, paramiko.AuthenticationException) or str(e) == 'No authentication methods available'
+
+
+def _ssh_connect(uri):
+	"""Connect and authenticate the SSH client to the host ``uri`` names. Returns the paramiko SSHClient."""
+	paramiko = _import_paramiko()
+	config = _ssh_config(paramiko, uri.host)
+	identities = [uri.get('identity')] if uri.get('identity') else config.get('identityfile', [])
+	identities = [os.path.expanduser(p) for p in identities if os.path.exists(os.path.expanduser(p))]
+	host = config.get('hostname', uri.host)
+	user = uri.username or config.get('user') or getpass.getuser()
+	args = {
+		'hostname': host,
+		'port': uri.port or int(config.get('port', 22)),
+		'username': user,
+		'key_filename': identities or None,
+		'timeout': _CONNECT_TIMEOUT,
+	}
+
+	password = os.environ.get(PASSWORD_ENV)
+	for attempt in range(_PASSWORD_RETRIES + 1):
+		client = paramiko.SSHClient()
+		client.load_system_host_keys()
+		client.set_missing_host_key_policy(_host_key_policy(paramiko))
+		try:
+			client.connect(password=password, **args)
+			return client
+		except NbusError:
+			client.close()
+			raise
+		except paramiko.SSHException as e:
+			client.close()
+			if not _secret_needed(paramiko, e, password):
+				raise NbusError('ssh authentication of %s@%s failed: %s' % (user, host, e))
+			if _password_prompt is None:
+				raise NbusError('ssh authentication of %s@%s failed, set %s to the password (%s)'
+				                % (user, host, PASSWORD_ENV, e))
+			if isinstance(e, paramiko.PasswordRequiredException):
+				prompt = 'Passphrase of the private key of %s@%s:' % (user, host)
+			else:
+				prompt = 'Password of %s@%s:' % (user, host)
+			if password is not None:
+				prompt = 'Not accepted, try again. ' + prompt
+			password = _password_prompt(prompt)
+			if password is None:
+				raise NbusError('ssh authentication of %s@%s cancelled' % (user, host))
+		except OSError as e:
+			client.close()
+			raise NbusError('ssh connection to %s failed: %s' % (host, e))
+	raise NbusError('ssh authentication of %s@%s failed' % (user, host))
 
 
 def _netloc(uri):
@@ -119,18 +265,20 @@ class SshTransport(Transport):
 		self._connection = None
 		self._connection_lock = threading.Lock()
 
-		cmd = ['ssh', '-T', '-e', 'none']
-		if uri.port:
-			cmd += ['-p', str(uri.port)]
-		if uri.username:
-			cmd += ['-l', uri.username]
-		if uri.get('identity'):
-			cmd += ['-i', uri.get('identity')]
-		cmd += ['--', uri.host]
-		if uri.get('command'):
-			cmd += [uri.get('command')]
-		logger.info('running %s', ' '.join(cmd))
-		self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		self._rx_thread = None
+		self._client = _ssh_connect(uri)
+		try:
+			self._channel = self._client.get_transport().open_session()
+			# The proxy is the login shell, a shell session without a terminal starts it.
+			if uri.get('command'):
+				self._channel.exec_command(uri.get('command'))
+			else:
+				self._channel.invoke_shell()
+			self._stdout = self._channel.makefile('rb')
+			self._stderr = self._channel.makefile_stderr('rb')
+		except Exception as e:
+			self._client.close()
+			raise NbusError('starting the ssh session failed: %s' % e)
 
 		threading.Thread(target=self._stderr_loop, name='pynbus2-ssh-stderr', daemon=True).start()
 		try:
@@ -251,26 +399,23 @@ class SshTransport(Transport):
 			self._closed = True
 		try:
 			# The proxy closes its sessions and terminates at the end of its stdin.
-			self._proc.stdin.close()
-		except OSError:
+			self._channel.shutdown_write()
+		except Exception:
 			pass
-		try:
-			self._proc.wait(timeout=5.0)
-		except subprocess.TimeoutExpired:
-			self._proc.terminate()
-			self._proc.wait()
+		if self._rx_thread is not None and self._rx_thread is not threading.current_thread():
+			self._rx_thread.join(5.0)
+		self._client.close()
 
 	def _write(self, item):
 		with self._write_lock:
 			try:
-				self._proc.stdin.write(self._cbor.dumps(item))
-				self._proc.stdin.flush()
-			except (OSError, ValueError) as e:
+				self._channel.sendall(self._cbor.dumps(item))
+			except Exception as e:
 				raise NbusError('the ssh connection is closed') from e
 
 	def _greeting(self):
 		"""Skip any output preceding the proxy greeting and check it."""
-		stdout = self._proc.stdout
+		stdout = self._stdout
 		window = b''
 		for _ in range(_GREETING_MAX_SKIP):
 			byte = stdout.read(1)
@@ -296,7 +441,7 @@ class SshTransport(Transport):
 		logger.info('connected to %s %s', hello['p'], hello['pv'])
 
 	def _rx_loop(self):
-		decoder = self._cbor.CBORDecoder(self._proc.stdout)
+		decoder = self._cbor.CBORDecoder(self._stdout)
 		try:
 			while True:
 				self._dispatch(decoder.decode())
@@ -340,7 +485,7 @@ class SshTransport(Transport):
 				slot.put(item)
 
 	def _stderr_loop(self):
-		for line in self._proc.stderr:
+		for line in self._stderr:
 			logger.warning('ssh: %s', line.decode(errors='replace').rstrip())
 
 
