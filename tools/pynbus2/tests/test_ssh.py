@@ -77,13 +77,16 @@ class FakeSocket(SocketBackend):
 
 
 class FakeSshServer(paramiko.ServerInterface):
-	"""A local SSH server with a password login, the shell session runs the proxy of the fake transport."""
+	"""A local SSH server with a password login (or a public key one), the shell session runs the proxy of the
+	fake transport."""
 
 	USER = 'nbus'
 	PASSWORD = 'secret'
 
 	def __init__(self):
 		self.key = paramiko.ECDSAKey.generate()
+		#: The client key accepted, the password is not when set.
+		self.client_key = None
 		self._sock = socket.socket()
 		self._sock.bind(('127.0.0.1', 0))
 		self._sock.listen()
@@ -111,10 +114,14 @@ class FakeSshServer(paramiko.ServerInterface):
 				transport.close()
 
 	def get_allowed_auths(self, username):
-		return 'password'
+		return 'publickey' if self.client_key else 'password'
+
+	def check_auth_publickey(self, username, key):
+		ok = username == self.USER and self.client_key is not None and key == self.client_key
+		return paramiko.AUTH_SUCCESSFUL if ok else paramiko.AUTH_FAILED
 
 	def check_auth_password(self, username, password):
-		ok = username == self.USER and password == self.PASSWORD
+		ok = username == self.USER and password == self.PASSWORD and self.client_key is None
 		return paramiko.AUTH_SUCCESSFUL if ok else paramiko.AUTH_FAILED
 
 	def check_channel_request(self, kind, chanid):
@@ -247,3 +254,28 @@ def test_password_prompt_cancelled(server, monkeypatch):
 	with pytest.raises(pynbus2.NbusError, match='cancelled'):
 		pynbus2.connect(server.uri('/dev1'))
 
+
+def encrypted_key(home, passphrase):
+	"""A private key encrypted with ``passphrase`` where the SSH client looks for the keys."""
+	key = paramiko.ECDSAKey.generate()
+	(home / '.ssh').mkdir(exist_ok=True)
+	key.write_private_key_file(str(home / '.ssh' / 'id_ecdsa'), password=passphrase)
+	return key
+
+
+def test_password_prompt_with_encrypted_key(server, ssh_home, monkeypatch):
+	monkeypatch.setenv(ssh.TRUST_NEW_ENV, '1')
+	encrypted_key(ssh_home, 'passphrase')
+	prompts = []
+	ssh.set_prompts(password=lambda prompt: prompts.append(prompt) or server.PASSWORD)
+	pynbus2.connect(server.uri('/dev1')).close()
+	assert prompts == ['Password of nbus@127.0.0.1:']
+
+
+def test_passphrase_prompt(server, ssh_home, monkeypatch):
+	monkeypatch.setenv(ssh.TRUST_NEW_ENV, '1')
+	server.client_key = encrypted_key(ssh_home, 'passphrase')
+	prompts = []
+	ssh.set_prompts(password=lambda prompt: prompts.append(prompt) or 'passphrase')
+	pynbus2.connect(server.uri('/dev1')).close()
+	assert prompts == ['Passphrase of the private key of nbus@127.0.0.1:']

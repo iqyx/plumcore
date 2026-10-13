@@ -169,6 +169,18 @@ def _secret_needed(paramiko, e, password):
 	return isinstance(e, paramiko.AuthenticationException) or str(e) == 'No authentication methods available'
 
 
+def _password_allowed(paramiko, client, user):
+	"""Whether the server of a client which failed to authenticate accepts passwords, asked on its connection.
+	``None`` when unknown."""
+	try:
+		client.get_transport().auth_none(user)
+	except paramiko.BadAuthenticationType as e:
+		return bool({'password', 'keyboard-interactive'} & set(e.allowed_types))
+	except Exception:
+		pass
+	return None
+
+
 def _ssh_connect(uri):
 	"""Connect and authenticate the SSH client to the host ``uri`` names. Returns the paramiko SSHClient."""
 	paramiko = _import_paramiko()
@@ -197,13 +209,17 @@ def _ssh_connect(uri):
 			client.close()
 			raise
 		except paramiko.SSHException as e:
+			# An encrypted private key makes paramiko ask for its passphrase, even if the server takes a
+			# password. The password is tried as the passphrase too.
+			passphrase = (isinstance(e, paramiko.PasswordRequiredException)
+			              and _password_allowed(paramiko, client, user) is False)
 			client.close()
 			if not _secret_needed(paramiko, e, password):
 				raise NbusError('ssh authentication of %s@%s failed: %s' % (user, host, e))
 			if _password_prompt is None:
 				raise NbusError('ssh authentication of %s@%s failed, set %s to the password (%s)'
 				                % (user, host, PASSWORD_ENV, e))
-			if isinstance(e, paramiko.PasswordRequiredException):
+			if passphrase:
 				prompt = 'Passphrase of the private key of %s@%s:' % (user, host)
 			else:
 				prompt = 'Password of %s@%s:' % (user, host)
