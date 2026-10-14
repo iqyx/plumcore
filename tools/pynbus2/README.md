@@ -27,6 +27,7 @@ optional dependencies, installed with an extra (`pip install pynbus2[<extra>]`, 
 | `swd`    | `swd`                               | pyocd, cbor2       |
 | `ssh`    | `ssh`                               | paramiko, cbor2    |
 | `proxy`  | the `pynbus2-ssh-proxy` service     | cbor2              |
+| `mq`     | the `pynbus2.mq` message queue client | cbor2            |
 | `all`    | all of the above                    |                    |
 
 Another project can depend on the built sdist directly, e.g. with pdm:
@@ -347,6 +348,24 @@ pynbus2.probe('dgtext+serial:///dev/ttyUSB0')
 | `udp6`            | not implemented     | not implemented |
 
 Probing can block for seconds, run it off a UI thread.
+
+## Message queue client
+
+`pynbus2.mq.MqPollClient` polls the message queue of a device through the firmware `nbus-mq-poll`
+bridge, exported as an interface speaking the `mq` protocol. Each poll acknowledges the batches
+received so far and returns the new values; a reply with `pending` batches left is best followed by
+another poll right away. The optional MQTT-style topic filter (`#`, `+`) replaces the remote
+subscription.
+
+```python
+from pynbus2.mq import MqPollClient
+
+with pynbus2.connect('rible://AA:BB:CC:DD:EE:FF') as nbus:
+    client = MqPollClient(nbus.socket('mq', 0), topic='sensor/#')
+    reply = client.poll()                   # None when no reply arrives
+    for v in reply.values:
+        print(v.host, v.ts, v.topic, v.value)
+```
 
 ## SSH proxy
 
