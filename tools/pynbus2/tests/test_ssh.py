@@ -109,7 +109,7 @@ class FakeSshServer(paramiko.ServerInterface):
 			transport.add_server_key(self.key)
 			try:
 				transport.start_server(server=self)
-			except (paramiko.SSHException, OSError):
+			except (paramiko.SSHException, OSError, EOFError):
 				# The client hung up, e.g. refusing the host key.
 				transport.close()
 

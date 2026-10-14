@@ -23,7 +23,7 @@ optional dependencies, installed with an extra (`pip install pynbus2[<extra>]`, 
 | extra    | transports                          | installs           |
 |----------|-------------------------------------|--------------------|
 | `serial` | `dgtext+serial`, `dgstream+serial`  | pyserial, cbor2    |
-| `ble`    | `dgble`, `rible`                    | SimplePyBLE, cbor2 |
+| `ble`    | `dgble`, `rible`                    | SimplePyBLE ≥1.2, cbor2 |
 | `swd`    | `swd`                               | pyocd, cbor2       |
 | `ssh`    | `ssh`                               | paramiko, cbor2    |
 | `proxy`  | the `pynbus2-ssh-proxy` service     | cbor2              |
