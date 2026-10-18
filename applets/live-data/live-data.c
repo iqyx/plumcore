@@ -25,6 +25,8 @@
 /* The applet requires the fb-painter service (see its Kconfig depends), so its assets are always available. */
 #include <services/fb-painter/assets/assets.h>
 
+#include "live-data.h"
+
 #define MODULE_NAME "live-data"
 
 /* Height of the tab bar drawn along the bottom edge of the window, in pixels. */
@@ -49,9 +51,6 @@
 /* Period at which the polling task refreshes the cached sensor values, in milliseconds. */
 #define LIVE_DATA_POLL_INTERVAL_MS 200
 
-/* Maximum length of an MQ topic string kept as a live value's name, including the terminator. */
-#define LIVE_DATA_MAX_TOPIC_LEN 48
-
 /* The MQ listener wakes at least this often to notice a stop request while blocked on receive. */
 #define LIVE_DATA_MQ_RX_TIMEOUT_MS 500
 
@@ -59,16 +58,6 @@
  * scalar messages the applet cares about; longer arrays are received truncated and only the first
  * element is used. */
 #define LIVE_DATA_MQ_BUF_BYTES 128
-
-/* The applet presents its data through several tabs selected with the F1..F4 keys. The list, detail and
- * graph tabs are known; the fourth is a placeholder until its purpose is decided. */
-enum live_data_tab {
-	LIVE_DATA_TAB_LIST = 0,
-	LIVE_DATA_TAB_DETAIL,
-	LIVE_DATA_TAB_GRAPH,
-	LIVE_DATA_TAB_TBD,
-	LIVE_DATA_TAB_COUNT,
-};
 
 /* Short label shown for each tab in the tab bar, indexed by enum live_data_tab. */
 static const char *live_data_tab_labels[LIVE_DATA_TAB_COUNT] = {
@@ -100,6 +89,7 @@ typedef struct live_data_applet {
 	uint16_t w;                      /* framebuffer dimensions in pixels */
 	uint16_t h;
 	enum live_data_tab tab;          /* currently selected tab */
+	uint32_t default_tab;            /* last seen default-tab conf value, a change switches the tab */
 
 	/* Sensors advertised through the service locator, captured once at init, with their cached values. */
 	struct live_data_sensor sensors[LIVE_DATA_MAX_SENSORS];
@@ -110,6 +100,8 @@ typedef struct live_data_applet {
 	/* Top LEDs (led0..led11) discovered through the service locator, captured once at init. */
 	Led *led[LIVE_DATA_MAX_LEDS];
 	size_t led_count;
+	bool leds_enable;                /* last applied leds/enable conf value */
+	bool leds_changed;               /* set when the LEDs need to be written again */
 
 	/* Background task refreshing the cached sensor values once a second. */
 	TaskHandle_t poll_task;
@@ -209,11 +201,19 @@ static void live_data_draw_scrollbar(LiveDataApplet *self) {
 }
 
 
-/* Format a sensor value into buf with up to three decimal places, dropping any trailing zeros and a trailing
- * decimal point so a whole number renders without a fractional part (e.g. 1.500 -> "1.5", 2.000 -> "2"). */
-static void live_data_format_value(char *buf, size_t size, float value) {
-	snprintf(buf, size, "%.3f", value);
-	if (strchr(buf, '.') != NULL) {
+/* Format a sensor value into buf rounded to frac_digits fractional digits, the integer part padded to int_digits
+ * (0 = no padding) with zeros when leading_zeros is set, otherwise with spaces. Unless trailing_zeros is set, any
+ * trailing zeros and a trailing decimal point are dropped so a whole number renders without a fractional part
+ * (e.g. 1.500 -> "1.5", 2.000 -> "2"). */
+static void live_data_format_value(char *buf, size_t size, float value, uint8_t int_digits, uint8_t frac_digits,
+                                   bool leading_zeros, bool trailing_zeros) {
+	/* The padded field covers the sign, the integer digits, the decimal point and the fractional digits. */
+	int width = 0;
+	if (int_digits > 0) {
+		width = int_digits + ((frac_digits > 0) ? frac_digits + 1 : 0) + ((value < 0.0f) ? 1 : 0);
+	}
+	snprintf(buf, size, leading_zeros ? "%0*.*f" : "%*.*f", width, frac_digits, value);
+	if (!trailing_zeros && strchr(buf, '.') != NULL) {
 		char *end = buf + strlen(buf) - 1;
 		while (end > buf && *end == '0') {
 			*end-- = '\0';
@@ -275,7 +275,7 @@ static void live_data_draw_list(LiveDataApplet *self) {
 		/* Cached value, shown as three dashes until the first successful read. */
 		char value[16];
 		if (s->valid) {
-			live_data_format_value(value, sizeof(value), s->value);
+			live_data_format_value(value, sizeof(value), s->value, 0, 3, false, false);
 		} else {
 			strcpy(value, "---");
 		}
@@ -452,10 +452,13 @@ static void live_data_draw_detail_cell(LiveDataApplet *self, struct live_data_se
                                        int16_t cy, uint16_t cw, uint16_t ch, bool show_name) {
 	Painter *painter = &self->painter.painter;
 
-	/* The current value as big seven-segment digits, shown as three dashes until the first successful read. */
-	char value[16];
+	/* The current value as big seven-segment digits formatted as configured in layout/detail, shown as three
+	 * dashes until the first successful read. */
+	char value[24];
 	if (s->valid) {
-		live_data_format_value(value, sizeof(value), s->value);
+		live_data_format_value(value, sizeof(value), s->value, live_data_conf.settings.layout.detail.int_digits,
+			live_data_conf.settings.layout.detail.frac_digits, live_data_conf.settings.layout.detail.leading_zeros,
+			live_data_conf.settings.layout.detail.trailing_zeros);
 	} else {
 		strcpy(value, "---");
 	}
@@ -527,6 +530,45 @@ static size_t live_data_selected_list(LiveDataApplet *self, size_t *sel, size_t 
 }
 
 
+/* Number of sections the detail tab is split into: the layout/detail/sections conf value or, when it is auto,
+ * the number of selected sensors (capped at four, one when nothing is ticked but there are sensors). */
+static size_t live_data_detail_sections(LiveDataApplet *self) {
+	size_t sections = live_data_conf.settings.layout.detail.sections;
+	if (sections == 0) {
+		size_t sel[4];
+		sections = live_data_selected_list(self, sel, 4);
+	}
+	return sections;
+}
+
+
+/* Drive the top LEDs: with leds/enable set, show a test pattern repeating blue, green, red across all the
+ * discovered LEDs, otherwise keep them off. Called from the redraw so the LEDs follow the conf value, but the
+ * LEDs are written only when something changed (the conf value or the first call after init). */
+static void live_data_update_leds(LiveDataApplet *self) {
+	static const led_color_t pattern[3] = {
+		LED_COLOR_RGB(0, 0, 255),
+		LED_COLOR_RGB(0, 255, 0),
+		LED_COLOR_RGB(255, 0, 0),
+	};
+
+	if (live_data_conf.settings.leds.enable != self->leds_enable) {
+		self->leds_enable = live_data_conf.settings.leds.enable;
+		self->leds_changed = true;
+	}
+	if (!self->leds_changed) {
+		return;
+	}
+	self->leds_changed = false;
+
+	for (size_t i = 0; i < self->led_count; i++) {
+		led_color_t color = self->leds_enable ? pattern[i % 3] : LED_COLOR_RGB(0, 0, 0);
+		self->led[i]->vmt->set(self->led[i], color);
+	}
+}
+
+
+#if 0
 /* Drive the top LEDs from the currently selected sensors: three LEDs per selected sensor (up to four sensors,
  * twelve LEDs) addressed as left, middle and right. As a simple test, a value below 4000000 lights the trio's
  * left LED blue, a value above 6000000 its right LED red, and anything in between its middle LED green; the
@@ -565,12 +607,16 @@ static void live_data_update_leds(LiveDataApplet *self) {
 		self->led[i]->vmt->set(self->led[i], color[i]);
 	}
 }
+#endif
 
 
 /* Draw the detail tab, one cell per selected sensor. The selected sensors are those with their box ticked in
  * the list, capped at four; when none are ticked the highlighted sensor stands in as a single selection. The
- * content area is split by that count: the whole area for one, two stacked rows for two, and a 2x2 grid for
- * three or four (any selection beyond the fourth is ignored). The caller must have an active painter frame. */
+ * content area is split into a number of sections set by the layout/detail/sections conf value, or by the
+ * selection count when it is auto: the whole area for one, two stacked rows for two, and a 2x2 grid for three
+ * or four. Sensors beyond the section count are ignored, spare sections are left empty. A non-empty
+ * layout/detail/sectionN conf value shows the named sensor or topic in section N instead of the selection, as
+ * dashes until a value of that name is known. The caller must have an active painter frame. */
 static void live_data_draw_detail(LiveDataApplet *self) {
 	Painter *painter = &self->painter.painter;
 
@@ -578,13 +624,15 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 		return;
 	}
 
-	/* Collect up to four selected sensors; fall back to the highlighted one when nothing is ticked. */
+	/* Collect the selected sensors, at most one per section; fall back to the highlighted one when nothing is
+	 * ticked. */
+	size_t sections = live_data_detail_sections(self);
 	size_t sel[4];
-	size_t n = live_data_selected_list(self, sel, 4);
+	size_t n = live_data_selected_list(self, sel, sections);
 
-	/* One column for one or two sensors, two for three or four; one row for a single sensor, two otherwise. */
-	uint16_t cols = (n >= 3) ? 2 : 1;
-	uint16_t rows = (n >= 2) ? 2 : 1;
+	/* One column for one or two sections, two for three or four; one row for a single section, two otherwise. */
+	uint16_t cols = (sections >= 3) ? 2 : 1;
+	uint16_t rows = (sections >= 2) ? 2 : 1;
 	uint16_t area_h = live_data_content_h(self);
 	uint16_t cell_w = (uint16_t)(self->w / cols);
 	uint16_t cell_h = (uint16_t)(area_h / rows);
@@ -599,7 +647,26 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 		painter->vmt->rect(painter, 0, (int16_t)cell_h, self->w, 1);
 	}
 
-	for (size_t k = 0; k < n; k++) {
+	for (size_t k = 0; k < sections; k++) {
+		/* The section override wins over the selection. An override not matching any known name is drawn from
+		 * a placeholder carrying just the name, so the section shows it with dashes. */
+		const char *override = live_data_conf.settings.layout.detail.section[k];
+		struct live_data_sensor placeholder = {.name = override};
+		struct live_data_sensor *s = NULL;
+		if (override[0] != '\0') {
+			s = &placeholder;
+			for (size_t i = 0; i < self->sensor_count; i++) {
+				if (!strcmp(self->sensors[i].name, override)) {
+					s = &self->sensors[i];
+					break;
+				}
+			}
+		} else if (k < n) {
+			s = &self->sensors[sel[k]];
+		} else {
+			continue;
+		}
+
 		uint16_t col = (uint16_t)(k % cols);
 		uint16_t row = (uint16_t)(k / cols);
 		int16_t cx = (int16_t)(col * cell_w);
@@ -607,13 +674,31 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 		/* The last column/row takes the remaining space so rounding never leaves a gap on the edge. */
 		uint16_t cw = (col == cols - 1) ? (uint16_t)(self->w - cx) : cell_w;
 		uint16_t ch = (row == rows - 1) ? (uint16_t)(area_h - cy) : cell_h;
-		live_data_draw_detail_cell(self, &self->sensors[sel[k]], cx, cy, cw, ch, n > 1);
+		live_data_draw_detail_cell(self, s, cx, cy, cw, ch, sections > 1);
 	}
 }
 
 
+/* Set the window title to "Live data - <highlighted sensor name>", reflecting the current selection. When
+ * the detail tab is split into several sections no single name applies, so the title is just "Live data".
+ * Does nothing when the applet has no window (no compositor) or no sensors. */
+static void live_data_update_title(LiveDataApplet *self) {
+	if (self->window == NULL || self->sensor_count == 0) {
+		return;
+	}
+	char title[48];
+	if (self->tab == LIVE_DATA_TAB_DETAIL && live_data_detail_sections(self) > 1) {
+		snprintf(title, sizeof(title), "Live data");
+	} else {
+		const char *name = self->sensors[self->selected].name;
+		snprintf(title, sizeof(title), "Live data - %s", (name != NULL) ? name : "");
+	}
+	self->window->vmt->set_title(self->window, title);
+}
+
+
 /* Fully repaint the window: clear the content area above the tab bar, draw the active tab's content and
- * draw the tab bar reflecting the currently selected tab. */
+ * draw the tab bar reflecting the currently selected tab. The window title is refreshed along with it. */
 static void live_data_redraw(LiveDataApplet *self) {
 	Painter *painter = &self->painter.painter;
 
@@ -638,6 +723,7 @@ static void live_data_redraw(LiveDataApplet *self) {
 	live_data_draw_tabs(self);
 
 	painter->vmt->end(painter);
+	live_data_update_title(self);
 
 	/* Mirror the selected sensors onto the top LEDs so they track whatever the display shows. */
 	live_data_update_leds(self);
@@ -678,7 +764,8 @@ static void live_data_capture_leds(LiveDataApplet *self) {
 
 
 /* Polling task: every LIVE_DATA_POLL_INTERVAL_MS refresh every sensor's cached value and, while the list
- * tab is on screen, repaint it so the displayed values keep up. Runs until asked to stop by live_data_free. */
+ * tab is on screen, repaint it so the displayed values keep up. A change of the default-tab conf value switches
+ * to the newly configured tab. Runs until asked to stop by live_data_free. */
 static void live_data_poll_task(void *p) {
 	LiveDataApplet *self = (LiveDataApplet *)p;
 
@@ -698,8 +785,13 @@ static void live_data_poll_task(void *p) {
 				s->valid = false;
 			}
 		}
-		/* Repaint the tabs that show live values so the refreshed readings appear. */
-		if (self->tab == LIVE_DATA_TAB_LIST || self->tab == LIVE_DATA_TAB_DETAIL) {
+		/* Follow the default-tab conf value changed at runtime by switching to the newly configured tab. */
+		if (live_data_conf.settings.default_tab != self->default_tab) {
+			self->default_tab = live_data_conf.settings.default_tab;
+			self->tab = (enum live_data_tab)self->default_tab;
+			live_data_redraw(self);
+		} else if (self->tab == LIVE_DATA_TAB_LIST || self->tab == LIVE_DATA_TAB_DETAIL) {
+			/* Repaint the tabs that show live values so the refreshed readings appear. */
 			live_data_redraw(self);
 		}
 		vTaskDelay(pdMS_TO_TICKS(LIVE_DATA_POLL_INTERVAL_MS));
@@ -849,36 +941,6 @@ static applet_ret_t live_data_start_mq(LiveDataApplet *self) {
 }
 
 
-/* Number of sensors with their selection box ticked in the list. */
-static size_t live_data_selected_count(LiveDataApplet *self) {
-	size_t n = 0;
-	for (size_t i = 0; i < self->sensor_count; i++) {
-		if (self->sensors[i].selected) {
-			n++;
-		}
-	}
-	return n;
-}
-
-
-/* Set the window title to "Live data - <highlighted sensor name>", reflecting the current selection. When
- * the detail tab shows several selected sensors at once no single name applies, so the title is just
- * "Live data". Does nothing when the applet has no window (no compositor) or no sensors. */
-static void live_data_update_title(LiveDataApplet *self) {
-	if (self->window == NULL || self->sensor_count == 0) {
-		return;
-	}
-	char title[48];
-	if (self->tab == LIVE_DATA_TAB_DETAIL && live_data_selected_count(self) > 1) {
-		snprintf(title, sizeof(title), "Live data");
-	} else {
-		const char *name = self->sensors[self->selected].name;
-		snprintf(title, sizeof(title), "Live data - %s", (name != NULL) ? name : "");
-	}
-	self->window->vmt->set_title(self->window, title);
-}
-
-
 /* Set up the applet instance from the runner-provided arguments: bind the framebuffer and event source,
  * start the painter, capture the framebuffer dimensions, discover the sensors, select the initial tab and
  * start the polling task refreshing the cached sensor values. */
@@ -891,7 +953,8 @@ static applet_ret_t live_data_init(LiveDataApplet *self, struct applet_args *arg
 	self->fb = args->fb;
 	self->event = args->event;
 	self->window = args->window;
-	self->tab = LIVE_DATA_TAB_LIST;
+	self->default_tab = live_data_conf.settings.default_tab;
+	self->tab = (enum live_data_tab)self->default_tab;
 
 	struct fb_stat stat = {0};
 	if (self->fb->vmt->stat(self->fb, &stat) != FB_RET_OK) {
@@ -906,7 +969,7 @@ static applet_ret_t live_data_init(LiveDataApplet *self, struct applet_args *arg
 
 	live_data_capture_sensors(self);
 	live_data_capture_leds(self);
-	live_data_update_title(self);
+	self->leds_changed = true;
 
 	self->poll_can_run = true;
 	if (xTaskCreate(live_data_poll_task, "live-data-poll", configMINIMAL_STACK_SIZE + 512, (void *)self, 1,
@@ -1032,7 +1095,6 @@ static bool live_data_process_event(LiveDataApplet *self) {
 	}
 	if (tab != self->tab) {
 		self->tab = tab;
-		live_data_update_title(self);
 		live_data_redraw(self);
 	}
 	return true;
@@ -1068,4 +1130,6 @@ const Applet live_data = {
 	.help = "Display live measurement data",
 	.stack_size = 1536,
 	.icon = &graph_data,
+	.conf = &live_data_conf.tree.live_data.conf,
+	.conf_init = live_data_conf_init,
 };
