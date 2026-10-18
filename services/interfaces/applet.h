@@ -30,6 +30,7 @@
 #include <interfaces/event.h>
 #include <interfaces/painter.h>
 #include <interfaces/window.h>
+#include <interfaces/conf.h>
 #include "system_log.h"
 
 typedef enum applet_ret {
@@ -89,6 +90,14 @@ typedef struct applet {
 
 	bool start_thread;
 	size_t stack_size;
+
+	/** Root of the applet's static configuration tree (optional, may be NULL when the applet is not
+	 *  configurable). It is advertised when the applet is registered so the stored configuration is loaded. */
+	Conf *conf;
+
+	/** Build the configuration tree rooted at @p conf, called once when the applet is registered, before the
+	 *  tree is advertised (optional, may be NULL). */
+	applet_ret_t (*conf_init)(Applet *self);
 
 } Applet;
 
