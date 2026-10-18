@@ -1122,6 +1122,19 @@ static void port_setup_beeper(void) {
 
 
 #if !defined(CONFIG_APP_BL)
+/* Advertise an applet and, if it has a static configuration, build its tree and advertise it as conf_name so the
+ * stored configuration is loaded into it. */
+static void port_add_applet(Applet *applet, char *name, char *conf_name) {
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)applet, name);
+	if (applet->conf_init != NULL) {
+		applet->conf_init(applet);
+	}
+	if (applet->conf != NULL) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)applet->conf, conf_name);
+	}
+}
+
+
 static void port_setup_applets(void) {
 #if defined(CONFIG_APPLET_HELLO_WORLD)
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_world, "hello-world");
@@ -1148,7 +1161,7 @@ static void port_setup_applets(void) {
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&settings, "settings");
 #endif
 #if defined(CONFIG_APPLET_LIVE_DATA)
-	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&live_data, "live-data");
+	port_add_applet((Applet *)&live_data, "live-data", "applet live-data");
 #endif
 #if defined(CONFIG_APPLET_HELLO_WREN)
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_wren, "hello-wren");
