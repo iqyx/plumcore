@@ -995,6 +995,17 @@ static proto_conf_ret_t process_request(ProtoConf *self, uint8_t *buf, size_t le
 	}
 
 	cbor_encoder_close_container(&encoder, &omap);
+
+	/* The response does not fit into the datagram MTU. The encoder then counts the missing bytes in place of
+	 * its write pointer, its buffer size is meaningless. Replace the response with an error, which always fits. */
+	if (cbor_encoder_get_extra_bytes_needed(&encoder) != 0) {
+		cbor_encoder_init(&encoder, self->tx_buf, CONFIG_SERVICE_PROTO_CONF_MAX_DATAGRAM_LEN, 0);
+		cbor_encoder_create_map(&encoder, &omap, CborIndefiniteLength);
+		cbor_encode_text_stringz(&omap, "err");
+		cbor_encode_text_stringz(&omap, "response too long");
+		cbor_encoder_close_container(&encoder, &omap);
+		ret = PROTO_CONF_RET_FAILED;
+	}
 	size_t tx_len = cbor_encoder_get_buffer_size(&encoder, self->tx_buf);
 
 	struct datagram_msg txmsg = {0};

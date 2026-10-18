@@ -21,7 +21,8 @@
  * =================
  * All messages are CBOR maps. Requests must include a "c" key (command string)
  * and a "p" key (path array of strings from root, may be absent/empty for root).
- * Responses are CBOR maps; on error they contain an "err" text string key.
+ * Responses are CBOR maps; on error they contain an "err" text string key. A response not fitting into the
+ * datagram MTU (CONFIG_SERVICE_PROTO_CONF_MAX_DATAGRAM_LEN) is replaced with {err:"response too long"}.
  *
  * Path encoding
  * -------------
