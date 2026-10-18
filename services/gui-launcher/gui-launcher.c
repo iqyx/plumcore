@@ -56,8 +56,6 @@
 /* Width of the scroll bar drawn along the right edge of the window, in pixels. */
 #define GUI_LAUNCHER_SCROLLBAR_W 8
 
-/* Upper bound on a single applet name, including the terminator. */
-#define GUI_LAUNCHER_NAME_MAX 64
 
 
 /* Snapshot all applets advertised through the service locator into self->applets. */
@@ -442,6 +440,7 @@ gui_launcher_ret_t gui_launcher_init(GuiLauncher *self, const struct gui_launche
 	}
 	memset(self, 0, sizeof(GuiLauncher));
 	memcpy(&self->conf, conf, sizeof(struct gui_launcher_conf));
+	gui_launcher_conf_init(self);
 
 	if (u_assert(self->conf.compositor != NULL) ||
 	    u_assert(self->conf.geometry.w > 0) ||
@@ -507,10 +506,6 @@ gui_launcher_ret_t gui_launcher_show(GuiLauncher *self) {
 		return GUI_LAUNCHER_RET_FAILED;
 	}
 
-	#if defined(CONFIG_SERVICE_GUI_LAUNCHER_AUTOSTART)
-	bool first_show = self->window == NULL;
-	#endif
-
 	/* Create the window and start the event loop task on the first show. */
 	if (self->window == NULL) {
 		if (self->conf.compositor->factory.vmt->create(&self->conf.compositor->factory, &self->conf.geometry,
@@ -548,22 +543,35 @@ gui_launcher_ret_t gui_launcher_show(GuiLauncher *self) {
 	self->window->vmt->to_front(self->window);
 	self->window->vmt->show(self->window, true);
 
-	#if defined(CONFIG_SERVICE_GUI_LAUNCHER_AUTOSTART)
-	if (first_show) {
-		for (size_t i = 0; i < self->applet_count; i++) {
-			const char *name = self->applets[i]->name;
-			if (name != NULL && !strcmp(name, CONFIG_SERVICE_GUI_LAUNCHER_AUTOSTART_APPLET)) {
-				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("applet auto-start: %s"), name);
-				self->selected = i;
-				if (gui_launcher_launch(self, self->applets[i])) {
-					return GUI_LAUNCHER_RET_OK;
-				}
-				break;
-			}
-		}
-		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot auto-start applet %s: not found"), CONFIG_SERVICE_GUI_LAUNCHER_AUTOSTART_APPLET);
-	}
-	#endif
-
 	return GUI_LAUNCHER_RET_OK;
+}
+
+
+gui_launcher_ret_t gui_launcher_autostart(GuiLauncher *self) {
+	if (u_assert(self != NULL)) {
+		return GUI_LAUNCHER_RET_FAILED;
+	}
+
+	/* An empty name disables the auto-start. */
+	if (self->settings.autostart[0] == '\0') {
+		return GUI_LAUNCHER_RET_OK;
+	}
+
+	/* Rediscover the applets, the list may have changed since the launcher was shown. */
+	gui_launcher_capture(self);
+	for (size_t i = 0; i < self->applet_count; i++) {
+		const char *name = self->applets[i]->name;
+		if (name != NULL && !strcmp(name, self->settings.autostart)) {
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("applet auto-start: %s"), name);
+			self->selected = i;
+			if (gui_launcher_launch(self, self->applets[i])) {
+				return GUI_LAUNCHER_RET_OK;
+			}
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot auto-start applet %s"), name);
+			return GUI_LAUNCHER_RET_FAILED;
+		}
+	}
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot auto-start applet %s: not found"),
+	      self->settings.autostart);
+	return GUI_LAUNCHER_RET_FAILED;
 }

@@ -19,6 +19,8 @@
 #include <interfaces/event.h>
 #include <interfaces/window.h>
 #include <interfaces/applet.h>
+#include <interfaces/conf.h>
+#include <configlib.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 #include <services/applet-runner-native/applet-runner-native.h>
@@ -28,6 +30,9 @@
 
 /* Upper bound on the number of applets shown at once. */
 #define GUI_LAUNCHER_MAX_APPLETS 32
+
+/* Upper bound on a single applet name, including the terminator. */
+#define GUI_LAUNCHER_NAME_MAX 64
 
 typedef enum {
 	GUI_LAUNCHER_RET_OK = 0,
@@ -72,6 +77,17 @@ typedef struct {
 	size_t selected;
 	int16_t x_scroll;
 	int16_t y_scroll;
+
+	/* Launcher configuration tree, advertised by the application at /service/launcher. Built in conf.c, the
+	 * nodes map the values in settings. */
+	struct {
+		ConfiglibValue launcher;
+		ConfiglibValue autostart;
+	} conf_tree;
+
+	struct {
+		char autostart[GUI_LAUNCHER_NAME_MAX];
+	} settings;
 } GuiLauncher;
 
 
@@ -81,3 +97,10 @@ gui_launcher_ret_t gui_launcher_free(GuiLauncher *self);
 /* Discover the available applets, render them into the launcher window and bring it on screen. The
  * first call also creates the window and starts the event loop task. */
 gui_launcher_ret_t gui_launcher_show(GuiLauncher *self);
+
+/* Launch the applet named in the autostart setting, if any. Call once the stored configuration is loaded and
+ * the launcher was shown. */
+gui_launcher_ret_t gui_launcher_autostart(GuiLauncher *self);
+
+/* Set the launcher settings to their defaults and build the configuration tree (conf.c). */
+gui_launcher_ret_t gui_launcher_conf_init(GuiLauncher *self);
