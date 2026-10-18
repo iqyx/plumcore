@@ -214,6 +214,9 @@ static app_ret_t app_setup_ui(App *self) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the GUI"));
 		return APP_RET_FAILED;
 	}
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)&self->gui.conf_tree.gui.conf, "service gui");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)&self->gui.launcher.conf_tree.launcher.conf,
+		"service launcher");
 
 	return APP_RET_OK;
 }
@@ -457,6 +460,11 @@ app_ret_t app_init(App *self) {
 
 	/* Apply the stored configuration once everything is up. */
 	app_load_conf(self);
+
+	/* The auto-start applet is configurable, launch it only once the stored configuration is applied. */
+	if (self->lcd != NULL) {
+		gui_launcher_autostart(&self->gui.launcher);
+	}
 
 	return APP_RET_OK;
 }
