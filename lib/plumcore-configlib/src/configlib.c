@@ -18,8 +18,49 @@
 
 static const char *configlib_type_str[] = {"none", "subtree", "float", "u32", "s32", "u16", "s16", "u8", "s8", "bool", "bstr", "str", "enum"};
 
+/* Check @p val against the constraint of @p value. Numbers must lie within min..max (a NaN float fails, it compares
+ * false against both bounds), an enum index must be below the number of its values and a text or byte string must
+ * not be longer than max_len, a zero max_len means no length limit. The string regexp is not checked. A value without
+ * a constraint and the remaining types always pass. */
+static bool configlib_in_range(ConfiglibValue *value, const union conf_val *val) {
+	if (!value->has_constraints) {
+		return true;
+	}
+
+	switch (value->type) {
+		case CONF_F:
+			return val->f >= value->constraint.numeric.min.f && val->f <= value->constraint.numeric.max.f;
+		case CONF_U32:
+			return val->u32 >= value->constraint.numeric.min.u32 && val->u32 <= value->constraint.numeric.max.u32;
+		case CONF_S32:
+			return val->i32 >= value->constraint.numeric.min.i32 && val->i32 <= value->constraint.numeric.max.i32;
+		case CONF_U16:
+			return val->u16 >= value->constraint.numeric.min.u16 && val->u16 <= value->constraint.numeric.max.u16;
+		case CONF_S16:
+			return val->i16 >= value->constraint.numeric.min.i16 && val->i16 <= value->constraint.numeric.max.i16;
+		case CONF_U8:
+			return val->u8 >= value->constraint.numeric.min.u8 && val->u8 <= value->constraint.numeric.max.u8;
+		case CONF_S8:
+			return val->i8 >= value->constraint.numeric.min.i8 && val->i8 <= value->constraint.numeric.max.i8;
+		case CONF_ENUM:
+			return val->u32 < value->constraint.enumeration.count;
+		case CONF_STR:
+			return value->constraint.str.max_len == 0 || val->str.len <= value->constraint.str.max_len;
+		case CONF_BSTR:
+			return value->constraint.bstr.max_len == 0 || val->bstr.len <= value->constraint.bstr.max_len;
+		default:
+			return true;
+	}
+}
+
+
 static conf_ret_t configlib_write(Conf *self, const union conf_val val) {
 	ConfiglibValue *value = self->parent;
+
+	/* Refuse a value outside the constraint, the stored value is kept. */
+	if (!configlib_in_range(value, &val)) {
+		return CONF_RET_FAILED;
+	}
 
 	switch (value->type) {
 		case CONF_F:    *(float *)value->var    = val.f;   break;

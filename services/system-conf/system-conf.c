@@ -142,7 +142,7 @@ system_conf_ret_t system_conf_init(SystemConf *self) {
 	system_conf_add_string(&self->date_conf, "date", self->date, sizeof(self->date),
 	                       UMESH_BUILD_DATE, &self->firmware_conf);
 
-	/* Writable "hostname" leaf under the root, empty until configured. Longer writes are truncated. */
+	/* Writable "hostname" leaf under the root, empty until configured. Longer writes are refused. */
 	configlib_init(&self->hostname_conf, "hostname");
 	configlib_map_string(&self->hostname_conf, self->hostname, sizeof(self->hostname));
 	configlib_append(&self->hostname_conf, &self->root_conf, CONF_DIR_CHILD);
