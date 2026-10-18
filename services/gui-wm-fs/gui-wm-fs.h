@@ -23,6 +23,8 @@
 #include <interfaces/sensor.h>
 #include <interfaces/pm.h>
 #include <interfaces/waveform-source.h>
+#include <interfaces/conf.h>
+#include <configlib.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 #include <services/gui-launcher/gui-launcher.h>
@@ -95,8 +97,36 @@ typedef struct {
 	TaskHandle_t accel_task;
 	volatile bool accel_can_run;
 	volatile bool accel_running;
+
+	/* D2 lock held while the device lies with its display facing down and accel.awake_upside_down is set. Acquired
+	 * by the accelerometer task, released by it or by the onoff key. */
+	PmLock upside_down_lock;
+	bool upside_down_locked;
+
+	/* GUI configuration tree, advertised by the application at /service/gui. Built in conf.c, the nodes map the
+	 * values in settings. */
+	struct {
+		ConfiglibValue gui;
+		ConfiglibValue accel;
+		ConfiglibValue accel_wake_enable;
+		ConfiglibValue accel_wake_threshold;
+		ConfiglibValue accel_wake_window;
+		ConfiglibValue accel_awake_upside_down;
+	} conf_tree;
+
+	struct {
+		struct {
+			bool wake_enable;
+			float wake_threshold;
+			float wake_window;
+			bool awake_upside_down;
+		} accel;
+	} settings;
 } GuiWmFs;
 
 
 gui_wm_fs_ret_t gui_wm_fs_init(GuiWmFs *self, const struct gui_wm_fs_conf *conf);
 gui_wm_fs_ret_t gui_wm_fs_free(GuiWmFs *self);
+
+/* Set the GUI settings to their defaults and build the configuration tree (conf.c). */
+gui_wm_fs_ret_t gui_wm_fs_conf_init(GuiWmFs *self);

@@ -508,6 +508,7 @@ menu "User interface services"
 		bool "Full-screen GUI window manager"
 		select SERVICE_FB_COMPOSITOR
 		select SERVICE_FB_PAINTER
+		select LIB_PLUMCORE_CONFIGLIB
 		default n
 
 	config SERVICE_GUI_LAUNCHER

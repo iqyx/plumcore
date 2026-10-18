@@ -48,6 +48,17 @@
  * Input event source
  *********************************************************************************************************************/
 
+/* Release the upside down D2 lock if it is held. The held flag is checked first and only then the lock released,
+ * called both from the accelerometer task and from the onoff key handling in the input task. */
+static void gui_wm_fs_accel_upside_down_release(GuiWmFs *self) {
+	if (self->upside_down_locked) {
+		self->conf.pm->vmt->pm_release_state(self->conf.pm, &self->upside_down_lock);
+		self->upside_down_locked = false;
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("accel: upside down lock released"));
+	}
+}
+
+
 /* Event source handed to the compositor. Its listen() runs in the compositor's input task context:
  * it borrows that caller to pump the upstream source, consumes globally-handled keys itself and
  * returns everything else so the compositor can route it to the top-level window. */
@@ -110,6 +121,8 @@ static event_ret_t gui_wm_fs_event_listen(Event *self, enum event_type *type, en
 		 * at the top of the loop) puts it into the off (low-power) state. */
 		if (g->conf.pm != NULL && c == g->conf.onoff_event && v != 0) {
 			vTaskDelay(100);
+			/* Do not keep the device awake while it is off. */
+			gui_wm_fs_accel_upside_down_release(g);
 			g->conf.pm->vmt->pm_set_state(g->conf.pm, g->conf.off_state);
 			continue;
 		}
@@ -150,14 +163,39 @@ static const struct event_vmt gui_wm_fs_event_vmt = {
 
 #define GUI_WM_FS_ACCEL_PERIOD_MS 100
 #define GUI_WM_FS_ACCEL_SAMPLES 8
-#define GUI_WM_FS_ACCEL_WINDOW_S 0.5f
-#define GUI_WM_FS_ACCEL_THRESHOLD_LSB 250.0f
 #define GUI_WM_FS_ACCEL_QUIET_WINDOWS 6
+
+/* Hold a D2 lock while the display faces down and accel.awake_upside_down is set, so the power manager does not
+ * settle down to D3. Released as soon as the device is turned back or the setting is cleared, the onoff key releases
+ * it when turning the device off. */
+static void gui_wm_fs_accel_upside_down(GuiWmFs *self, bool upside_down) {
+	if (self->conf.pm == NULL) {
+		return;
+	}
+
+	bool hold = upside_down && self->settings.accel.awake_upside_down;
+	if (hold && !self->upside_down_locked) {
+		/* Taking the lock moves the system up to D2 at once. Never from the off state, waking from it reboots
+		 * the device and only the onoff key may do that. The lock is acquired first and only then marked as
+		 * held, so the onoff key never releases a lock not acquired yet. */
+		enum pm_state state = PM_STATE_NONE;
+		self->conf.pm->vmt->pm_get_state(self->conf.pm, &state);
+		if (state != self->conf.off_state &&
+		    self->conf.pm->vmt->pm_lock_state(self->conf.pm, PM_STATE_D2, &self->upside_down_lock) == PM_RET_OK) {
+			self->upside_down_locked = true;
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("accel: display facing down, staying awake"));
+		}
+	} else if (!hold) {
+		gui_wm_fs_accel_upside_down_release(self);
+	}
+}
+
 
 /* Detect the device being handled. Samples are accumulated over a tumbling window, at its end the per-axis
  * variances are summed into the variance of the acceleration vector. The mean removes gravity, so the result
  * does not depend on the device orientation. Above the threshold the device is moving, it is considered still
- * again only after several consecutive quiet windows. */
+ * again only after several consecutive quiet windows. The mean itself is the gravity vector, it tells whether
+ * the display is facing down. */
 static void gui_wm_fs_accel_task(void *p) {
 	GuiWmFs *self = (GuiWmFs *)p;
 
@@ -188,25 +226,31 @@ static void gui_wm_fs_accel_task(void *p) {
 			}
 		} while (read == GUI_WM_FS_ACCEL_SAMPLES);
 
-		if (n > 0.0f && n >= sample_rate_Hz * GUI_WM_FS_ACCEL_WINDOW_S) {
+		if (n > 0.0f && n >= sample_rate_Hz * self->settings.accel.wake_window) {
 			float var = 0.0f;
+			float m[3];
 			for (size_t a = 0; a < 3; a++) {
-				var += q[a] / n - (s[a] / n) * (s[a] / n);
+				m[a] = s[a] / n;
+				var += q[a] / n - m[a] * m[a];
 				s[a] = 0.0f;
 				q[a] = 0.0f;
 			}
 			n = 0.0f;
 
-			if (var > GUI_WM_FS_ACCEL_THRESHOLD_LSB * GUI_WM_FS_ACCEL_THRESHOLD_LSB) {
+			/* Z is the display normal, gravity reads positive on it with the display facing up. The display
+			 * faces down when gravity points against Z by more than 45 degrees. */
+			gui_wm_fs_accel_upside_down(self, m[2] < 0.0f && m[2] * m[2] > m[0] * m[0] + m[1] * m[1]);
+
+			if (var > self->settings.accel.wake_threshold * self->settings.accel.wake_threshold) {
 				if (quiet >= GUI_WM_FS_ACCEL_QUIET_WINDOWS) {
 					u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("accel: device is moving"));
 				}
 				quiet = 0;
 
-				/* Movement counts as user activity like a key press. Not in the off state, waking from it
-				 * reboots the device and only the onoff key may do that. */
+				/* Movement counts as user activity like a key press, if enabled. Not in the off state, waking
+				 * from it reboots the device and only the onoff key may do that. */
 				enum pm_state state = PM_STATE_NONE;
-				if (self->conf.pm != NULL) {
+				if (self->conf.pm != NULL && self->settings.accel.wake_enable) {
 					self->conf.pm->vmt->pm_get_state(self->conf.pm, &state);
 					if (state != self->conf.off_state) {
 						self->conf.pm->vmt->pm_set_state(self->conf.pm, PM_STATE_D0);
@@ -222,6 +266,7 @@ static void gui_wm_fs_accel_task(void *p) {
 
 		vTaskDelay(pdMS_TO_TICKS(GUI_WM_FS_ACCEL_PERIOD_MS));
 	}
+	gui_wm_fs_accel_upside_down(self, false);
 	self->conf.accel->vmt->stop(self->conf.accel);
 	self->accel_running = false;
 
@@ -240,6 +285,7 @@ gui_wm_fs_ret_t gui_wm_fs_init(GuiWmFs *self, const struct gui_wm_fs_conf *conf)
 	}
 	memset(self, 0, sizeof(GuiWmFs));
 	memcpy(&self->conf, conf, sizeof(struct gui_wm_fs_conf));
+	gui_wm_fs_conf_init(self);
 
 	self->event.parent = self;
 	self->event.vmt = &gui_wm_fs_event_vmt;
