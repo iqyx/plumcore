@@ -229,12 +229,8 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 			base->ICR = I2C_ICR_STOPCF;
 		}
 	} else {
-		/* Try to restart I2C peripheral here. */
-		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("bus stuck, restarting"));
-		stm32_i2c_bus_init(self);
-		if (xSemaphoreGetMutexHolder(self->bus_lock) == xTaskGetCurrentTaskHandle()) {
-			xSemaphoreGive(self->bus_lock);
-		}
+		/* The bus is busy with another task's transfer. Do not touch the peripheral under it, a wedged
+		 * transfer is recovered by its owner in the common error exit. */
 		return I2C_BUS_RET_FAILED;
 	}
 
