@@ -12,7 +12,6 @@
 #include <stdbool.h>
 #include <main.h>
 
-#include <libopencm3/cm3/common.h>
 #include <interfaces/flash.h>
 
 #define STM32_FLASH_BASE 0x08000000

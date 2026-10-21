@@ -17,13 +17,51 @@
 #include "stm32-flash.h"
 
 #if defined(STM32G4)
-	#include <libopencm3/cm3/cortex.h>
-	#include <libopencm3/stm32/flash.h>
+	#include <stm32g4xx.h>
 #elif defined(STM32U5)
 	#include <stm32u5xx.h>
 #endif
 
 #define MODULE_NAME "stm32-flash"
+
+
+#if defined(STM32G4)
+
+/* STM32G4 internal flash, programmed 64 bits (a double-word) at a time. The page size and the bank organization depend
+ * on the device category, which is detected at runtime. The ports are built with the headers of a single bank device,
+ * the category 3 (G47x/G48x) dual bank bits are defined here. In dual bank mode, the bank 2 always starts at 256 KB and
+ * page numbering restarts there. */
+#define FLASH_G4_KEY1         0x45670123
+#define FLASH_G4_KEY2         0xCDEF89AB
+#define FLASH_G4_OPTR_DBANK   (1UL << 22)
+#define FLASH_G4_CR_BKER      (1UL << 11)
+#define FLASH_G4_CR_PNB_MASK  (0xffUL << FLASH_CR_PNB_Pos)
+#define FLASH_G4_BANK2_OFFSET (256 * 1024)
+
+/* Status flags cleared before each operation (all rc_w1 error bits plus the end-of-operation flag). */
+#define FLASH_G4_STATUS_CLEAR (FLASH_SR_OPERR | FLASH_SR_PROGERR | FLASH_SR_WRPERR | FLASH_SR_PGAERR | \
+                               FLASH_SR_SIZERR | FLASH_SR_PGSERR | FLASH_SR_MISERR | FLASH_SR_FASTERR | FLASH_SR_EOP)
+
+static void flash_g4_wait(void) {
+	while (FLASH->SR & FLASH_SR_BSY) {
+		;
+	}
+}
+
+
+static void flash_g4_unlock(void) {
+	if (FLASH->CR & FLASH_CR_LOCK) {
+		FLASH->KEYR = FLASH_G4_KEY1;
+		FLASH->KEYR = FLASH_G4_KEY2;
+	}
+}
+
+
+static void flash_g4_lock(void) {
+	FLASH->CR |= FLASH_CR_LOCK;
+}
+
+#endif
 
 
 #if defined(STM32U5)
@@ -80,17 +118,19 @@ static size_t get_sector_size(void) {
 #else
 
 static uint16_t get_devid(void) {
-	return ((uint32_t)MMIO16(0xe0042000)) & 0xfffUL;
+	return DBGMCU->IDCODE & DBGMCU_IDCODE_DEV_ID_Msk;
 }
 
 
 static size_t get_flash_size(void) {
-	return ((uint32_t)MMIO16(0x1fff75e0) << 10UL);
+	/* The factory flash size register holds the flash size in kilobytes. */
+	return (size_t)(*(const uint16_t *)FLASHSIZE_BASE) << 10UL;
 }
 
 
+/* Only the category 3 devices can be configured as dual bank. */
 static bool get_dbank(void) {
-	return (uint32_t)MMIO16(0x1fff7800) & (1 << 22UL);
+	return get_devid() == 0x469 && (FLASH->OPTR & FLASH_G4_OPTR_DBANK);
 }
 
 
@@ -152,29 +192,48 @@ static flash_ret_t stm32_flash_get_size(Flash *flash, uint32_t i, size_t *size, 
 static flash_ret_t stm32_flash_erase(Flash *flash, const size_t addr, size_t len) {
 	Stm32Flash *self = flash->parent;
 
+	if ((addr + len) > self->flash_size) {
+		return FLASH_RET_BAD_ARG;
+	}
+
 	#if defined(STM32G4)
-		/* Always perform erase in sectors. */
+		/* Always perform erase in whole pages. */
 		if (addr % self->flash_sector_size) {
 			return FLASH_RET_FAILED;
 		}
 		if (len % self->flash_sector_size) {
 			return FLASH_RET_FAILED;
 		}
-		cm_disable_interrupts();
-		flash_unlock();
+
+		bool dual_bank = get_dbank();
+
+		__disable_irq();
+		flash_g4_unlock();
 		for (size_t i = 0; i < (len / self->flash_sector_size); i++) {
-			size_t sector = i + (addr / self->flash_sector_size);
+			size_t a = addr + i * self->flash_sector_size;
+			uint32_t bank = 0;
+			if (dual_bank && a >= FLASH_G4_BANK2_OFFSET) {
+				bank = 1;
+				a -= FLASH_G4_BANK2_OFFSET;
+			}
+			uint32_t page = a / self->flash_sector_size;
 
-			/* Reset error flags before erasing a sector. */
-			FLASH_SR |= 0x3f8;
+			flash_g4_wait();
+			FLASH->SR = FLASH_G4_STATUS_CLEAR;
 
-			/* Beware, wrong naming. */
-			flash_wait_for_last_operation();
-			flash_erase_page(sector);
-			flash_wait_for_last_operation();
+			uint32_t cr = FLASH->CR & ~(FLASH_G4_CR_PNB_MASK | FLASH_G4_CR_BKER);
+			cr |= FLASH_CR_PER | ((page << FLASH_CR_PNB_Pos) & FLASH_G4_CR_PNB_MASK);
+			if (bank) {
+				cr |= FLASH_G4_CR_BKER;
+			}
+			FLASH->CR = cr;
+			FLASH->CR |= FLASH_CR_STRT;
+
+			flash_g4_wait();
+			FLASH->CR &= ~FLASH_CR_PER;
 		}
-		flash_lock();
-		cm_enable_interrupts();
+		flash_g4_lock();
+		__enable_irq();
 	#elif defined(STM32U5)
 		/* Always perform erase in whole pages. */
 		if (addr % self->flash_sector_size) {
@@ -232,22 +291,29 @@ static flash_ret_t stm32_flash_write(Flash *flash, const size_t addr, const void
 			return FLASH_RET_FAILED;
 		}
 
-		cm_disable_interrupts();
-		flash_unlock();
-		for (size_t i = 0; i < len; i += 8) {
-			flash_wait_for_last_operation();
+		__disable_irq();
+		flash_g4_unlock();
+		for (size_t i = 0; i < len; i += self->flash_page_size) {
+			volatile uint32_t *dst = (volatile uint32_t *)(STM32_FLASH_BASE + addr + i);
+			const uint8_t *src = (const uint8_t *)buf + i;
 
-			/* Reset error flags before writing. */
-			FLASH_SR |= 0x3f8;
+			flash_g4_wait();
+			FLASH->SR = FLASH_G4_STATUS_CLEAR;
+			FLASH->CR |= FLASH_CR_PG;
 
-			FLASH_CR |= FLASH_CR_PG;
-			MMIO32(STM32_FLASH_BASE + addr + i) = *(const uint32_t *)((const uint8_t *)buf + i);
-			MMIO32(STM32_FLASH_BASE + addr + i + 4) = *(const uint32_t *)((const uint8_t *)buf + i + 4);
-			flash_wait_for_last_operation();
-			FLASH_CR &= ~FLASH_CR_PG;
+			/* Push the two words of the double-word, the second store triggers the programming. Copy through
+			 * a local to tolerate an unaligned source buffer. */
+			for (size_t w = 0; w < 2; w++) {
+				uint32_t word;
+				memcpy(&word, src + w * 4, 4);
+				dst[w] = word;
+			}
+
+			flash_g4_wait();
+			FLASH->CR &= ~FLASH_CR_PG;
 		}
-		flash_lock();
-		cm_enable_interrupts();
+		flash_g4_lock();
+		__enable_irq();
 	#elif defined(STM32U5)
 		/* Always program whole quad-words (128 bits). */
 		if (addr % self->flash_page_size) {
