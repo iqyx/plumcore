@@ -80,7 +80,11 @@ static flash_updater_ret_t load_xz_image_cache(FlashUpdater *self, size_t block)
 
 		while (true) {
 			if (self->xz_buf.in_pos == self->xz_buf.in_size) {
-				abstract_source_read(self, self->xz_pos, self->xz_read_buf, CONFIG_XZ_READ_BUF_SIZE);
+				if (abstract_source_read(self, self->xz_pos, self->xz_read_buf, CONFIG_XZ_READ_BUF_SIZE) != FLASH_UPDATER_RET_OK) {
+					u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: cannot read source"));
+					self->method = FLASH_UPDATER_SOURCE_METHOD_NONE;
+					return FLASH_UPDATER_RET_FAILED;
+				}
 				self->xz_buf.in_pos = 0;
 				self->xz_buf.in_size = CONFIG_XZ_READ_BUF_SIZE;
 				self->xz_pos += CONFIG_XZ_READ_BUF_SIZE;
@@ -88,6 +92,40 @@ static flash_updater_ret_t load_xz_image_cache(FlashUpdater *self, size_t block)
 
 			enum xz_ret ret = xz_dec_run(self->xz, &self->xz_buf);
 			//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("ret = %d"), ret);
+
+			if (ret != XZ_OK && ret != XZ_STREAM_END) {
+				switch (ret) {
+					case XZ_UNSUPPORTED_CHECK:
+						u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: unsupported check type"));
+						break;
+
+					case XZ_MEM_ERROR:
+					case XZ_MEMLIMIT_ERROR:
+						u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: was too optimistic about memory usage..."));
+						break;
+
+					case XZ_FORMAT_ERROR:
+						u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: not a xz, format error"));
+						break;
+
+					case XZ_OPTIONS_ERROR:
+						u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: unknwon decoding option/filter"));
+						break;
+
+					case XZ_DATA_ERROR:
+						u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: not a xz, bad data"));
+						break;
+
+					default:
+						u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: decoding error %d at block %lu"), ret, b);
+						break;
+				}
+				/* The decoder state is undefined after an error and must not be run again. Continuing
+				 * with the next block makes it dereference corrupted match distances. Disable the
+				 * source, all subsequent image reads fail. */
+				self->method = FLASH_UPDATER_SOURCE_METHOD_NONE;
+				return FLASH_UPDATER_RET_FAILED;
+			}
 
 			if (self->xz_buf.out_pos == self->xz_buf.out_size) {
 				/* Output is full, input data remains. Prepare for the next cache block,
@@ -103,40 +141,9 @@ static flash_updater_ret_t load_xz_image_cache(FlashUpdater *self, size_t block)
 			}
 
 			/* Nothing more to decode. Handle incomplete last cache buffer. */
-
-			if (ret == XZ_STREAM_END) {
-				//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("xz: stream end while decoding cache block %lu"), b);
-				//osize += self->xz_buf.out_pos;
-				return FLASH_UPDATER_RET_OK;
-			}
-
-			switch (ret) {
-				case XZ_UNSUPPORTED_CHECK:
-					u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: unsupported check type"));
-					break;
-
-				case XZ_MEM_ERROR:
-				case XZ_MEMLIMIT_ERROR:
-					u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: was too optimistic about memory usage..."));
-					break;
-
-				case XZ_FORMAT_ERROR:
-					u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: not a xz, format error"));
-					break;
-
-				case XZ_OPTIONS_ERROR:
-					u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: unknwon decoding option/filter"));
-					break;
-
-				case XZ_DATA_ERROR:
-					u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: not a xz, bad data"));
-					break;
-
-				default:
-					u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("xz: decoding error %d at block %lu"), ret, b);
-					break;
-			}
-			return FLASH_UPDATER_RET_FAILED;
+			//u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("xz: stream end while decoding cache block %lu"), b);
+			//osize += self->xz_buf.out_pos;
+			return FLASH_UPDATER_RET_OK;
 		}
 	}
 
@@ -160,6 +167,11 @@ static flash_updater_ret_t load_image_cache(FlashUpdater *self, size_t block) {
 
 
 static flash_updater_ret_t abstract_image_read(FlashUpdater *self, const size_t addr, void *buf, size_t len) {
+	/* No valid source or a previous decoding error, the image cache content is not valid. */
+	if (self->method == FLASH_UPDATER_SOURCE_METHOD_NONE) {
+		return FLASH_UPDATER_RET_FAILED;
+	}
+
 	if (len > CONFIG_IMAGE_CACHE_SIZE) {
 		return FLASH_UPDATER_RET_FAILED;
 	}
@@ -379,6 +391,11 @@ flash_updater_ret_t flash_updater_check_signature(FlashUpdater *self, const uint
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("checking update ELF signature..."));
 
 	uint8_t sig[64] = {0};
+	if (self->ed25519_sig_size != sizeof(sig)) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("wrong update signature size %lu"), self->ed25519_sig_size);
+		flash_updater_progress(self, 0, 0, "ERROR: signature verification failed");
+		return FLASH_UPDATER_RET_FAILED;
+	}
 	if (abstract_image_read(self, self->ed25519_sig_pos, sig, self->ed25519_sig_size) != FLASH_UPDATER_RET_OK) {
 		return FLASH_UPDATER_RET_FAILED;
 	}
