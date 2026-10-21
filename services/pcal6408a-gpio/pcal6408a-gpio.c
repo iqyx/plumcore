@@ -64,9 +64,12 @@ static gpio_ret_t gpio_get(Gpio *gpio, bool *state) {
 	Pcal6408A *self = gpio->parent;
 	int pin = gpio - &(self->pin[0]);
 
-	if (pcal6408a_gpio_read8(self, 0x00, &self->reg_ipr) != PCAL6408A_GPIO_RET_OK) {
+	/* Read into a local first, a failed transfer may have left garbage in the buffer. */
+	uint8_t ipr = 0;
+	if (pcal6408a_gpio_read8(self, 0x00, &ipr) != PCAL6408A_GPIO_RET_OK) {
 		return GPIO_RET_FAILED;
 	}
+	self->reg_ipr = ipr;
 	if (state == NULL) {
 		return GPIO_RET_FAILED;
 	}
