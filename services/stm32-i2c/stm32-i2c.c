@@ -142,19 +142,28 @@ stm32_i2c_ret_t stm32_i2c_bus_init(Stm32I2c *self) {
 }
 
 
-/* Arm the requested interrupt(s) and block until the ISR wakes us. Besides the requested flags, the ISR always
- * reports bus error/arbitration-lost/overrun, so check for those on every wakeup and bail out via the common
- * cleanup path. On timeout we also bail out, which guarantees the bus lock is always released. */
-#define WAIT_FOR_INT(f) \
-	base->CR1 |= (f) | I2C_CR1_ERRIE;\
-	if (xSemaphoreTake(self->wait_lock, pdMS_TO_TICKS(self->timeout_ms)) != pdTRUE) { \
-		ret = I2C_BUS_RET_FAILED;\
-		goto err;\
-	}\
-	if (base->ISR & (I2C_ISR_BERR | I2C_ISR_ARLO | I2C_ISR_OVR)) { \
-		ret = I2C_BUS_RET_FAILED;\
-		goto err;\
-	}\
+/* Block until the expected ISR flag is actually set. The semaphore is only a hint that something happened: a wakeup
+ * is never trusted on its own, the flag is re-checked and the interrupt re-armed until it shows up. A NACK, a
+ * bus/arbitration-lost/overrun error or a timeout bail out via the common cleanup path, which guarantees the bus
+ * lock is always released. */
+#define WAIT_FOR_FLAG(ie, flag) \
+	while (!(base->ISR & (flag))) { \
+		if (base->ISR & I2C_ISR_NACKF) { \
+			ret = I2C_BUS_RET_NACK; \
+			goto err; \
+		} \
+		if (base->ISR & (I2C_ISR_BERR | I2C_ISR_ARLO | I2C_ISR_OVR)) { \
+			ret = I2C_BUS_RET_FAILED; \
+			goto err; \
+		} \
+		base->CR1 |= (ie) | I2C_CR1_NACKIE | I2C_CR1_ERRIE; \
+		if (xSemaphoreTake(self->wait_lock, pdMS_TO_TICKS(self->timeout_ms)) != pdTRUE) { \
+			ret = I2C_BUS_RET_FAILED; \
+			goto err; \
+		} \
+	}
+
+#define I2C_CR1_ALLIE (I2C_CR1_TXIE | I2C_CR1_NACKIE | I2C_CR1_RXIE | I2C_CR1_TCIE | I2C_CR1_STOPIE | I2C_CR1_ERRIE)
 
 
 static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t *txdata, size_t txlen, uint8_t *rxdata, size_t rxlen) {
@@ -169,9 +178,14 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 
 	if (xSemaphoreTake(self->bus_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
 		xSemaphoreTake(self->wait_lock, 0);
-		/* Clear a STOPF possibly left set by a previously aborted transfer, so it cannot make the ISR
-		 * report a spurious stop while this transfer waits for TXIS/TC. */
-		base->ICR = I2C_ICR_STOPCF;
+		/* Clear a STOPF/NACKF possibly left set by a previously aborted transfer, so they cannot satisfy or
+		 * abort this transfer's waits. */
+		base->ICR = I2C_ICR_STOPCF | I2C_ICR_NACKCF;
+		/* Flush a byte left unread in RXDR. Otherwise it is returned as the first byte of this transfer and
+		 * every following read on the bus is shifted by one byte. */
+		if (base->ISR & I2C_ISR_RXNE) {
+			(void)base->RXDR;
+		}
 		if (txdata != NULL) {
 			/* Implemented according to Master communication initialization (address phase) in RM0440. */
 			base->CR2 = (base->CR2 & ~I2C_CR2_SADD_Msk) | ((addr & 0x7F) << 1);
@@ -183,27 +197,20 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 
 			while (txlen > 0) {
 				/* For every byte to be sent, TXIS or NACKF is set, depending on the result
-				 * of the previous transfer. Wait for either of those. */
-				WAIT_FOR_INT(I2C_CR1_TXIE | I2C_CR1_NACKIE);
-
-				/* Handle NACKF in a specific way, it needs clearing and a STOP to release the bus. */
-				if (base->ISR & I2C_ISR_NACKF) {
-					ret = I2C_BUS_RET_NACK;
-					goto err;
-				}
-
+				 * of the previous transfer. NACKF is handled in the wait. */
+				WAIT_FOR_FLAG(I2C_CR1_TXIE, I2C_ISR_TXIS);
 				base->TXDR = *txdata;
 
 				txlen--;
 				txdata++;
 			}
-			WAIT_FOR_INT(I2C_CR1_TCIE);
+			WAIT_FOR_FLAG(I2C_CR1_TCIE, I2C_ISR_TC);
 			if (rxdata == NULL) {
 				/* No repeated start follows: issue a STOP and wait for it to actually complete before
 				 * releasing the bus, so the next transfer never sets START while this STOP is still in
 				 * progress. STOPF is cleared here as nothing else clears it on the success path. */
 				base->CR2 |= I2C_CR2_STOP;
-				WAIT_FOR_INT(I2C_CR1_STOPIE);
+				WAIT_FOR_FLAG(I2C_CR1_STOPIE, I2C_ISR_STOPF);
 				base->ICR = I2C_ICR_STOPCF;
 			}
 		}
@@ -215,17 +222,17 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 			base->CR2 &= ~I2C_CR2_AUTOEND;
 
 			while (rxlen > 0) {
-				/* For every byte to be sent, read for RXNE. */
-				WAIT_FOR_INT(I2C_CR1_RXIE);
+				/* For every byte to be received, wait for RXNE. RXDR must never be read without it. */
+				WAIT_FOR_FLAG(I2C_CR1_RXIE, I2C_ISR_RXNE);
 				*rxdata = base->RXDR;
 
 				rxlen--;
 				rxdata++;
 			}
 
-			WAIT_FOR_INT(I2C_CR1_TCIE);
+			WAIT_FOR_FLAG(I2C_CR1_TCIE, I2C_ISR_TC);
 			base->CR2 |= I2C_CR2_STOP;
-			WAIT_FOR_INT(I2C_CR1_STOPIE);
+			WAIT_FOR_FLAG(I2C_CR1_STOPIE, I2C_ISR_STOPF);
 			base->ICR = I2C_ICR_STOPCF;
 		}
 	} else {
@@ -234,6 +241,8 @@ static i2c_bus_ret_t stm32_i2c_transfer(I2cBus *bus, uint8_t addr, const uint8_t
 		return I2C_BUS_RET_FAILED;
 	}
 
+	/* Leave no interrupt armed between transfers. */
+	base->CR1 &= ~I2C_CR1_ALLIE;
 	xSemaphoreGive(self->bus_lock);
 	return I2C_BUS_RET_OK;
 
@@ -241,7 +250,7 @@ err:
 	/* Common error exit. Disable the transfer interrupts first so the ISR cannot fire while we tear the
 	 * transaction down, then recover the peripheral depending on the failure. Either way the bus lock is
 	 * always released so the bus never stays stuck. */
-	base->CR1 &= ~(I2C_CR1_TXIE | I2C_CR1_NACKIE | I2C_CR1_RXIE | I2C_CR1_TCIE | I2C_CR1_STOPIE | I2C_CR1_ERRIE);
+	base->CR1 &= ~I2C_CR1_ALLIE;
 	if (ret == I2C_BUS_RET_NACK) {
 		/* A NACK is a normal slave response: the state machine is still healthy, so just release the bus
 		 * with a STOP and clear the pending flags. */
@@ -293,6 +302,7 @@ static i2c_bus_ret_t stm32_i2c_probe(Stm32I2c *self, uint8_t addr) {
 		ret = I2C_BUS_RET_NACK;
 	}
 	base->ICR = I2C_ICR_STOPCF | I2C_ICR_NACKCF;
+	base->CR1 &= ~I2C_CR1_ALLIE;
 
 	xSemaphoreGive(self->bus_lock);
 	return ret;
@@ -370,31 +380,34 @@ stm32_i2c_ret_t stm32_i2c_free(Stm32I2c *self) {
 stm32_i2c_ret_t stm32_i2c_irq_handler(Stm32I2c *self) {
 	I2C_TypeDef *base = (I2C_TypeDef *)self->base;
 
+	/* Only flags whose interrupt is armed wake the waiter, a flag that is merely set (eg. TC lingering until the next
+	 * START) must not produce a wakeup nobody asked for. Each serviced interrupt is masked to avoid an ISR storm, the
+	 * flags themselves are left set for the waiter to check and clear. */
+	uint32_t isr = base->ISR;
+	uint32_t cr1 = base->CR1;
+	uint32_t mask = 0;
+	if ((isr & I2C_ISR_NACKF) && (cr1 & I2C_CR1_NACKIE)) {
+		mask |= I2C_CR1_NACKIE;
+	}
+	if ((isr & I2C_ISR_TXIS) && (cr1 & I2C_CR1_TXIE)) {
+		mask |= I2C_CR1_TXIE;
+	}
+	if ((isr & I2C_ISR_TC) && (cr1 & I2C_CR1_TCIE)) {
+		mask |= I2C_CR1_TCIE;
+	}
+	if ((isr & I2C_ISR_STOPF) && (cr1 & I2C_CR1_STOPIE)) {
+		mask |= I2C_CR1_STOPIE;
+	}
+	if ((isr & I2C_ISR_RXNE) && (cr1 & I2C_CR1_RXIE)) {
+		mask |= I2C_CR1_RXIE;
+	}
+	if ((isr & (I2C_ISR_BERR | I2C_ISR_ARLO | I2C_ISR_OVR)) && (cr1 & I2C_CR1_ERRIE)) {
+		mask |= I2C_CR1_ERRIE;
+	}
+
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-	if (base->ISR & I2C_ISR_NACKF) {
-		base->CR1 &= ~I2C_CR1_NACKIE;
-		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
-	}
-	if (base->ISR & I2C_ISR_TXIS) {
-		base->CR1 &= ~I2C_CR1_TXIE;
-		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
-	}
-	if (base->ISR & I2C_ISR_TC) {
-		base->CR1 &= ~I2C_CR1_TCIE;
-		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
-	}
-	if (base->ISR & I2C_ISR_STOPF) {
-		base->CR1 &= ~I2C_CR1_STOPIE;
-		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
-	}
-	if (base->ISR & I2C_ISR_RXNE) {
-		base->CR1 &= ~I2C_CR1_RXIE;
-		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
-	}
-	/* Bus error, arbitration lost or overrun: wake the waiter so it can abort the transfer. The flags are left
-	 * set and cleared on the error cleanup path; only the error interrupt is masked to avoid an ISR storm. */
-	if (base->ISR & (I2C_ISR_BERR | I2C_ISR_ARLO | I2C_ISR_OVR)) {
-		base->CR1 &= ~I2C_CR1_ERRIE;
+	if (mask) {
+		base->CR1 &= ~mask;
 		xSemaphoreGiveFromISR(self->wait_lock, &xHigherPriorityTaskWoken);
 	}
 	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
