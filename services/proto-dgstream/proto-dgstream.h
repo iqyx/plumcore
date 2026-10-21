@@ -28,9 +28,10 @@
  * consecutive datagrams on the wire.
  *
  * On reception the service reads from the stream using a timeout. While bytes keep arriving they are
- * accumulated into the current frame. When the stream read times out (the medium went idle, e.g.
- * signalled by an UART end-of-transfer/receiver-timeout interrupt) the current frame is considered
- * complete and returned as a single datagram.
+ * accumulated into the current frame. When the stream signals the end of a transfer (STREAM_RET_EOT, e.g.
+ * a gap of a few characters detected by an UART receiver timeout) or the stream read times out (the
+ * medium went idle for the receive timeout), the current frame is considered complete and returned as a
+ * single datagram. The end of transfer delimits frames even with a gap much shorter than the timeout.
  *
  * This pairs naturally with half-duplex UART links (RS485, CAN PHY) where the line idles between
  * bursts of bytes.

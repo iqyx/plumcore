@@ -55,6 +55,8 @@ struct stream_vmt {
 	 *
 	 * @return STREAM_RET_OK if at least one byte was read successfully,
 	 *         STREAM_RET_EOF of there are no more bytes to read from the stream (closed),
+	 *         STREAM_RET_EOT if the stream marks the end of a transfer (e.g. a gap in the received data
+	 *         detected by an UART receiver timeout), @p read holds the bytes received before it (possibly 0),
 	 *         STREAM_RET_FAILED on other error.
 	 */
 	stream_ret_t (*read)(Stream *self, void *buf, size_t size, size_t *read);
@@ -92,6 +94,9 @@ struct stream_vmt {
 	 * @return STREAM_RET_OK if at least one byte was read successfully,
 	 *         STREAM_RET_EOF of there are no more bytes to read from the stream (closed),
 	 *         STREAM_RET_TIMEOUT if a timeout occured during read,
+	 *         STREAM_RET_EOT if the stream marks the end of a transfer before the timeout (e.g. a gap in
+	 *         the received data detected by an UART receiver timeout), @p read holds the bytes received
+	 *         before it (possibly 0),
 	 *         STREAM_RET_FAILED on other error.
 	 */
 	stream_ret_t (*read_timeout)(Stream *self, void *buf, size_t size, size_t *read, uint32_t timeout_ms);

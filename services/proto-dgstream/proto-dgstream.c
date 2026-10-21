@@ -24,8 +24,8 @@
  * Helpers
  **********************************************************************************************************************/
 
-/* Consume and discard the remainder of the current frame until the medium goes idle. Used to
- * resynchronize after a frame did not fit into the caller's buffer. */
+/* Consume and discard the remainder of the current frame until the medium goes idle or the stream signals the end
+ * of transfer. Used to resynchronize after a frame did not fit into the caller's buffer. */
 static void drain_frame(ProtoDgstream *self) {
 	uint8_t tmp[32];
 	size_t read = 0;
@@ -93,15 +93,18 @@ static datagram_ret_t dgram_read(Datagram *self, void *buf, size_t *len, struct 
 	size_t off = 0;
 	datagram_ret_t ret = DATAGRAM_RET_OK;
 
-	/* Accumulate bytes into the frame until the medium goes idle. A read timeout with at least one
-	 * byte already buffered delimits the end of the current frame; a read timeout with nothing
-	 * buffered simply means no frame has started yet, keep waiting. */
+	/* Accumulate bytes into the frame until the medium goes idle. An end of transfer or a read timeout
+	 * with at least one byte already buffered delimits the end of the current frame; with nothing
+	 * buffered it simply means no frame has started yet, keep waiting. */
 	while (true) {
 		size_t read = 0;
 		stream_ret_t sret = proto->stream->vmt->read_timeout(proto->stream, out + off, cap - off,
 		                                                     &read, proto->rx_timeout_ms);
-		if (sret == STREAM_RET_OK) {
+		if (sret == STREAM_RET_OK || sret == STREAM_RET_EOT) {
 			off += read;
+			if (sret == STREAM_RET_EOT && off > 0) {
+				break;
+			}
 			if (off >= cap) {
 				/* The frame does not fit into the caller's buffer. Discard the rest and report
 				 * a failure rather than splitting it across reads. */
