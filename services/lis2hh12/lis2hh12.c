@@ -23,38 +23,47 @@
 #define MODULE_NAME "lis2hh12"
 
 
-static uint8_t read8(Lis2hh12 *self, lis2hh12_reg_t addr) {
+static lis2hh12_ret_t read8(Lis2hh12 *self, lis2hh12_reg_t addr, uint8_t *value) {
 	/* Write the sub-address, then read a single byte after a repeated start. */
 	uint8_t reg = addr & 0x7f;
 	uint8_t rxbuf = 0;
-	self->i2c->vmt->transfer(self->i2c, self->addr, &reg, 1, &rxbuf, 1);
+	if (self->i2c->vmt->transfer(self->i2c, self->addr, &reg, 1, &rxbuf, 1) != I2C_BUS_RET_OK) {
+		return LIS2HH12_RET_FAILED;
+	}
 	#if defined(DEBUG)
 		u_log(system_log, LOG_TYPE_DEBUG, "read8 [0x%02x] = 0x%02x", addr, rxbuf);
 	#endif
-	return rxbuf;
+	*value = rxbuf;
+	return LIS2HH12_RET_OK;
 }
 
 
-static void readn(Lis2hh12 *self, lis2hh12_reg_t addr, uint8_t *buf, size_t len) {
+static lis2hh12_ret_t readn(Lis2hh12 *self, lis2hh12_reg_t addr, uint8_t *buf, size_t len) {
 	/* The MSB of the sub-address enables register address auto-increment during
 	 * multi-byte reads (IF_ADD_INC in CTRL4 must be enabled as well). */
 	uint8_t reg = 0x80 | (addr & 0x7f);
-	self->i2c->vmt->transfer(self->i2c, self->addr, &reg, 1, buf, len);
+	if (self->i2c->vmt->transfer(self->i2c, self->addr, &reg, 1, buf, len) != I2C_BUS_RET_OK) {
+		return LIS2HH12_RET_FAILED;
+	}
+	return LIS2HH12_RET_OK;
 }
 
 
-static void write8(Lis2hh12 *self, lis2hh12_reg_t addr, uint8_t value) {
+static lis2hh12_ret_t write8(Lis2hh12 *self, lis2hh12_reg_t addr, uint8_t value) {
 	uint8_t txbuf[2] = {addr & 0x7f, value};
-	self->i2c->vmt->transfer(self->i2c, self->addr, txbuf, 2, NULL, 0);
+	if (self->i2c->vmt->transfer(self->i2c, self->addr, txbuf, 2, NULL, 0) != I2C_BUS_RET_OK) {
+		return LIS2HH12_RET_FAILED;
+	}
 	#if defined(DEBUG)
 		u_log(system_log, LOG_TYPE_DEBUG, "write8 [0x%02x] = 0x%02x", addr, value);
 	#endif
+	return LIS2HH12_RET_OK;
 }
 
 
 lis2hh12_ret_t lis2hh12_detect(Lis2hh12 *self) {
-	uint8_t who_am_i = read8(self, LIS2HH12_REG_WHO_AM_I);
-	if (who_am_i == LIS2HH12_WHO_AM_I_VALUE) {
+	uint8_t who_am_i = 0;
+	if (read8(self, LIS2HH12_REG_WHO_AM_I, &who_am_i) == LIS2HH12_RET_OK && who_am_i == LIS2HH12_WHO_AM_I_VALUE) {
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("LIS2HH12 detected, who_am_i = 0x%02x"), who_am_i);
 		return LIS2HH12_RET_OK;
 	}
@@ -64,13 +73,18 @@ lis2hh12_ret_t lis2hh12_detect(Lis2hh12 *self) {
 }
 
 
-static uint32_t lis2hh12_fifo_entries(Lis2hh12 *self) {
-	uint8_t src = read8(self, LIS2HH12_REG_FIFO_SRC);
+static lis2hh12_ret_t lis2hh12_fifo_entries(Lis2hh12 *self, uint32_t *entries) {
+	uint8_t src = 0;
+	if (read8(self, LIS2HH12_REG_FIFO_SRC, &src) != LIS2HH12_RET_OK) {
+		return LIS2HH12_RET_FAILED;
+	}
 	if (src & LIS2HH12_FIFO_SRC_OVR) {
 		/* The FIFO is 32 samples deep and has overrun, all slots are full. */
-		return 32;
+		*entries = 32;
+	} else {
+		*entries = src & LIS2HH12_FIFO_SRC_FSS_MASK;
 	}
-	return src & LIS2HH12_FIFO_SRC_FSS_MASK;
+	return LIS2HH12_RET_OK;
 }
 
 
@@ -112,8 +126,10 @@ static uint8_t lis2hh12_odr_bits(float sample_rate_Hz, float *actual_Hz) {
 static waveform_source_ret_t lis2hh12_start(WaveformSource *source) {
 	Lis2hh12 *self = (Lis2hh12 *)source->parent;
 	/* Leave power-down mode by writing the configured ODR and enabling all three axes. */
-	write8(self, LIS2HH12_REG_CTRL1, lis2hh12_odr_bits(self->sample_rate_Hz, NULL) |
-	       LIS2HH12_CTRL1_BDU | LIS2HH12_CTRL1_XEN | LIS2HH12_CTRL1_YEN | LIS2HH12_CTRL1_ZEN);
+	if (write8(self, LIS2HH12_REG_CTRL1, lis2hh12_odr_bits(self->sample_rate_Hz, NULL) |
+	           LIS2HH12_CTRL1_BDU | LIS2HH12_CTRL1_XEN | LIS2HH12_CTRL1_YEN | LIS2HH12_CTRL1_ZEN) != LIS2HH12_RET_OK) {
+		return WAVEFORM_SOURCE_RET_FAILED;
+	}
 	return WAVEFORM_SOURCE_RET_OK;
 }
 
@@ -121,7 +137,9 @@ static waveform_source_ret_t lis2hh12_start(WaveformSource *source) {
 static waveform_source_ret_t lis2hh12_stop(WaveformSource *source) {
 	Lis2hh12 *self = (Lis2hh12 *)source->parent;
 	/* Power-down mode (ODR = 0) stops conversions but keeps the configuration. */
-	write8(self, LIS2HH12_REG_CTRL1, LIS2HH12_CTRL1_ODR_PD);
+	if (write8(self, LIS2HH12_REG_CTRL1, LIS2HH12_CTRL1_ODR_PD) != LIS2HH12_RET_OK) {
+		return WAVEFORM_SOURCE_RET_FAILED;
+	}
 	return WAVEFORM_SOURCE_RET_OK;
 }
 
@@ -132,7 +150,11 @@ static waveform_source_ret_t lis2hh12_read(WaveformSource *source, void *data, s
 	int16_t *out = (int16_t *)data;
 
 	/* Do not read more samples than the FIFO currently holds. */
-	uint32_t fifo_count = lis2hh12_fifo_entries(self);
+	*read = 0;
+	uint32_t fifo_count = 0;
+	if (lis2hh12_fifo_entries(self, &fifo_count) != LIS2HH12_RET_OK) {
+		return WAVEFORM_SOURCE_RET_FAILED;
+	}
 	if (sample_count > fifo_count) {
 		sample_count = fifo_count;
 	}
@@ -141,11 +163,13 @@ static waveform_source_ret_t lis2hh12_read(WaveformSource *source, void *data, s
 		u_log(system_log, LOG_TYPE_DEBUG, "ws_read(data=0x%08x, count=%d, read=0x%08x)", data, sample_count, read);
 	#endif
 
-	*read = 0;
 	while (sample_count > 0) {
 		/* One FIFO slot holds six consecutive bytes (X_L, X_H, Y_L, Y_H, Z_L, Z_H).
 		 * The device is little endian and so is the MCU, copy the triplet directly. */
-		readn(self, LIS2HH12_REG_OUT_X_L, (uint8_t *)out, 3 * sizeof(int16_t));
+		if (readn(self, LIS2HH12_REG_OUT_X_L, (uint8_t *)out, 3 * sizeof(int16_t)) != LIS2HH12_RET_OK) {
+			/* Keep the samples read so far, the failed one is not counted. */
+			return (*read > 0) ? WAVEFORM_SOURCE_RET_OK : WAVEFORM_SOURCE_RET_FAILED;
+		}
 
 		out += 3;
 		sample_count--;
@@ -169,8 +193,14 @@ static waveform_source_ret_t lis2hh12_set_sample_rate(WaveformSource *source, fl
 	uint8_t odr = lis2hh12_odr_bits(sample_rate_Hz, &self->sample_rate_Hz);
 
 	/* Replace only the ODR field, keep the axis enables and BDU bit untouched. */
-	uint8_t ctrl1 = read8(self, LIS2HH12_REG_CTRL1) & ~LIS2HH12_CTRL1_ODR_MASK;
-	write8(self, LIS2HH12_REG_CTRL1, ctrl1 | odr);
+	uint8_t ctrl1 = 0;
+	if (read8(self, LIS2HH12_REG_CTRL1, &ctrl1) != LIS2HH12_RET_OK) {
+		return WAVEFORM_SOURCE_RET_FAILED;
+	}
+	ctrl1 &= ~LIS2HH12_CTRL1_ODR_MASK;
+	if (write8(self, LIS2HH12_REG_CTRL1, ctrl1 | odr) != LIS2HH12_RET_OK) {
+		return WAVEFORM_SOURCE_RET_FAILED;
+	}
 
 	return WAVEFORM_SOURCE_RET_OK;
 }
@@ -195,16 +225,23 @@ static const struct waveform_source_vmt lis2hh12_source_vmt = {
 
 lis2hh12_ret_t lis2hh12_init_defaults(Lis2hh12 *self) {
 	/* Enable register address auto-increment for multi-byte transfers, full scale +-2 g. */
-	write8(self, LIS2HH12_REG_CTRL4, LIS2HH12_CTRL4_IF_ADD_INC | LIS2HH12_CTRL4_FS_2G | LIS2HH12_CTRL4_BW_SCALE_ODR);
+	if (write8(self, LIS2HH12_REG_CTRL4, LIS2HH12_CTRL4_IF_ADD_INC | LIS2HH12_CTRL4_FS_2G |
+	           LIS2HH12_CTRL4_BW_SCALE_ODR) != LIS2HH12_RET_OK) {
+		return LIS2HH12_RET_FAILED;
+	}
 
 	/* Enable all three axes and block data update, 100 Hz output data rate. */
 	self->sample_rate_Hz = 50.0f;
-	write8(self, LIS2HH12_REG_CTRL1, LIS2HH12_CTRL1_ODR_50HZ |
-		LIS2HH12_CTRL1_BDU | LIS2HH12_CTRL1_XEN | LIS2HH12_CTRL1_YEN | LIS2HH12_CTRL1_ZEN);
+	if (write8(self, LIS2HH12_REG_CTRL1, LIS2HH12_CTRL1_ODR_50HZ |
+	           LIS2HH12_CTRL1_BDU | LIS2HH12_CTRL1_XEN | LIS2HH12_CTRL1_YEN | LIS2HH12_CTRL1_ZEN) != LIS2HH12_RET_OK) {
+		return LIS2HH12_RET_FAILED;
+	}
 
 	/* Enable the FIFO and put it into stream mode so samples are buffered continuously. */
-	write8(self, LIS2HH12_REG_CTRL3, LIS2HH12_CTRL3_FIFO_EN);
-	write8(self, LIS2HH12_REG_FIFO_CTRL, LIS2HH12_FIFO_CTRL_FMODE_STREAM);
+	if (write8(self, LIS2HH12_REG_CTRL3, LIS2HH12_CTRL3_FIFO_EN) != LIS2HH12_RET_OK ||
+	    write8(self, LIS2HH12_REG_FIFO_CTRL, LIS2HH12_FIFO_CTRL_FMODE_STREAM) != LIS2HH12_RET_OK) {
+		return LIS2HH12_RET_FAILED;
+	}
 
 	return LIS2HH12_RET_OK;
 }
@@ -218,7 +255,9 @@ static sensor_ret_t temp_sensor_value_f(Sensor *sensor, float *value) {
 	Lis2hh12 *self = (Lis2hh12 *)sensor->parent;
 
 	uint8_t buf[2] = {0};
-	readn(self, LIS2HH12_REG_TEMP_L, buf, sizeof(buf));
+	if (readn(self, LIS2HH12_REG_TEMP_L, buf, sizeof(buf)) != LIS2HH12_RET_OK) {
+		return SENSOR_RET_FAILED;
+	}
 
 	/* 12 bit, two's complement, 8 LSB/degC with 0 LSB representing 25 degC.
 	 * Sign-extend the 12 bit value held in a 16 bit container. */
@@ -254,7 +293,10 @@ lis2hh12_ret_t lis2hh12_init(Lis2hh12 *self, I2cBus *i2c, uint8_t addr) {
 		return LIS2HH12_RET_FAILED;
 	}
 
-	lis2hh12_init_defaults(self);
+	if (lis2hh12_init_defaults(self) != LIS2HH12_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot configure the device"));
+		return LIS2HH12_RET_FAILED;
+	}
 
 	self->source.vmt = &lis2hh12_source_vmt;
 	self->source.parent = self;
