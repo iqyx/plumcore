@@ -347,6 +347,7 @@ static void port_setup_nbus2(void) {
 
 	/* Advertise the raw backplane stream. The application frames nbus2 datagrams onto it. */
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&uart1.stream, "nbus");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_UART, (Interface *)&uart1.uart, "nbus");
 }
 
 

@@ -195,7 +195,7 @@ static void nbus2_init(void) {
 	 * interface. The proto-dgstream service handles medium access (framing and the inter-frame gaps);
 	 * nbus2 only deals with the protocol itself. */
 	Datagram *nbus_dgram = NULL;
-	proto_dgstream_init(&nbus2_dgstream, &nbus2_uart.stream);
+	proto_dgstream_init(&nbus2_dgstream, &nbus2_uart.stream, &nbus2_uart.uart);
 	proto_dgstream_get_datagram(&nbus2_dgstream, &nbus_dgram);
 
 	/* Transmit the current ChaCha20+HalfSipHash scheme; accept both schemes on receive. */
@@ -460,7 +460,7 @@ static void bridge_init(void) {
 	NVIC_EnableIRQ(USART3_IRQn);
 	NVIC_SetPriority(USART3_IRQn, 7);
 
-	proto_dgstream_init(&dgstream, &usart3.stream);
+	proto_dgstream_init(&dgstream, &usart3.stream, &usart3.uart);
 	proto_dgstream_get_datagram(&dgstream, &dgstream_dgram);
 	proto_dgstream_set_rx_timeout(&dgstream, 1);
 

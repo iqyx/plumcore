@@ -135,7 +135,7 @@ static void nbus_bp_port_init(void) {
 
 	/* Frame nbus2 packets onto the UART byte stream, nbus2 runs on top of the resulting Datagram. */
 	Datagram *dgram = NULL;
-	proto_dgstream_init(&nbus_bp_dgstream, &nbus_bp_uart.stream);
+	proto_dgstream_init(&nbus_bp_dgstream, &nbus_bp_uart.stream, &nbus_bp_uart.uart);
 	proto_dgstream_get_datagram(&nbus_bp_dgstream, &dgram);
 
 	/* Transmit the legacy ChaCha20+HalfSipHash scheme for compatibility, accept both schemes on receive. */
@@ -184,7 +184,7 @@ static void nbus_port0_init(void) {
 	nvic_set_priority(NVIC_USART3_IRQ, 5 * 16);
 
 	Datagram *dgram = NULL;
-	proto_dgstream_init(&(nbus_dgstream[0]), &(nbus_uart[0].stream));
+	proto_dgstream_init(&(nbus_dgstream[0]), &(nbus_uart[0].stream), &(nbus_uart[0].uart));
 	proto_dgstream_get_datagram(&(nbus_dgstream[0]), &dgram);
 
 	const struct nbus_config nbus_config = {

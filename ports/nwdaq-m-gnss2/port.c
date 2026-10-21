@@ -143,7 +143,7 @@ static void port_setup_nbus2(void) {
 	 * interface. The proto-dgstream service handles medium access (framing and the inter-frame gaps);
 	 * nbus2 only deals with the protocol itself. */
 	Datagram *nbus_dgram = NULL;
-	proto_dgstream_init(&nbus2_dgstream, &nbus2_uart.stream);
+	proto_dgstream_init(&nbus2_dgstream, &nbus2_uart.stream, &nbus2_uart.uart);
 	proto_dgstream_set_rx_timeout(&nbus2_dgstream, 1);
 	proto_dgstream_set_tx_gap(&nbus2_dgstream, 2);
 	proto_dgstream_get_datagram(&nbus2_dgstream, &nbus_dgram);

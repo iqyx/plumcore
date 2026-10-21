@@ -277,6 +277,11 @@ static app_ret_t app_setup_backplane(App *self) {
 		return APP_RET_FAILED;
 	}
 
+	/* The Uart interface of the backplane, if advertised, lets proto-dgstream separate the frames with precisely
+	 * timed idle periods. */
+	Uart *nbus_uart = NULL;
+	iservicelocator_query_name_type(locator, "nbus", ISERVICELOCATOR_TYPE_UART, (Interface **)&nbus_uart);
+
 	self->mq = NULL;
 	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_MQ, 0, (Interface **)&self->mq) != ISERVICELOCATOR_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no message queue found"));
@@ -286,7 +291,7 @@ static app_ret_t app_setup_backplane(App *self) {
 	/* Frame nbus2 datagrams onto the backplane byte stream. The crypto scheme and MAC key must match
 	 * the measurement card so the two peers interoperate. */
 	Datagram *nbus_dgram = NULL;
-	proto_dgstream_init(&self->nbus_dgstream, nbus_stream);
+	proto_dgstream_init(&self->nbus_dgstream, nbus_stream, nbus_uart);
 	proto_dgstream_get_datagram(&self->nbus_dgstream, &nbus_dgram);
 
 	const struct nbus_config nbus_config = {

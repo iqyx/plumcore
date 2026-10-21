@@ -18,6 +18,8 @@
 #include "proto-dgstream.h"
 
 #define MODULE_NAME "proto-dgstream"
+#define PROTO_DGSTREAM_IDLE_FRAMES 5
+#define PROTO_DGSTREAM_BACKOFF_FRAMES 32
 
 
 /**********************************************************************************************************************
@@ -33,6 +35,19 @@ static void drain_frame(ProtoDgstream *self) {
 	                                       self->rx_timeout_ms) == STREAM_RET_OK) {
 		;
 	}
+}
+
+
+/* Random backoff of 0 to PROTO_DGSTREAM_BACKOFF_FRAMES frames (xorshift32). The tick count mixed in at every draw
+ * makes the sequences of nodes running the same firmware diverge. */
+static uint32_t backoff_frames(ProtoDgstream *self) {
+	uint32_t x = self->backoff_state ^ xTaskGetTickCount();
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	self->backoff_state = x;
+
+	return x % (PROTO_DGSTREAM_BACKOFF_FRAMES + 1);
 }
 
 
@@ -56,15 +71,23 @@ static datagram_ret_t dgram_write(Datagram *self, const void *buf, size_t len, c
 
 	datagram_ret_t ret = DATAGRAM_RET_OK;
 
+	/* End the previous datagram with an idle period the receiver detects before this one starts. Wait for a random
+	 * backoff on top of it, so nodes waiting for the medium to become idle do not start transmitting at once. */
+	bool idle = (proto->uart != NULL && proto->uart->vmt->send_idle != NULL);
+	if (idle && proto->uart->vmt->send_idle(proto->uart, PROTO_DGSTREAM_IDLE_FRAMES + backoff_frames(proto)) != UART_RET_OK) {
+		ret = DATAGRAM_RET_FAILED;
+		goto out;
+	}
+
 	/* Emit the whole datagram as a single contiguous burst on the medium. */
 	if (proto->stream->vmt->write(proto->stream, buf, len) != STREAM_RET_OK) {
 		ret = DATAGRAM_RET_FAILED;
 		goto out;
 	}
 
-	/* Keep the medium idle for the inter-frame gap so the receiver sees a delimiting timeout
-	 * before the next datagram starts. */
-	if (proto->tx_gap_ms > 0) {
+	/* Without the idle periods, keep the medium idle for the inter-frame gap so the receiver sees a
+	 * delimiting timeout before the next datagram starts. */
+	if (!idle && proto->tx_gap_ms > 0) {
 		vTaskDelay(pdMS_TO_TICKS(proto->tx_gap_ms));
 	}
 
@@ -141,7 +164,7 @@ static const struct datagram_vmt proto_dgstream_datagram_vmt = {
  * Public API
  **********************************************************************************************************************/
 
-proto_dgstream_ret_t proto_dgstream_init(ProtoDgstream *self, Stream *stream) {
+proto_dgstream_ret_t proto_dgstream_init(ProtoDgstream *self, Stream *stream, Uart *uart) {
 	if (u_assert(self != NULL) ||
 	    u_assert(stream != NULL)) {
 		return PROTO_DGSTREAM_RET_FAILED;
@@ -149,6 +172,8 @@ proto_dgstream_ret_t proto_dgstream_init(ProtoDgstream *self, Stream *stream) {
 	memset(self, 0, sizeof(ProtoDgstream));
 
 	self->stream = stream;
+	self->uart = uart;
+	self->backoff_state = 0x9e3779b9;
 	self->tx_gap_ms = CONFIG_SERVICE_PROTO_DGSTREAM_TX_GAP_MS;
 	self->rx_timeout_ms = CONFIG_SERVICE_PROTO_DGSTREAM_RX_TIMEOUT_MS;
 
@@ -162,8 +187,14 @@ proto_dgstream_ret_t proto_dgstream_init(ProtoDgstream *self, Stream *stream) {
 		return PROTO_DGSTREAM_RET_FAILED;
 	}
 
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("service started, tx gap = %u ms, rx timeout = %u ms"),
-		(unsigned int)self->tx_gap_ms, (unsigned int)self->rx_timeout_ms);
+	if (self->uart != NULL) {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("service started, tx idle = %u+%u frames, rx timeout = %u ms"),
+			(unsigned int)PROTO_DGSTREAM_IDLE_FRAMES, (unsigned int)PROTO_DGSTREAM_BACKOFF_FRAMES,
+			(unsigned int)self->rx_timeout_ms);
+	} else {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("service started, tx gap = %u ms, rx timeout = %u ms"),
+			(unsigned int)self->tx_gap_ms, (unsigned int)self->rx_timeout_ms);
+	}
 	return PROTO_DGSTREAM_RET_OK;
 }
 
