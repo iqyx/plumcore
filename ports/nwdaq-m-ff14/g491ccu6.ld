@@ -3,7 +3,7 @@
 
 MEMORY
 {
-	rom (rx) : ORIGIN = LOAD_ADDRESS, LENGTH = 512K
+	rom (rx) : ORIGIN = LOAD_ADDRESS, LENGTH = ROM_LENGTH
 	ram (rwx) : ORIGIN = 0x20000000 + 2K, LENGTH = 80K - 2K
 }
 

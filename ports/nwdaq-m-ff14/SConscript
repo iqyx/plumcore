@@ -21,3 +21,9 @@ if conf["APP_BL"] == "n":
 	env.Append(LINKFLAGS = [
 		"-Wl,-u_printf_float",
 	])
+
+# The bootloader must fit its 56K partition, the bootconf partition follows it.
+if conf["APP_BL"] == "y":
+	env.Append(LINKFLAGS = ["-Wl,--defsym=ROM_LENGTH=56K"])
+else:
+	env.Append(LINKFLAGS = ["-Wl,--defsym=ROM_LENGTH=512K"])
