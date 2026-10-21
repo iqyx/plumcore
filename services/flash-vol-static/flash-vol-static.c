@@ -141,6 +141,10 @@ flash_vol_static_ret_t flash_vol_static_create(FlashVolStatic *self, const char 
 			return FLASH_VOL_STATIC_RET_OK;
 		}
 	}
+	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create LV '%s', all %u LVs used (SERVICE_FLASH_VOL_STATIC_LVS_MAX)"),
+		name,
+		(unsigned int)FLASH_VOL_STATIC_LVS_MAX
+	);
 	return FLASH_VOL_STATIC_RET_FAILED;
 }
 
