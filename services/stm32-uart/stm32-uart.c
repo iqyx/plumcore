@@ -44,6 +44,11 @@
 #define USART_RDR_RDR_Msk USART_RDR_RDR
 #endif
 
+/* With the receiver timeout enabled, the ISR stores a received ESC byte as ESC ESC and marks the receiver timeout (a gap
+ * in the received data) as ESC ETB in the receive ring buffer. */
+#define STM32_UART_ESC 0x1b
+#define STM32_UART_ETB 0x17
+
 
 /*********************************************************************************************************************
  * Uart interface implementation
@@ -265,42 +270,47 @@ static stream_ret_t stream_read_timeout(Stream *self, void *buf, size_t size, si
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
 
 	/* Allow using constant for the max delay, see @p stream_read below. */
+	TickType_t ticks = portMAX_DELAY;
 	if (timeout_ms != portMAX_DELAY) {
-		timeout_ms = pdMS_TO_TICKS(timeout_ms);
+		ticks = pdMS_TO_TICKS(timeout_ms);
 	}
+	TimeOut_t timeout;
+	vTaskSetTimeOutState(&timeout);
 
-	for (size_t i = 0; i < size; i++) {
+	stream_ret_t ret = STREAM_RET_OK;
+	size_t i = 0;
+	while (i < size) {
 		uint8_t c;
-		/* Waiting with timeout for the first byte only. */
-		size_t r = xStreamBufferReceive(stm32_uart->rxbuf, &c, sizeof(c), i ? 0 : timeout_ms);
-
-		if (r == 0) {
-			if (read != NULL) {
-				*read = i;
+		if (ringbuf_get(&stm32_uart->rxring, &c) != RINGBUF_RET_OK) {
+			/* Return what is available. Wait with timeout for the first byte only. */
+			if (i > 0) {
+				break;
 			}
-			return i ? STREAM_RET_OK : STREAM_RET_TIMEOUT;
-		} else {
-			//if (c == 0x1b) {
-				/* Do not handle timeout. We are sure there is another byte ready
-				 * when ESC is received. Read the next byte after the ESC. */
-				//r = xStreamBufferReceive(stm32_uart->rxbuf, &c, sizeof(c), timeout_ms);
-				//((uint8_t *)buf)[i] = c;
-			//} else if (c == 0x17) {
-				/* Handle end of block (signalled by RTO interrupt). */
-				//if (read != NULL) {
-					//*read = i;
-				//}
-				//return STREAM_RET_EOT;
-			//} else {
-				((uint8_t *)buf)[i] = c;
-			//}
+			if (xTaskCheckForTimeOut(&timeout, &ticks) == pdTRUE ||
+			    xSemaphoreTake(stm32_uart->rxsem, ticks) != pdTRUE) {
+				ret = STREAM_RET_TIMEOUT;
+				break;
+			}
+			continue;
 		}
-	}
-	if (read != NULL) {
-		*read = size;
+
+		if (stm32_uart->enable_rto && c == STM32_UART_ESC) {
+			/* The ISR stores the ESC together with the following byte, it is always available. */
+			ringbuf_get(&stm32_uart->rxring, &c);
+			if (c == STM32_UART_ETB) {
+				/* A gap in the received data ends the read, even with no bytes read. */
+				ret = STREAM_RET_EOT;
+				break;
+			}
+		}
+		((uint8_t *)buf)[i] = c;
+		i++;
 	}
 
-	return STREAM_RET_OK;
+	if (read != NULL) {
+		*read = i;
+	}
+	return ret;
 }
 
 
@@ -355,9 +365,10 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, void *port_base) {
 	stm32_uart_enable(self, true);
 
 	/* Allocate IPC primitives. */
-	self->rxbuf = xStreamBufferCreate(CONFIG_SERVICE_STM32_UART_RXBUF_SIZE, 1);
+	ringbuf_init(&self->rxring, self->rxring_data, sizeof(self->rxring_data));
+	self->rxsem = xSemaphoreCreateBinary();
 	self->txbuf = xStreamBufferCreate(CONFIG_SERVICE_STM32_UART_TXBUF_SIZE, 1);
-	if (self->rxbuf == NULL || self->txbuf == NULL) {
+	if (self->rxsem == NULL || self->txbuf == NULL) {
 		goto err;
 	}
 	self->txmutex = xSemaphoreCreateMutex();
@@ -387,8 +398,8 @@ stm32_uart_ret_t stm32_uart_free(Stm32Uart *self) {
 	if (self->txbuf != NULL) {
 		vStreamBufferDelete(self->txbuf);
 	}
-	if (self->rxbuf != NULL) {
-		vStreamBufferDelete(self->rxbuf);
+	if (self->rxsem != NULL) {
+		vSemaphoreDelete(self->rxsem);
 	}
 	if (self->txmutex != NULL) {
 		vSemaphoreDelete(self->txmutex);
@@ -425,19 +436,44 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 		port->ICR |= USART_ICR_TCCF;
 	}
 
-	/* Aggregate multiple receptions until the FIFO is empty or bbuf full. */
-	uint8_t bbuf[32];
-	size_t bbuf_len = 0;
-	while ((port->ISR & USART_ISR_RXNE_RXFNE) && (bbuf_len < sizeof(bbuf))) {
-		bbuf[bbuf_len] = (uint8_t)(port->RDR & USART_RDR_RDR_Msk);
-		bbuf_len++;
-	}
-	if (bbuf_len > 0) {
-		xStreamBufferSendFromISR(self->rxbuf, bbuf, bbuf_len, &woken);
-	}
-
+	/* Check the receiver timeout before draining the FIFO. If it is set, the line went idle after the last received
+	 * byte, all the bytes still in the FIFO belong to the frame it ends. */
+	bool rto = false;
 	if (port->ISR & USART_ISR_RTOF) {
 		port->ICR |= USART_ICR_RTOCF;
+		rto = true;
+	}
+
+	/* Aggregate multiple receptions until the FIFO is empty. Escaped bytes and the gap marker are always stored
+	 * together, never split between two ringbuf_put() calls. */
+	uint8_t bbuf[32];
+	size_t bbuf_len = 0;
+	bool received = false;
+	while (port->ISR & USART_ISR_RXNE_RXFNE) {
+		uint8_t c = (uint8_t)(port->RDR & USART_RDR_RDR_Msk);
+		if (self->enable_rto && c == STM32_UART_ESC) {
+			bbuf[bbuf_len] = STM32_UART_ESC;
+			bbuf_len++;
+		}
+		bbuf[bbuf_len] = c;
+		bbuf_len++;
+		if (bbuf_len > sizeof(bbuf) - 2) {
+			ringbuf_put(&self->rxring, bbuf, bbuf_len);
+			bbuf_len = 0;
+			received = true;
+		}
+	}
+	if (rto && self->enable_rto) {
+		bbuf[bbuf_len] = STM32_UART_ESC;
+		bbuf[bbuf_len + 1] = STM32_UART_ETB;
+		bbuf_len += 2;
+	}
+	if (bbuf_len > 0) {
+		ringbuf_put(&self->rxring, bbuf, bbuf_len);
+		received = true;
+	}
+	if (received) {
+		xSemaphoreGiveFromISR(self->rxsem, &woken);
 	}
 
 	/* Enabling the RXNE interrupt also enables ORE. We must handle it properly. */
@@ -457,15 +493,15 @@ stm32_uart_ret_t stm32_uart_set_de(Stm32Uart *self, Gpio *de_gpio) {
 }
 
 
-stm32_uart_ret_t stm32_uart_set_rto(Stm32Uart *self, bool rto) {
+stm32_uart_ret_t stm32_uart_set_rto(Stm32Uart *self, uint32_t chars) {
 	USART_TypeDef *port = (USART_TypeDef *)self->port;
 
 	stm32_uart_enable(self, false);
-	self->enable_rto = rto;
-	if (rto) {
-		/* Set receiver timeout enable. 3 character time. */
+	self->enable_rto = (chars > 0);
+	if (chars > 0) {
+		/* The timeout is counted in bit periods, a character is 10 bits long (8N1). */
 		port->CR2 |= USART_CR2_RTOEN;
-		port->RTOR = 200L;
+		port->RTOR = (chars * 10) & USART_RTOR_RTO_Msk;
 
 		/* Enable timeout interrupt. */
 		port->CR1 |= USART_CR1_RTOIE;

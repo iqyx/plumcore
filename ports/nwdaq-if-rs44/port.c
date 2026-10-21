@@ -127,7 +127,7 @@ static void nbus_bp_port_init(void) {
 	rcc_periph_clock_enable(RCC_USART2);
 
 	stm32_uart_init(&nbus_bp_uart, (void *)USART2);
-	stm32_uart_set_rto(&nbus_bp_uart, true);
+	stm32_uart_set_rto(&nbus_bp_uart, 3);
 	nbus_bp_uart.uart.vmt->set_bitrate(&nbus_bp_uart.uart, 1000000);
 
 	nvic_enable_irq(NVIC_USART2_IRQ);
@@ -176,7 +176,7 @@ static void nbus_port0_init(void) {
 	rcc_periph_clock_enable(RCC_USART3);
 
 	stm32_uart_init(&(nbus_uart[0]), (void *)USART3);
-	stm32_uart_set_rto(&(nbus_uart[0]), true);
+	stm32_uart_set_rto(&(nbus_uart[0]), 3);
 	stm32_uart_set_de(&(nbus_uart[0]), &(gpiob.pin[14]));
 	nbus_uart[0].uart.vmt->set_bitrate(&(nbus_uart[0].uart), 1000000);
 

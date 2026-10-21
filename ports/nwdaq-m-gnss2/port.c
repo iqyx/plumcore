@@ -133,7 +133,7 @@ static void port_setup_nbus2(void) {
 	RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
 
 	stm32_uart_init(&nbus2_uart, (void *)USART1);
-	stm32_uart_set_rto(&nbus2_uart, true);
+	stm32_uart_set_rto(&nbus2_uart, 3);
 	nbus2_uart.uart.vmt->set_bitrate(&nbus2_uart.uart, 2e6);
 
 	NVIC_EnableIRQ(USART1_IRQn);

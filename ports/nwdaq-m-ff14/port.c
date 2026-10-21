@@ -130,7 +130,7 @@ static void port_setup_nbus2(void) {
 	gpiob.pin[7].vmt->set_pinmux(&(gpiob.pin[7]), 7);
 
 	stm32_uart_init(&uart1, (void *)USART1);
-	//stm32_uart_set_rto(&uart1, true);
+	stm32_uart_set_rto(&uart1, 3);
 	uart1.uart.vmt->set_bitrate(&uart1.uart, 1000000);
 
 	NVIC_EnableIRQ(USART1_IRQn);

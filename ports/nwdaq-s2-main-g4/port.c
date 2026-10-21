@@ -168,7 +168,7 @@ static void nbus2_init(void) {
 
 	stm32_uart_init(&nbus2_uart, (void *)USART3);
 	stm32_uart_set_swmode(&nbus2_uart);
-	stm32_uart_set_rto(&nbus2_uart, true);
+	stm32_uart_set_rto(&nbus2_uart, 3);
 	nbus2_uart.uart.vmt->set_bitrate(&nbus2_uart.uart, 500000);
 
 	NVIC_EnableIRQ(USART3_IRQn);
