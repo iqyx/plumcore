@@ -36,8 +36,22 @@ typedef struct {
 	uint8_t rxring_data[CONFIG_SERVICE_STM32_UART_RXBUF_SIZE];
 	SemaphoreHandle_t rxsem;
 
-	StreamBufferHandle_t txbuf;
+	/* Bytes to transmit, written by a single task holding txmutex and read by the ISR. The semaphore wakes up the
+	 * writer when the ISR frees space or the transmission completes. */
+	struct ringbuf txring;
+	uint8_t txring_data[CONFIG_SERVICE_STM32_UART_TXBUF_SIZE];
+	SemaphoreHandle_t txsem;
 	SemaphoreHandle_t txmutex;
+
+	/* Current bitrate, used to time the idle and break periods. */
+	uint32_t bitrate;
+
+	/* Cycle counter value of the last reception, the line is sensed idle since then. With the receiver timeout
+	 * enabled, rx_active is set from a reception until the receiver timeout, which also gives idlesem to wake up
+	 * a writer waiting for the line to become idle. */
+	volatile uint32_t rx_cycles;
+	volatile bool rx_active;
+	SemaphoreHandle_t idlesem;
 	volatile size_t pending_tx;
 } Stm32Uart;
 

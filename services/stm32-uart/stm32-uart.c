@@ -51,6 +51,76 @@
 
 
 /*********************************************************************************************************************
+ * Transmit helpers
+ *********************************************************************************************************************/
+
+/* Queue as many bytes as fit into the transmit ring buffer and start the transmission. TCIE stays enabled until the
+ * transmission completes to release the driver enable and wake up a writer waiting for the completion. */
+static size_t tx_queue(Stm32Uart *self, const uint8_t *buf, size_t size) {
+	USART_TypeDef *port = (USART_TypeDef *)self->port;
+
+	size_t written = 0;
+	ringbuf_write(&self->txring, buf, size, &written);
+	if (written > 0) {
+		/* Assert driver enable if set. */
+		if (self->de_gpio) {
+			self->de_gpio->vmt->set(self->de_gpio, true);
+		}
+
+		/* The ISR clears these bits too, do not race with it. */
+		taskENTER_CRITICAL();
+		port->CR1 |= USART_CR1_TXEIE_TXFNFIE | USART_CR1_TCIE;
+		taskEXIT_CRITICAL();
+	}
+	return written;
+}
+
+
+/* Wait until all the queued data is transmitted, including the last frame. The ISR leaves the TC flag set, it is
+ * cleared only by writing the next data. Called with txmutex held. */
+static void tx_wait_complete(Stm32Uart *self) {
+	USART_TypeDef *port = (USART_TypeDef *)self->port;
+
+	while (true) {
+		size_t used = 0;
+		ringbuf_used(&self->txring, &used);
+		if (used == 0 && (port->ISR & USART_ISR_TC)) {
+			return;
+		}
+		taskENTER_CRITICAL();
+		port->CR1 |= USART_CR1_TCIE;
+		taskEXIT_CRITICAL();
+		xSemaphoreTake(self->txsem, portMAX_DELAY);
+	}
+}
+
+
+/* Duration of @p frames frames (10 bits each, 8N1) at the current bitrate in core clock cycles. */
+static uint32_t tx_frame_cycles(Stm32Uart *self, uint32_t frames) {
+	uint32_t bit_cycles = (SystemCoreClock + self->bitrate - 1) / self->bitrate;
+	return frames * 10 * bit_cycles;
+}
+
+
+/* Wait for @p cycles core clock cycles. Sleep if it takes at least two ticks, busy wait on the cycle counter
+ * otherwise. */
+static void tx_wait_cycles(uint32_t cycles) {
+	uint32_t tick_cycles = SystemCoreClock / configTICK_RATE_HZ;
+
+	if (cycles >= 2 * tick_cycles) {
+		/* Round up, the current tick is already partially elapsed. */
+		vTaskDelay(cycles / tick_cycles + 1);
+		return;
+	}
+
+	uint32_t start = DWT->CYCCNT;
+	while ((DWT->CYCCNT - start) < cycles) {
+		;
+	}
+}
+
+
+/*********************************************************************************************************************
  * Uart interface implementation
  *********************************************************************************************************************/
 
@@ -67,7 +137,8 @@ static uart_ret_t uart_set_bitrate(Uart *self, uint32_t bitrate_baud) {
 	 * state, and those flags cannot be cleared while UE=0. If their interrupt enables stayed set, the handler
 	 * would spin on the uncleared flags and starve the caller, which is fatal when the bitrate is switched at
 	 * runtime (e.g. a 1-Wire master toggling between reset and bit-slot rates). Mask them across the
-	 * reconfiguration and restore them once the port is re-enabled and the flags can be cleared again. */
+	 * reconfiguration and restore them once the port is re-enabled. The TC flag is left set, the ISR disables TCIE
+	 * when it handles it. */
 	uint32_t txie = port->CR1 & (USART_CR1_TCIE | USART_CR1_TXEIE_TXFNFIE);
 	port->CR1 &= ~(USART_CR1_TCIE | USART_CR1_TXEIE_TXFNFIE);
 
@@ -81,8 +152,8 @@ static uart_ret_t uart_set_bitrate(Uart *self, uint32_t bitrate_baud) {
 		port->BRR = (clock + bitrate_baud / 2) / bitrate_baud;
 	#endif
 	stm32_uart_enable(stm32_uart, true);
+	stm32_uart->bitrate = bitrate_baud;
 
-	port->ICR = USART_ICR_TCCF;
 	port->CR1 |= txie;
 
 	return UART_RET_OK;
@@ -167,11 +238,79 @@ static uart_ret_t uart_set_parity(Uart *self, enum uart_parity p) {
 }
 
 
+static uart_ret_t uart_send_break(Uart *self, uint32_t frames) {
+	if (u_assert(self != NULL)) {
+		return UART_RET_FAILED;
+	}
+	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
+	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
+
+	xSemaphoreTake(stm32_uart->txmutex, portMAX_DELAY);
+	tx_wait_complete(stm32_uart);
+
+	if (stm32_uart->de_gpio) {
+		stm32_uart->de_gpio->vmt->set(stm32_uart->de_gpio, true);
+	}
+	for (uint32_t i = 0; i < frames; i++) {
+		/* The hardware sends a single break character per request and signals its end only by clearing SBKF
+		 * during the stop bits, without an interrupt. Wait for the break duration, then poll the rest. */
+		port->RQR = USART_RQR_SBKRQ;
+		tx_wait_cycles(tx_frame_cycles(stm32_uart, 1));
+		while (port->ISR & USART_ISR_SBKF) {
+			;
+		}
+	}
+	if (stm32_uart->de_gpio) {
+		stm32_uart->de_gpio->vmt->set(stm32_uart->de_gpio, false);
+	}
+
+	xSemaphoreGive(stm32_uart->txmutex);
+	return UART_RET_OK;
+}
+
+
+static uart_ret_t uart_send_idle(Uart *self, uint32_t frames) {
+	if (u_assert(self != NULL)) {
+		return UART_RET_FAILED;
+	}
+	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
+	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
+
+	/* The hardware can send only a single idle frame by toggling TE and does not signal its end. Time the idle
+	 * period in software after the previous data has been completely transmitted instead. */
+	xSemaphoreTake(stm32_uart->txmutex, portMAX_DELAY);
+	tx_wait_complete(stm32_uart);
+
+	/* Sense the line with the receiver. Any reception (including the echo of our own transmission on a shared
+	 * medium) restarts the idle period, so the transmission does not collide with another node. While the line
+	 * is busy, sleep until the receiver timeout signals its end. Without the receiver timeout nobody gives the
+	 * semaphore and the line is checked every tick. The timeout also recovers from a start bit not followed by a
+	 * whole character, which never raises the receiver timeout. */
+	uint32_t cycles = tx_frame_cycles(stm32_uart, frames);
+	while (true) {
+		if ((port->ISR & USART_ISR_BUSY) || (stm32_uart->enable_rto && stm32_uart->rx_active)) {
+			xSemaphoreTake(stm32_uart->idlesem, 1);
+			continue;
+		}
+		uint32_t idle = DWT->CYCCNT - stm32_uart->rx_cycles;
+		if (idle >= cycles) {
+			break;
+		}
+		tx_wait_cycles(cycles - idle);
+	}
+	xSemaphoreGive(stm32_uart->txmutex);
+
+	return UART_RET_OK;
+}
+
+
 static const struct uart_vmt uart_vmt = {
 	.set_bitrate = uart_set_bitrate,
 	.set_databits = uart_set_databits,
 	.set_stopbits = uart_set_stopbits,
 	.set_parity = uart_set_parity,
+	.send_break = uart_send_break,
+	.send_idle = uart_send_idle,
 };
 
 
@@ -179,42 +318,22 @@ static const struct uart_vmt uart_vmt = {
  * Stream interface implementation
  *********************************************************************************************************************/
 
-static size_t min_size(size_t a, size_t b) {
-	if (a < b) {
-		return a;
-	} else {
-		return b;
-	}
-}
-
-
 static stream_ret_t stream_write(Stream *self, const void *buf, size_t size) {
 	if (u_assert(self != NULL) ||
 	    u_assert(buf != NULL)) {
 		return STREAM_RET_FAILED;
 	}
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
-	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
 
-	/* FreeRTOS stream buffers allow only a single writer. This is not a problem here since
-	 * we can wait forever. */
 	xSemaphoreTake(stm32_uart->txmutex, portMAX_DELAY);
-	/* Write the whole buffer. Pay attention to the maximum allowed size by FreeRTOS. */
+	/* Write the whole buffer, wait for the ISR to free some space if it does not fit. */
 	while (size > 0) {
-		size_t to_write = min_size(CONFIG_SERVICE_STM32_UART_TXBUF_SIZE / 2, size);
-
-		size_t written = xStreamBufferSend(stm32_uart->txbuf, buf, to_write, portMAX_DELAY);
-
-		/* Assert driver enable if set. */
-		if (stm32_uart->de_gpio) {
-			stm32_uart->de_gpio->vmt->set(stm32_uart->de_gpio, true);
-		}
-
-		/* And send the data. It is important TXEIE remains set. */
-		port->CR1 |= USART_CR1_TXEIE;
-
+		size_t written = tx_queue(stm32_uart, buf, size);
 		buf = (const uint8_t *)buf + written;
 		size -= written;
+		if (size > 0) {
+			xSemaphoreTake(stm32_uart->txsem, portMAX_DELAY);
+		}
 	}
 	xSemaphoreGive(stm32_uart->txmutex);
 	return STREAM_RET_OK;
@@ -228,29 +347,25 @@ static stream_ret_t stream_write_timeout(Stream *self, const void *buf, size_t s
 		return STREAM_RET_FAILED;
 	}
 	Stm32Uart *stm32_uart = (Stm32Uart *)self->parent;
-	USART_TypeDef *port = (USART_TypeDef *)stm32_uart->port;
 
-	/* We are allowed to write less bytes than requested. Crop the buffer. */
-	size = min_size(CONFIG_SERVICE_STM32_UART_TXBUF_SIZE / 2, size);
+	TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+	TimeOut_t timeout;
+	vTaskSetTimeOutState(&timeout);
 
-	/* Mutex locking is somewhat complicated in this situation. We have to consider the timeout. */
-	if (xSemaphoreTake(stm32_uart->txmutex, pdMS_TO_TICKS(timeout_ms)) == pdFALSE) {
+	if (xSemaphoreTake(stm32_uart->txmutex, ticks) == pdFALSE) {
 		/* We were not even able to start. */
 		return STREAM_RET_TIMEOUT;
 	}
-	size_t w = xStreamBufferSend(stm32_uart->txbuf, buf, size, pdMS_TO_TICKS(timeout_ms));
-	if (w == 0) {
-		xSemaphoreGive(stm32_uart->txmutex);
-		return STREAM_RET_TIMEOUT;
-	}
 
-	/* Assert driver enable if set. */
-	if (stm32_uart->de_gpio) {
-		stm32_uart->de_gpio->vmt->set(stm32_uart->de_gpio, true);
+	/* We are allowed to write less bytes than requested. Write what fits, wait for some space if nothing does. */
+	size_t w = 0;
+	while ((w = tx_queue(stm32_uart, buf, size)) == 0) {
+		if (xTaskCheckForTimeOut(&timeout, &ticks) == pdTRUE ||
+		    xSemaphoreTake(stm32_uart->txsem, ticks) != pdTRUE) {
+			xSemaphoreGive(stm32_uart->txmutex);
+			return STREAM_RET_TIMEOUT;
+		}
 	}
-
-	/* Enable TX empty interrupt to send the data. */
-	port->CR1 |= USART_CR1_TXEIE;
 
 	if (written != NULL) {
 		*written = w;
@@ -362,11 +477,20 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, void *port_base) {
 
 	stm32_uart_enable(self, true);
 
+	/* The cycle counter times short idle and break periods. */
+	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+	#if defined(STM32H7)
+		DWT->LAR = 0xc5acce55;
+	#endif
+	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
 	/* Allocate IPC primitives. */
 	ringbuf_init(&self->rxring, self->rxring_data, sizeof(self->rxring_data));
 	self->rxsem = xSemaphoreCreateBinary();
-	self->txbuf = xStreamBufferCreate(CONFIG_SERVICE_STM32_UART_TXBUF_SIZE, 1);
-	if (self->rxsem == NULL || self->txbuf == NULL) {
+	self->idlesem = xSemaphoreCreateBinary();
+	ringbuf_init(&self->txring, self->txring_data, sizeof(self->txring_data));
+	self->txsem = xSemaphoreCreateBinary();
+	if (self->rxsem == NULL || self->idlesem == NULL || self->txsem == NULL) {
 		goto err;
 	}
 	self->txmutex = xSemaphoreCreateMutex();
@@ -378,7 +502,6 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, void *port_base) {
 	/* Enable RX not empty interrupt to receive data. */
 	port->CR3 |= USART_CR3_OVRDIS;
 	port->CR1 |= USART_CR1_RXNEIE;
-	port->CR1 |= USART_CR1_TCIE;
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("port %p initialized"), port);
 	return STM32_UART_RET_OK;
@@ -393,11 +516,14 @@ stm32_uart_ret_t stm32_uart_free(Stm32Uart *self) {
 		return STM32_UART_RET_FAILED;
 	}
 
-	if (self->txbuf != NULL) {
-		vStreamBufferDelete(self->txbuf);
+	if (self->txsem != NULL) {
+		vSemaphoreDelete(self->txsem);
 	}
 	if (self->rxsem != NULL) {
 		vSemaphoreDelete(self->rxsem);
+	}
+	if (self->idlesem != NULL) {
+		vSemaphoreDelete(self->idlesem);
 	}
 	if (self->txmutex != NULL) {
 		vSemaphoreDelete(self->txmutex);
@@ -411,27 +537,32 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 	USART_TypeDef *port = (USART_TypeDef *)self->port;
 	BaseType_t woken = pdFALSE;
 
+	/* Wake up the writer when space is freed or the transmission completes. */
+	bool tx_event = false;
 	while ((port->ISR & USART_ISR_TXE_TXFNF)) {
 		uint8_t b = 0;
-		/** @todo 1 us! */
-		size_t r = xStreamBufferReceiveFromISR(self->txbuf, &b, sizeof(b), 0);
-		if (r > 0) {
-			port->TDR = (b & USART_TDR_TDR_Msk);
-		}
-		if (r == 0) {
+		if (ringbuf_get(&self->txring, &b) != RINGBUF_RET_OK) {
 			/* No more bytes to send. Disable the interrupt. */
 			port->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;
 			break;
 		}
+		port->TDR = (b & USART_TDR_TDR_Msk);
+		tx_event = true;
 	}
 
-	if (port->ISR & USART_ISR_TC) {
+	/* Writing TDR above clears TC, it is set only after the last frame is transmitted. Leave the flag set as an
+	 * indication of the completed transmission, disable its interrupt instead. */
+	if ((port->CR1 & USART_CR1_TCIE) && (port->ISR & USART_ISR_TC)) {
 		/* De-assert driver enable if set. */
 		if (self->de_gpio) {
 			self->de_gpio->vmt->set(self->de_gpio, false);
 		}
 
-		port->ICR |= USART_ICR_TCCF;
+		port->CR1 &= ~USART_CR1_TCIE;
+		tx_event = true;
+	}
+	if (tx_event) {
+		xSemaphoreGiveFromISR(self->txsem, &woken);
 	}
 
 	/* Check the receiver timeout before draining the FIFO. If it is set, the line went idle after the last received
@@ -447,8 +578,10 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 	uint8_t bbuf[32];
 	size_t bbuf_len = 0;
 	bool received = false;
+	bool data = false;
 	while (port->ISR & USART_ISR_RXNE_RXFNE) {
 		uint8_t c = (uint8_t)(port->RDR & USART_RDR_RDR_Msk);
+		data = true;
 		if (self->enable_rto && c == STM32_UART_ESC) {
 			bbuf[bbuf_len] = STM32_UART_ESC;
 			bbuf_len++;
@@ -470,8 +603,18 @@ stm32_uart_ret_t stm32_uart_interrupt_handler(Stm32Uart *self) {
 		ringbuf_put(&self->rxring, bbuf, bbuf_len);
 		received = true;
 	}
+	if (data) {
+		/* Only the data marks the line activity, not the gap marker. */
+		self->rx_cycles = DWT->CYCCNT;
+		self->rx_active = true;
+	}
 	if (received) {
 		xSemaphoreGiveFromISR(self->rxsem, &woken);
+	}
+	if (rto) {
+		/* The bytes read above belong to the frame which ended, the line is idle now. */
+		self->rx_active = false;
+		xSemaphoreGiveFromISR(self->idlesem, &woken);
 	}
 
 	/* Enabling the RXNE interrupt also enables ORE. We must handle it properly. */

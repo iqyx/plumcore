@@ -23,13 +23,13 @@ ringbuf_ret_t ringbuf_init(struct ringbuf *self, uint8_t *buf, size_t size) {
 
 
 ringbuf_ret_t ringbuf_put(struct ringbuf *self, const uint8_t *data, size_t len) {
-	size_t head = self->head;
-	size_t tail = self->tail;
-	size_t used = (head >= tail) ? (head - tail) : (head + self->size - tail);
+	size_t used = 0;
+	ringbuf_used(self, &used);
 	if (len > self->size - 1 - used) {
 		return RINGBUF_RET_FULL;
 	}
 
+	size_t head = self->head;
 	for (size_t i = 0; i < len; i++) {
 		self->buf[head] = data[i];
 		head++;
@@ -43,6 +43,19 @@ ringbuf_ret_t ringbuf_put(struct ringbuf *self, const uint8_t *data, size_t len)
 	self->head = head;
 
 	return RINGBUF_RET_OK;
+}
+
+
+ringbuf_ret_t ringbuf_write(struct ringbuf *self, const uint8_t *data, size_t len, size_t *written) {
+	size_t used = 0;
+	ringbuf_used(self, &used);
+	size_t free = self->size - 1 - used;
+	if (len > free) {
+		len = free;
+	}
+	*written = len;
+
+	return ringbuf_put(self, data, len);
 }
 
 
@@ -63,6 +76,15 @@ ringbuf_ret_t ringbuf_get(struct ringbuf *self, uint8_t *b) {
 	/* Release the slot only after the byte is read out. */
 	__atomic_thread_fence(__ATOMIC_RELEASE);
 	self->tail = tail;
+
+	return RINGBUF_RET_OK;
+}
+
+
+ringbuf_ret_t ringbuf_used(struct ringbuf *self, size_t *used) {
+	size_t head = self->head;
+	size_t tail = self->tail;
+	*used = (head >= tail) ? (head - tail) : (head + self->size - tail);
 
 	return RINGBUF_RET_OK;
 }

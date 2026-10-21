@@ -34,6 +34,16 @@ struct uart_vmt {
 	uart_ret_t (*set_databits)(Uart *self, uint32_t b);
 	uart_ret_t (*set_stopbits)(Uart *self, enum uart_stopbits b);
 	uart_ret_t (*set_parity)(Uart *self, enum uart_parity p);
+
+	/* Send @p frames break characters after all the data written before has been transmitted. Returns once the
+	 * breaks are sent. The length is in frames (bytes with 8N1). */
+	uart_ret_t (*send_break)(Uart *self, uint32_t frames);
+
+	/* Wait until the line stays idle for @p frames frame times after all the data written before has been
+	 * transmitted. If the implementation can sense the line (e.g. on a shared half-duplex medium), any activity
+	 * of other nodes restarts the idle period. Returns once the idle period elapsed, data written afterwards
+	 * follows it. The length is in frames (bytes with 8N1). */
+	uart_ret_t (*send_idle)(Uart *self, uint32_t frames);
 };
 
 typedef struct uart {

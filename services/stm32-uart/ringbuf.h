@@ -33,5 +33,11 @@ ringbuf_ret_t ringbuf_init(struct ringbuf *self, uint8_t *buf, size_t size);
 /* Store all @p len bytes or nothing. The bytes become visible to the consumer at once. */
 ringbuf_ret_t ringbuf_put(struct ringbuf *self, const uint8_t *data, size_t len);
 
+/* Store as many of the @p len bytes as fit, their number is returned in @p written. */
+ringbuf_ret_t ringbuf_write(struct ringbuf *self, const uint8_t *data, size_t len, size_t *written);
+
 /* Take a single byte. */
 ringbuf_ret_t ringbuf_get(struct ringbuf *self, uint8_t *b);
+
+/* Number of bytes stored. */
+ringbuf_ret_t ringbuf_used(struct ringbuf *self, size_t *used);
