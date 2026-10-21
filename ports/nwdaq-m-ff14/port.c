@@ -370,9 +370,9 @@ static void port_setup_flash(void) {
 	stm32_flash_init(&iflash);
 
 	flash_vol_static_init(&pv_iflash, &iflash.flash);
-	flash_vol_static_create(&pv_iflash, "bootloader", 0,          60 * 1024,  &lv_bl);
-	flash_vol_static_create(&pv_iflash, "bootconf",   60 * 1024,  2 * 1024,   &lv_blconf);
-	flash_vol_static_create(&pv_iflash, "mib",        62 * 1024,  2 * 1024,   &lv_mib);
+	flash_vol_static_create(&pv_iflash, "bootloader", 0,          56 * 1024,  &lv_bl);
+	flash_vol_static_create(&pv_iflash, "bootconf",   56 * 1024,  4 * 1024,   &lv_blconf);
+	flash_vol_static_create(&pv_iflash, "mib",        60 * 1024,  4 * 1024,   &lv_mib);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_mib, "mib");
 	flash_vol_static_create(&pv_iflash, "app",        64 * 1024,  184 * 1024, &lv_app);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FLASH, (Interface *)lv_app, "app");
