@@ -453,7 +453,7 @@ app_ret_t app_init(App *self) {
 		app_setup_force(self);
 	#endif
 
-	xTaskCreate(app_task, "app", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &(self->task));
+	xTaskCreate(app_task, "app", configMINIMAL_STACK_SIZE + 512, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		return APP_RET_FAILED;
 	}
