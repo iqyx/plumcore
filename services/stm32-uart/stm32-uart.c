@@ -350,17 +350,15 @@ stm32_uart_ret_t stm32_uart_init(Stm32Uart *self, void *port_base) {
 	self->uart.parent = self;
 	self->uart.vmt = &uart_vmt;
 
-	/* Set default UART parameters. */
+	/* Set default UART parameters. FIFOEN can be written only while the USART is disabled. */
 	stm32_uart_enable(self, false);
+	port->CR1 |= USART_CR1_FIFOEN;
 	uart_set_bitrate(&self->uart, 115200);
 	port->CR1 |= USART_CR1_RE | USART_CR1_TE;
 	uart_set_databits(&self->uart, 8);
 	uart_set_stopbits(&self->uart, UART_STOPBITS_1);
 	uart_set_parity(&self->uart, UART_PARITY_NONE);
 	//usart_set_flow_control(self->port, USART_FLOWCONTROL_NONE);
-
-	/* Enable FIFO mode */
-	port->CR1 |= USART_CR1_FIFOEN;
 
 	stm32_uart_enable(self, true);
 
