@@ -69,6 +69,20 @@ menu "meas-generic application configuration"
 		bool "Export the configuration tree over nbus2 on the console"
 		default y
 
+	config APP_MEAS_GENERIC_EOL
+		bool "EOL test mode (print raw channel values)"
+		default n
+
+	config APP_MEAS_GENERIC_EOL_STDDEV
+		bool "Compute and print standard deviation of the raw channel values"
+		depends on APP_MEAS_GENERIC_EOL
+		default n
+
+	config APP_MEAS_GENERIC_EOL_STDDEV_COUNT
+		int "Number of samples the standard deviation is computed from"
+		depends on APP_MEAS_GENERIC_EOL_STDDEV
+		default 100
+
 	config APP_MEAS_GENERIC_TEDS
 		bool "Enable TEDS over one-wire"
 		default n

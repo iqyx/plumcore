@@ -6,6 +6,8 @@
  * All rights reserved.
  */
 
+#include <math.h>
+
 #include <main.h>
 
 #include <interfaces/servicelocator.h>
@@ -62,10 +64,60 @@ static float compute_sensor(Sampling *self, float value) {
 }
 
 
+#if defined(CONFIG_APP_MEAS_GENERIC_EOL)
+/**
+ * @brief Append a " name=value" field to the EOL output line
+ */
+static void eol_append(char *line, size_t size, const char *name, float value) {
+	size_t len = strlen(line);
+	snprintf(line + len, size - len, " %s=%.3f", name, value);
+}
+#endif
+
+
+#if defined(CONFIG_APP_MEAS_GENERIC_EOL_STDDEV)
+/**
+ * @brief Accumulate a raw channel value into the running standard deviation window
+ */
+static void eol_stddev_add(struct sampling_channel *ch, float f) {
+	/* Welford's online update, numerically stable for large raw ADC counts in single precision. */
+	ch->n++;
+	float delta = f - ch->mean;
+	ch->mean += delta / (float)ch->n;
+	ch->m2 += delta * (f - ch->mean);
+}
+
+
+/**
+ * @brief Print the standard deviation of all channels with a full window on a single line and restart their windows
+ */
+static void eol_stddev_print(Sampling *self, char *line, size_t size) {
+	snprintf(line, size, "stddev");
+	size_t empty_len = strlen(line);
+	for (size_t i = 0; i < self->channel_count; i++) {
+		struct sampling_channel *ch = &self->channels[i];
+		if (ch->n >= CONFIG_APP_MEAS_GENERIC_EOL_STDDEV_COUNT) {
+			eol_append(line, size, ch->name, sqrtf(ch->m2 / (float)(ch->n - 1)));
+			ch->n = 0;
+			ch->mean = 0.0f;
+			ch->m2 = 0.0f;
+		}
+	}
+	if (strlen(line) > empty_len) {
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("eol %s"), line);
+	}
+}
+#endif
+
+
 static void sampling_task(void *p) {
 	Sampling *self = p;
 
 	while (true) {
+		#if defined(CONFIG_APP_MEAS_GENERIC_EOL)
+			/* Raw values of all channels in this cycle, printed on a single line when the cycle ends. */
+			char line[128] = "raw";
+		#endif
 		/* Sample every discovered channel and, if present, the compensation temperature, then
 		 * publish the values on their input topics. The compensation service republishes the
 		 * compensated results on the corresponding output topics. */
@@ -73,6 +125,12 @@ static void sampling_task(void *p) {
 			float f = 0.0f;
 			if (self->channels[i].sensor->vmt->value_f(self->channels[i].sensor, &f) == SENSOR_RET_OK) {
 				publish_value(self, compute_sensor(self, f), self->channels[i].input_topic);
+				#if defined(CONFIG_APP_MEAS_GENERIC_EOL)
+					eol_append(line, sizeof(line), self->channels[i].name, f);
+				#endif
+				#if defined(CONFIG_APP_MEAS_GENERIC_EOL_STDDEV)
+					eol_stddev_add(&self->channels[i], f);
+				#endif
 			}
 		}
 		if (self->temp != NULL) {
@@ -83,6 +141,13 @@ static void sampling_task(void *p) {
 				publish_value(self, f, self->temp_topic);
 			}
 		}
+		#if defined(CONFIG_APP_MEAS_GENERIC_EOL)
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("eol %s"), line);
+		#endif
+		#if defined(CONFIG_APP_MEAS_GENERIC_EOL_STDDEV)
+			/* Reuse the line buffer, the raw values have already been printed. */
+			eol_stddev_print(self, line, sizeof(line));
+		#endif
 
 		vTaskDelay(pdMS_TO_TICKS(self->sample_interval_ms));
 	}

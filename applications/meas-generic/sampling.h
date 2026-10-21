@@ -47,6 +47,13 @@ struct sampling_channel {
 	char name[SAMPLING_NAME_LEN];
 	char input_topic[SAMPLING_TOPIC_LEN];
 	Sensor *sensor;
+
+	#if defined(CONFIG_APP_MEAS_GENERIC_EOL_STDDEV)
+		/* Running mean and sum of squared deviations of the raw values (Welford's method). */
+		uint32_t n;
+		float mean;
+		float m2;
+	#endif
 };
 
 typedef struct sampling {
