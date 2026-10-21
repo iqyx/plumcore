@@ -48,9 +48,7 @@ static void c2r_task(void *p) {
 	while (self->can_run) {
 		size_t len = sizeof(self->c2r_buf);
 		if (self->conf.client->vmt->read(self->conf.client, self->c2r_buf, &len, NULL) == DATAGRAM_RET_OK) {
-			datagram_ret_t ret = self->conf.remote->vmt->write(self->conf.remote, self->c2r_buf, len, NULL);
-			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("client -> remote: %u bytes (write ret %d)"),
-			      (unsigned)len, (int)ret);
+			self->conf.remote->vmt->write(self->conf.remote, self->c2r_buf, len, NULL);
 		}
 	}
 	self->c2r_running = false;
@@ -67,9 +65,7 @@ static void r2c_task(void *p) {
 	while (self->can_run) {
 		size_t len = sizeof(self->r2c_buf);
 		if (self->conf.remote->vmt->read(self->conf.remote, self->r2c_buf, &len, NULL) == DATAGRAM_RET_OK) {
-			datagram_ret_t ret = self->conf.client->vmt->write(self->conf.client, self->r2c_buf, len, NULL);
-			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("remote -> client: %u bytes (write ret %d)"),
-			      (unsigned)len, (int)ret);
+			self->conf.client->vmt->write(self->conf.client, self->r2c_buf, len, NULL);
 		}
 	}
 	self->r2c_running = false;
