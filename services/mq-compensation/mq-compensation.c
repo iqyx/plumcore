@@ -22,9 +22,11 @@
 #include <types/ndarray.h>
 #include <interfaces/mq.h>
 #include <interfaces/conf.h>
+#include <interfaces/flash.h>
 #include <configlib.h>
 
 #include "mq-compensation.h"
+#include "mq-compensation-cert.h"
 
 #define MODULE_NAME "mq-compensation"
 
@@ -317,6 +319,71 @@ mq_compensation_ret_t mq_compensation_set_temp_topic(MqCompensation *self, const
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("temperature topic set to '%s'"), topic);
 
 	return MQ_COMPENSATION_RET_OK;
+}
+
+
+mq_compensation_ret_t mq_compensation_load_certificate(MqCompensation *self, const struct mq_compensation_cert_conf *conf) {
+	if (u_assert(self != NULL) ||
+	    u_assert(conf != NULL) ||
+	    u_assert(conf->flash != NULL) ||
+	    u_assert(conf->channels != NULL)) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	/** @todo verify the certificate signatures using conf->public_keys */
+	if (conf->verify) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot verify the certificate"));
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	struct mq_compensation_cert cert;
+	if (mq_compensation_cert_init(&cert, conf->flash) != MQ_COMPENSATION_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no calibration certificate found"));
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	/* Informational only, the administrative data and the targets are optional. */
+	mq_compensation_cert_log_info(&cert);
+
+	char cfg[MQ_COMPENSATION_CERT_STR_LEN] = {0};
+	if (conf->cfg != NULL) {
+		for (const struct mq_compensation_cert_kv *kv = conf->cfg; kv->key != NULL; kv++) {
+			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("requested configuration %s = %s"), kv->key, kv->value);
+		}
+		if (mq_compensation_cert_find_cfg(&cert, conf->cfg, cfg, sizeof(cfg)) != MQ_COMPENSATION_RET_OK) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no matching configuration in the certificate"));
+			return MQ_COMPENSATION_RET_FAILED;
+		}
+	}
+
+	mq_compensation_ret_t ret = MQ_COMPENSATION_RET_OK;
+	for (const struct mq_compensation_cert_channel *c = conf->channels; c->name != NULL; c++) {
+		struct mq_compensation_channel *ch = self->first_channel;
+		while (ch != NULL && strcmp(ch->conf.name, c->name)) {
+			ch = ch->next;
+		}
+
+		const char *tgt = NULL;
+		if (ch == NULL ||
+		    mq_compensation_cert_check_path(&cert, c->path, &tgt) != MQ_COMPENSATION_RET_OK ||
+		    mq_compensation_cert_find_comp(&cert, tgt, (conf->cfg != NULL) ? cfg : NULL, &ch->conf) != MQ_COMPENSATION_RET_OK) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot load channel '%s' from the certificate"), c->name);
+			ret = MQ_COMPENSATION_RET_FAILED;
+			continue;
+		}
+
+		/* The path is joined only for the log, a truncated path is good enough there. */
+		char path[64] = {0};
+		for (const char *const *t = c->path; *t != NULL; t++) {
+			if (t != c->path) {
+				strlcat(path, "/", sizeof(path));
+			}
+			strlcat(path, *t, sizeof(path));
+		}
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("channel '%s' loaded from '%s'"), c->name, path);
+	}
+
+	return ret;
 }
 
 

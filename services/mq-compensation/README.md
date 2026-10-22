@@ -142,6 +142,21 @@ Each channel exposes a configuration subtree named after the channel, under the 
 Unused high-order coefficients should be left at `0.0`. Disabling temperature compensation is done
 by setting `tc1 = tc2 = 0` (the factor stays 1.0 for all temperatures).
 
+## Loading the coefficients from a calibration certificate
+
+`mq_compensation_load_certificate()` loads the coefficients of already added channels from an EP-7d3 calibration
+certificate stored at the beginning of a flash partition. The certificate is parsed directly from the flash, it is not
+buffered in RAM.
+
+- `cfg` lists the key-value pairs of the current device configuration (eg. `{"pga", "1"}`). The first configuration
+  of the certificate having all these pairs is selected, its other pairs are ignored. Result groups taken under the selected configuration, or
+  under no configuration, are used.
+- `channels` maps each channel name to a hierarchical path of certificate targets (eg. `{"dev", "adc0", "ch0"}`).
+  Each target must have the preceding one as its parent. The compensation model (`comp`) of the first matching
+  result group of the last target is loaded; absent steps (`recip`, `poly`, `exp`, `tc`) are loaded as identity.
+- `public_keys` and `verify` are placeholders, signature verification is not implemented yet. Loading with
+  `verify = true` therefore fails.
+
 ## Computing the coefficients
 
 A helper script, [`tools/mq-comp-make-coeffs.py`](../../tools/mq-comp-make-coeffs.py), captures

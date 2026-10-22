@@ -597,6 +597,7 @@ menu "Communication server/client services"
 
 		config SERVICE_MQ_COMPENSATION
 			bool "Polynomial offset/gain/nonlinearity and temperature compensation"
+			select LIB_TINYCBOR
 			default y
 
 		if SERVICE_MQ_COMPENSATION

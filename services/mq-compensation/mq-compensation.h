@@ -18,6 +18,7 @@
 #include <types/ndarray.h>
 #include <interfaces/mq.h>
 #include <interfaces/conf.h>
+#include <interfaces/flash.h>
 #include <configlib.h>
 
 
@@ -79,6 +80,54 @@ struct mq_compensation_channel_conf {
 	float t_ref;
 	float tc1;
 	float tc2;
+};
+
+
+/**
+ * A key-value pair of a configuration of the calibration certificate (an entry of its top-level "cfg" map), eg.
+ * {"pga", "1"}. The value is given as text, it is compared with a text, a number or a bool ("true"/"false") of the
+ * certificate. A floating point number is compared in single precision.
+ */
+struct mq_compensation_cert_kv {
+	const char *key;
+	const char *value;
+};
+
+
+/**
+ * A compensation channel loaded from the calibration certificate.
+ */
+struct mq_compensation_cert_channel {
+	/* Name of a channel added with mq_compensation_add_channel() beforehand. */
+	const char *name;
+
+	/* NULL-terminated hierarchical path of the certificate targets from the root target to the one the compensation
+	 * model is loaded from, eg. {"dev", "adc0", "ch0", NULL}. */
+	const char *const *path;
+};
+
+
+/**
+ * Parameters of loading the calibration certificate, see mq_compensation_load_certificate().
+ */
+struct mq_compensation_cert_conf {
+	/* Flash partition the certificate is loaded from. It starts at the beginning of the partition. */
+	Flash *flash;
+
+	/* NULL-terminated array of base64 encoded ed25519 public keys used to verify the signatures of the certificate.
+	 * NULL if no keys are provided. */
+	const char *const *public_keys;
+
+	/* Force the verification. Loading fails if the certificate signatures cannot be verified. */
+	bool verify;
+
+	/* Key-value pairs of the device configuration terminated by a pair with a NULL key. The first configuration
+	 * of the certificate having all these pairs is used, its other pairs are ignored. NULL to use only results with
+	 * no configuration. */
+	const struct mq_compensation_cert_kv *cfg;
+
+	/* Channels to load, terminated by a channel with a NULL name. */
+	const struct mq_compensation_cert_channel *channels;
 };
 
 
@@ -165,6 +214,38 @@ mq_compensation_ret_t mq_compensation_add_channel(MqCompensation *self, const st
  * is used.
  */
 mq_compensation_ret_t mq_compensation_set_temp_topic(MqCompensation *self, const char *topic);
+
+
+/**
+ * @brief Load the compensation coefficients from an EP-7d3 calibration certificate
+ *
+ * The configuration of the certificate matching @p conf->cfg is found first. Then for each channel of
+ * @p conf->channels, the hierarchy of its target path is checked and the compensation model ("comp") of the first
+ * result group of the last target of the path, taken under the matching configuration (or under no configuration),
+ * is loaded into the channel coefficients. Absent steps of the model are loaded as identity.
+ *
+ * The parameters are expected to be passed as a compound literal:
+ *
+ *     mq_compensation_load_certificate(&comp, &(const struct mq_compensation_cert_conf) {
+ *         .flash = calib_flash,
+ *         .cfg = (const struct mq_compensation_cert_kv[]) {
+ *             {"pga", "1"},
+ *             {NULL, NULL},
+ *         },
+ *         .channels = (const struct mq_compensation_cert_channel[]) {
+ *             {"inc_x", (const char *[]) {"dev", "adc0", "ch0", NULL}},
+ *             {"inc_y", (const char *[]) {"dev", "adc0", "ch1", NULL}},
+ *             {NULL, NULL},
+ *         },
+ *     });
+ *
+ * @param self The service instance.
+ * @param conf Loading parameters.
+ *
+ * @return MQ_COMPENSATION_RET_FAILED if the certificate cannot be loaded or verified, or if any of the channels
+ *         cannot be loaded (the other channels are loaded), MQ_COMPENSATION_RET_OK otherwise.
+ */
+mq_compensation_ret_t mq_compensation_load_certificate(MqCompensation *self, const struct mq_compensation_cert_conf *conf);
 
 
 /**
