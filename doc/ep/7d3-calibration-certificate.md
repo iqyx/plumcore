@@ -436,16 +436,34 @@ Instead of, or in addition to, the raw `"ref"`/`"meas"` point tables, a result g
 model* in `"comp"`: the coefficients that map a measured value to a corrected one. This is the form a device usually
 applies at runtime, and it avoids shipping (and interpolating) the full point tables on resource-constrained targets.
 
-`"comp"` is a map keyed by *compensation scheme*. Each entry contributes one stage of the correction, and its value
-is a map of that scheme's parameters. The indication (input) and measurand (output) quantities, and their units, are
-declared in the target definition (`"iq"`/`"iu"` and `"mq"`/`"mu"`), so the schemes carry only coefficients. Two
-schemes are defined, `"poly"` and `"tc"`, both mapping directly onto the on-device evaluator implemented by the
-`mq-compensation` service so the coefficients can be loaded into a device without transformation.
+`"comp"` is a map of compensation *steps*, keyed by the step name. Each step is an individual stage of the correction
+and any of them MAY be omitted; an absent step is the identity. The indication (input) and measurand (output)
+quantities, and their units, are declared in the target definition (`"iq"`/`"iu"` and `"mq"`/`"mu"`), so the steps
+carry only coefficients. All steps map directly onto the on-device evaluator implemented by the `mq-compensation`
+service so the coefficients can be loaded into a device without transformation.
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `"recip"` | bool | Reciprocal — replace the input by its reciprocal. |
+| `"poly"` | map | Value polynomial. |
+| `"exp"` | number | Exponent the value is raised to. |
+| `"tc"` | map | Temperature compensation. |
 
 The correction maps *indication → measurand*: the input is the quantity the target outputs (`"iq"`) and the output is
-the measurand the device should report (`"mq"`). The `"poly"` scheme produces the measurand value from the indication;
-the `"tc"` scheme, when present, then divides that value by a temperature factor. Each scheme is optional and an
-absent scheme is the identity for its stage.
+the measurand the device should report (`"mq"`). The steps are applied in a fixed order regardless of the order of the
+keys in the map: `"recip"`, `"poly"`, `"exp"`, `"tc"`.
+
+#### `"recip"` — reciprocal input
+
+If `"recip"` is `true`, the indication is replaced by its reciprocal, e.g. to work with a conductance instead of a
+measured resistance. An absent `"recip"` or `false` leaves the indication unchanged:
+
+```
+x = 1 / in
+```
+
+The reciprocal of a zero indication saturates to the largest finite `float32` value (`FLT_MAX`) instead of producing
+an infinity. A fitting tool SHOULD leave the zero indications out of the fit when `"recip"` is used.
 
 #### `"poly"` — value polynomial
 
@@ -455,8 +473,23 @@ absent scheme is the identity for its stage.
 | `"c"` | array of numbers | Polynomial coefficients in ascending order of exponent: `c[0]` is the offset, `c[1]` the gain, the rest nonlinearity. |
 
 ```
-value = Σ_i c[i] · (in − x0)^i
+value = Σ_i c[i] · (x − x0)^i
 ```
+
+where `x` is the output of the `"recip"` step (the indication `in` if it is absent).
+
+#### `"exp"` — output exponent
+
+The output of the `"poly"` step is raised to the power of `"exp"`, preserving its sign so that a negative value does
+not produce a NaN:
+
+```
+value' = sign(value) · |value|^exp
+```
+
+`"exp"` MUST NOT be `0`. An absent `"exp"` is equivalent to `1`. Together with `"recip"` this models
+hyperbolic and power-law curves, e.g. a resistance measured by a voltage divider (`"exp": -1`) or a force sensing
+resistor, `F = (k/R + c)^d` (`"recip": true`, `"c": [c, k]`, `"exp": d`).
 
 #### `"tc"` — temperature compensation
 
@@ -474,12 +507,12 @@ out = ────────────────────────�
         1 + Σ_k tc[k] · (T − t0)^(k+1)
 ```
 
-A device calibrated and operated at `t0` is therefore unaffected by the temperature stage. Combining both schemes
-gives the full model:
+where `value` is the output of the `"exp"` step. A device calibrated and operated at `t0` is therefore unaffected by
+the temperature step. Combining all steps gives the full model:
 
 ```
-        Σ_i c[i] · (in − x0)^i
-out = ───────────────────────────────────
+        sign(p) · |p|^exp
+out = ───────────────────────────────────,    p = Σ_i c[i] · (x − x0)^i,    x = in or 1/in
         1 + Σ_k tc[k] · (T − t0)^(k+1)
 ```
 
@@ -515,6 +548,23 @@ range (`out = (c0 + c1·code) / (1 + tc1·(T − 25) + tc2·(T − 25)²)`):
     "comp": {
         "poly": { "x0": 0, "c": [-9.1e-4, 7.6294e-5] },
         "tc": { "t0": 25.0, "tc": [-3.0e-5, 1.2e-7] }
+    }
+}
+```
+
+#### Example — reciprocal and exponent
+
+A force sensing resistor whose force is a power law of its conductance, `F = (−0.05 + 1.2e5/R)^1.3`, the measurand
+being the force in newtons and the indication the resistance in ohms:
+
+```
+{
+    "tgt": "fsr0",
+    "desc": "Force compensation",
+    "comp": {
+        "recip": true,
+        "poly": { "c": [-0.05, 1.2e5] },
+        "exp": 1.3
     }
 }
 ```
