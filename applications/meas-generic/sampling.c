@@ -216,6 +216,73 @@ static sampling_ret_t discover_channels(Sampling *self) {
 }
 
 
+/* Load the compensation coefficients of the discovered channels from the calibration certificate. The configuration
+ * key-value pairs and the target path of each channel are given as Kconfig strings, split in place. The paths are
+ * kept in a single flat array of NULL-terminated paths the channels point into. */
+static sampling_ret_t load_calibration(Sampling *self) {
+	if (CONFIG_APP_MEAS_GENERIC_CALIB_PATHS[0] == '\0') {
+		return SAMPLING_RET_OK;
+	}
+
+	Flash *flash = NULL;
+	if (iservicelocator_query_name_type(locator, CONFIG_APP_MEAS_GENERIC_CALIB_PARTITION, ISERVICELOCATOR_TYPE_FLASH, (Interface **)&flash) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("calibration partition '%s' not found"), CONFIG_APP_MEAS_GENERIC_CALIB_PARTITION);
+		return SAMPLING_RET_FAILED;
+	}
+
+	char cfg_str[] = CONFIG_APP_MEAS_GENERIC_CALIB_CFG;
+	struct mq_compensation_cert_kv cfg[sizeof(cfg_str) / 2 + 1];
+	size_t cfg_count = 0;
+	char *saveptr = NULL;
+	for (char *pair = strtok_r(cfg_str, ",", &saveptr); pair != NULL; pair = strtok_r(NULL, ",", &saveptr)) {
+		char *eq = strchr(pair, '=');
+		if (eq == NULL) {
+			continue;
+		}
+		*eq = '\0';
+		cfg[cfg_count].key = pair;
+		cfg[cfg_count].value = eq + 1;
+		cfg_count++;
+	}
+	cfg[cfg_count].key = NULL;
+	cfg[cfg_count].value = NULL;
+
+	char paths_str[] = CONFIG_APP_MEAS_GENERIC_CALIB_PATHS;
+	const char *paths[sizeof(paths_str) / 2 + 1];
+	struct mq_compensation_cert_channel channels[SAMPLING_MAX_SENSORS + 1];
+	size_t path_count = 0;
+	size_t channel_count = 0;
+	for (char *entry = strtok_r(paths_str, ",", &saveptr); entry != NULL && channel_count < SAMPLING_MAX_SENSORS; entry = strtok_r(NULL, ",", &saveptr)) {
+		char *eq = strchr(entry, '=');
+		if (eq == NULL) {
+			continue;
+		}
+		*eq = '\0';
+		channels[channel_count].name = entry;
+		channels[channel_count].path = &paths[path_count];
+		channel_count++;
+
+		char *path_saveptr = NULL;
+		for (char *tgt = strtok_r(eq + 1, "/", &path_saveptr); tgt != NULL; tgt = strtok_r(NULL, "/", &path_saveptr)) {
+			paths[path_count++] = tgt;
+		}
+		paths[path_count++] = NULL;
+	}
+	channels[channel_count].name = NULL;
+	channels[channel_count].path = NULL;
+
+	if (mq_compensation_load_certificate(&self->comp, &(const struct mq_compensation_cert_conf) {
+		.flash = flash,
+		.cfg = (cfg_count > 0) ? cfg : NULL,
+		.channels = channels,
+	}) != MQ_COMPENSATION_RET_OK) {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("calibration not loaded completely"));
+		return SAMPLING_RET_FAILED;
+	}
+	return SAMPLING_RET_OK;
+}
+
+
 sampling_ret_t sampling_init(Sampling *self) {
 	memset(self, 0, sizeof(Sampling));
 
@@ -236,6 +303,9 @@ sampling_ret_t sampling_init(Sampling *self) {
 	if (discover_channels(self) != SAMPLING_RET_OK) {
 		return SAMPLING_RET_FAILED;
 	}
+
+	/* Replace the identity compensation by the calibration, the channels are kept uncalibrated if it fails. */
+	load_calibration(self);
 
 	/* Optional board temperature feeding the compensation polynomial. */
 	snprintf(self->temp_topic, sizeof(self->temp_topic), "%s", CONFIG_APP_MEAS_GENERIC_TEMP_SENSOR);

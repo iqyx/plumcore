@@ -24,6 +24,18 @@ menu "meas-generic application configuration"
 		int "Sampling interval in milliseconds"
 		default 100
 
+	config APP_MEAS_GENERIC_CALIB_PARTITION
+		string "Flash partition the calibration certificate is loaded from"
+		default "calib"
+
+	config APP_MEAS_GENERIC_CALIB_CFG
+		string "Calibration certificate configuration (key=value,key=value)"
+		default ""
+
+	config APP_MEAS_GENERIC_CALIB_PATHS
+		string "Calibration certificate target paths of the sensors (name=target/target,...), empty to disable"
+		default ""
+
 	choice
 		prompt "ADC measure unit"
 		default APP_MEAS_GENERIC_MEASURE_UNIT_COUNTS
