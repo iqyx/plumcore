@@ -295,8 +295,8 @@ static void port_setup_console(void) {
 	uart4.uart.vmt->set_bitrate(&uart4.uart, 115200);
 	port_i2c2_miswire_errata();
 
-	NVIC_EnableIRQ(UART4_IRQn);
 	NVIC_SetPriority(UART4_IRQn, 7);
+	NVIC_EnableIRQ(UART4_IRQn);
 
 	/* Advertise the console stream output and set it as default for log output. */
 	Stream *console = &uart4.stream;
@@ -342,8 +342,8 @@ static void port_setup_nbus2(void) {
 	stm32_uart_set_rto(&uart1, 3);
 	uart1.uart.vmt->set_bitrate(&uart1.uart, 1000000);
 
-	NVIC_EnableIRQ(USART1_IRQn);
 	NVIC_SetPriority(USART1_IRQn, 7);
+	NVIC_EnableIRQ(USART1_IRQn);
 
 	/* Advertise the raw backplane stream. The application frames nbus2 datagrams onto it. */
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_STREAM, (Interface *)&uart1.stream, "nbus");
@@ -520,10 +520,10 @@ static void port_setup_i2c(void) {
 
 	/* Configure and run the I2C driver and peripheral when GPIO is ready. */
 	RCC->APB1ENR1 |= RCC_APB1ENR1_I2C1EN;
-	NVIC_EnableIRQ(I2C1_EV_IRQn);
 	NVIC_SetPriority(I2C1_EV_IRQn, 7);
-	NVIC_EnableIRQ(I2C1_ER_IRQn);
+	NVIC_EnableIRQ(I2C1_EV_IRQn);
 	NVIC_SetPriority(I2C1_ER_IRQn, 7);
+	NVIC_EnableIRQ(I2C1_ER_IRQn);
 	stm32_i2c_init(&i2c1, (void *)I2C1);
 	stm32_i2c_set_speed(&i2c1, 100000);
 
@@ -573,10 +573,10 @@ static void port_setup_pm_i2c(void) {
 
 	/* Configure and run the I2C driver and peripheral when GPIO is ready. */
 	RCC->APB1ENR1 |= RCC_APB1ENR1_I2C2EN;
-	NVIC_EnableIRQ(I2C2_EV_IRQn);
 	NVIC_SetPriority(I2C2_EV_IRQn, 7);
-	NVIC_EnableIRQ(I2C2_ER_IRQn);
+	NVIC_EnableIRQ(I2C2_EV_IRQn);
 	NVIC_SetPriority(I2C2_ER_IRQn, 7);
+	NVIC_EnableIRQ(I2C2_ER_IRQn);
 	stm32_i2c_init(&i2c2, (void *)I2C2);
 	stm32_i2c_set_speed(&i2c2, 100000);
 
