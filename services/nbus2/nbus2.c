@@ -458,8 +458,9 @@ static datagram_ret_t nbus_socket_read(Datagram *datagram, void *buf, size_t *le
 	(void)msg;
 
 	struct nbus_pbuf *pbuf = NULL;
-	if (xQueueReceive(self->rx_queue, &pbuf, portMAX_DELAY) != pdTRUE) {
-		return DATAGRAM_RET_FAILED;
+	TickType_t timeout = (self->timeout_ms > 0) ? pdMS_TO_TICKS(self->timeout_ms) : portMAX_DELAY;
+	if (xQueueReceive(self->rx_queue, &pbuf, timeout) != pdTRUE) {
+		return (self->timeout_ms > 0) ? DATAGRAM_RET_TIMEOUT : DATAGRAM_RET_FAILED;
 	}
 
 	/* Interested in data? */
@@ -709,6 +710,7 @@ struct nbus_socket *nbus_socket_allocate(Nbus *self) {
 			/** @todo do not enable until bound */
 			self->sockets[i].enabled = true;
 			self->sockets[i].multicast = false;
+			self->sockets[i].timeout_ms = 0;
 
 			memset(self->sockets[i].local_id, 0, 4);
 			memset(self->sockets[i].local_id_mask, 0, 4);
@@ -781,6 +783,17 @@ nbus_ret_t nbus_socket_set_multicast(struct nbus_socket *socket, bool multicast)
 	}
 
 	socket->multicast = multicast;
+
+	return NBUS_RET_OK;
+}
+
+
+nbus_ret_t nbus_socket_set_timeout(struct nbus_socket *socket, uint32_t timeout_ms) {
+	if (u_assert(socket != NULL)) {
+		return NBUS_RET_BAD_PARAM;
+	}
+
+	socket->timeout_ms = timeout_ms;
 
 	return NBUS_RET_OK;
 }

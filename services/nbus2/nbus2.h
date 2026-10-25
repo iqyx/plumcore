@@ -109,6 +109,9 @@ struct nbus_socket {
 
 	QueueHandle_t rx_queue;
 
+	/** Receive timeout of a datagram read in milliseconds, 0 to block forever. Set via nbus_socket_set_timeout(). */
+	uint32_t timeout_ms;
+
 	uint8_t local_id[4];
 	uint8_t local_id_mask[4];
 	uint32_t local_ep;
@@ -211,4 +214,5 @@ nbus_ret_t nbus_socket_release(Nbus *self, struct nbus_socket *socket);
 nbus_ret_t nbus_socket_bind(struct nbus_socket *socket, const uint8_t *id, uint8_t ep);
 nbus_ret_t nbus_socket_connect(struct nbus_socket *socket, const uint8_t *id, uint8_t ep);
 nbus_ret_t nbus_socket_set_multicast(struct nbus_socket *socket, bool multicast);
+nbus_ret_t nbus_socket_set_timeout(struct nbus_socket *socket, uint32_t timeout_ms);
 nbus_ret_t nbus_socket_set_descriptor(struct nbus_socket *socket, const struct nbus_socket_descriptor *descriptor);
