@@ -330,8 +330,23 @@ static app_ret_t app_setup_backplane(App *self) {
 	nbus_socket_bind(self->nbus_flash_socket, local_id, 2);
 	nbus_socket_connect(self->nbus_flash_socket, flash_id, 1);
 
-	/* Relay the "ff14 flash" RemoteInterface session (created in ble.c) to the remote nbus-flash service
-	 * over this socket, so a BLE client transparently accesses the measurement card's flash. */
+	/* Export the measurement card's flash as "ff14 flash" and relay its session to the remote nbus-flash
+	 * service over this socket, so a BLE client transparently accesses the measurement card's flash. */
+	if (remote_interface_proxy_init(&self->ff14_flash_proxy, &(const struct remote_interface_proxy_conf) {
+		.desc = {
+			.protocol = "flash",
+			.protocol_version = "1.0.0",
+			.mtu = NBUS_FLASH_PROXY_BUF_LEN,
+			.max_sessions = 1,
+			.session_idle_ms = 0,
+		},
+		.queue_len = 2,
+	}) != REMOTE_INTERFACE_PROXY_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the ff14 flash proxy"));
+		return APP_RET_FAILED;
+	}
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_REMOTE_INTERFACE, (Interface *)&self->ff14_flash_proxy.iface, "ff14 flash");
+
 	const struct nbus_flash_proxy_conf flash_proxy_conf = {
 		.client = &self->ff14_flash_proxy.sessions[0].dgram,
 		.remote = &self->nbus_flash_socket->datagram,
@@ -445,11 +460,8 @@ app_ret_t app_init(App *self) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("LCD framebuffer not found"));
 	}
 
-	/* Bring up the configuration storage before BLE, proto-conf runs its save/load jobs. */
+	/* Bring up the configuration storage. Its jobs are run by the configuration load below and by proto-conf. */
 	app_setup_conf(self);
-
-	/* Discover the BLE device advertised by the port and build the GATT server on it. */
-	app_ble_init(self);
 
 	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 		/* Pull the measurement card's values in over the backplane. */
@@ -465,6 +477,10 @@ app_ret_t app_init(App *self) {
 
 	/* Apply the stored configuration once everything is up. */
 	app_load_conf(self);
+
+	/* Discover the BLE device and build the GATT server on it. Done last, the advertised name is built from
+	 * the hostname, which is known only after the configuration load. */
+	app_ble_init(self);
 
 	/* The auto-start applet is configurable, launch it only once the stored configuration is applied. */
 	if (self->lcd != NULL) {

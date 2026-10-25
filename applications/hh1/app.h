@@ -103,8 +103,8 @@ typedef struct {
 	NbusMqPoll nbus_mq_poll;
 
 	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
-		/* The measurement card's flash exported as "ff14 flash". The nbus-flash-proxy relaying its session to
-		 * the card's nbus-flash service is wired in app_setup_backplane, once the nbus2 stack is up. */
+		/* The measurement card's flash exported as "ff14 flash". Created in app_setup_backplane together with
+		 * the nbus-flash-proxy relaying its session to the card's nbus-flash service. */
 		RemoteInterfaceProxy ff14_flash_proxy;
 	#endif
 

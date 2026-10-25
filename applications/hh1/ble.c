@@ -150,6 +150,66 @@ static void app_ble_event_handler(void *ctx, const struct ble_event *event) {
 }
 
 
+/* Read the string leaf @p leaf, a direct child of the Conf tree advertised as @p root. The returned @p val
+ * points to the node's own storage. Fails if the tree or the leaf does not exist or the leaf is not a string. */
+static conf_ret_t app_ble_conf_str(const char *root, const char *leaf, union conf_val *val) {
+	Conf *node = NULL;
+	if (iservicelocator_query_name_type(locator, root, ISERVICELOCATOR_TYPE_CONF, (Interface **)&node) != ISERVICELOCATOR_RET_OK) {
+		return CONF_RET_FAILED;
+	}
+
+	/* Walk the children of the root looking for the leaf by name. */
+	Conf *child = NULL;
+	if (node->vmt->walk(node, CONF_DIR_CHILD, &child) != CONF_RET_OK) {
+		return CONF_RET_FAILED;
+	}
+	while (child != NULL) {
+		const char *name = NULL;
+		enum conf_type type = CONF_NONE;
+		enum conf_flag flags = 0;
+		if (child->vmt->stat(child, &name, &type, &flags) == CONF_RET_OK && name != NULL && !strcmp(name, leaf)) {
+			if (type != CONF_STR) {
+				return CONF_RET_FAILED;
+			}
+			return child->vmt->read(child, val);
+		}
+		if (child->vmt->walk(child, CONF_DIR_NEXT, &child) != CONF_RET_OK) {
+			break;
+		}
+	}
+
+	return CONF_RET_FAILED;
+}
+
+
+/* Set the advertised device name to "<hostname> (<sn>)", or just "<hostname>" when the /mib/sn string is
+ * missing or empty. The port name is used when the hostname is missing or empty. */
+static app_ret_t app_ble_set_name(App *self) {
+	union conf_val hostname = {0};
+	if (app_ble_conf_str("system", "hostname", &hostname) != CONF_RET_OK || hostname.str.len == 0) {
+		hostname.str.buf = PORT_NAME;
+		hostname.str.len = strlen(PORT_NAME);
+	}
+
+	/* Append the serial number in parentheses when the MIB holds a nonempty one. */
+	char name[64];
+	union conf_val sn = {0};
+	if (app_ble_conf_str("mib", "sn", &sn) == CONF_RET_OK && sn.str.len > 0) {
+		snprintf(name, sizeof(name), "%.*s (%.*s)", (int)hostname.str.len, hostname.str.buf, (int)sn.str.len, sn.str.buf);
+	} else {
+		snprintf(name, sizeof(name), "%.*s", (int)hostname.str.len, hostname.str.buf);
+	}
+
+	if (self->ble->vmt->set_device_name(self->ble, name) != BLE_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot set the device name"));
+		return APP_RET_FAILED;
+	}
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("advertising as '%s'"), name);
+
+	return APP_RET_OK;
+}
+
+
 app_ret_t app_ble_init(App *self) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("--------------- starting BLE services ----------------"));
 
@@ -164,9 +224,9 @@ app_ret_t app_ble_init(App *self) {
 	 * connects and pairing begins. */
 	app_ble_pair_window_init(self);
 
-	/* Bring BLE up through the generic Ble interface and start advertising this device under its name. */
+	/* Bring BLE up through the generic Ble interface and advertise this device under its hostname. */
 	self->ble->vmt->start(self->ble);
-	self->ble->vmt->set_device_name(self->ble, "nwdaq-main-hh1");
+	app_ble_set_name(self);
 
 	/* Export the remote configuration protocol as a single-session RemoteInterface. proto-conf predates
 	 * RemoteInterface, so it is wired to the proxy's session Datagram. It runs with a NULL root, exposing
@@ -243,25 +303,6 @@ app_ret_t app_ble_init(App *self) {
 	} else {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no message queue, mq not exported"));
 	}
-
-	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
-		/* Export the measurement card's flash as "ff14 flash". The nbus-flash-proxy relaying the session to
-		 * the card is wired in app_setup_backplane, once the nbus2 stack is up. */
-		if (remote_interface_proxy_init(&self->ff14_flash_proxy, &(const struct remote_interface_proxy_conf) {
-			.desc = {
-				.protocol = "flash",
-				.protocol_version = "1.0.0",
-				.mtu = NBUS_FLASH_PROXY_BUF_LEN,
-				.max_sessions = 1,
-				.session_idle_ms = 0,
-			},
-			.queue_len = 2,
-		}) != REMOTE_INTERFACE_PROXY_RET_OK) {
-			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the ff14 flash proxy"));
-			return APP_RET_FAILED;
-		}
-		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_REMOTE_INTERFACE, (Interface *)&self->ff14_flash_proxy.iface, "ff14 flash");
-	#endif
 
 	/* Export all advertised RemoteInterfaces over BLE. The transport is the only user of the device and owns
 	 * its event callback, the application handler is forwarded to it. Its GATT service is built here, before
