@@ -60,6 +60,20 @@ mq_compensation_ret_t mq_compensation_cert_log_info(struct mq_compensation_cert 
 
 
 /**
+ * @brief Get the identifier of the certificate
+ *
+ * The identifier is the "id" of the administrative data.
+ *
+ * @param id Returns the identifier. It is read through the scratch buffer, a longer one than
+ *           MQ_COMPENSATION_CERT_STR_LEN - 1 cannot be read.
+ * @param size Size of the @p id buffer.
+ *
+ * @return MQ_COMPENSATION_RET_FAILED if the identifier is absent or does not fit, MQ_COMPENSATION_RET_OK otherwise.
+ */
+mq_compensation_ret_t mq_compensation_cert_get_id(struct mq_compensation_cert *self, char *id, size_t size);
+
+
+/**
  * @brief Find the first configuration of the certificate matching all key-value pairs
  *
  * A configuration (an entry of the top-level "cfg" map) matches if it has all the pairs in @p kv, in any order. Its
@@ -85,12 +99,25 @@ mq_compensation_ret_t mq_compensation_cert_check_path(struct mq_compensation_cer
 
 
 /**
+ * @brief Check a hierarchical path of targets given as a string
+ *
+ * Same as mq_compensation_cert_check_path() with the target identifiers delimited by '/', eg. "dev0/adc0/ch0".
+ *
+ * @param tgt Returns the identifier of the last target of the path.
+ * @param size Size of the @p tgt buffer.
+ */
+mq_compensation_ret_t mq_compensation_cert_check_path_str(struct mq_compensation_cert *self, const char *path, char *tgt, size_t size);
+
+
+/**
  * @brief Find the compensation model of a target
  *
  * The model is taken from the first result group with a "comp" model of the target @p tgt, taken under the
  * configuration @p cfg. A result group with no configuration applies to any. Only the coefficients of @p comp are
  * set, absent steps of the model are set to identity.
  *
+ * @param tgt Identifier of the target, NULL to take the model of the first result group whatever its target and
+ *            configuration are.
  * @param cfg Identifier of the configuration, NULL to accept only result groups with no configuration.
  */
 mq_compensation_ret_t mq_compensation_cert_find_comp(struct mq_compensation_cert *self, const char *tgt, const char *cfg, struct mq_compensation_channel_conf *comp);

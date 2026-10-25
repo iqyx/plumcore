@@ -249,6 +249,37 @@ mq_compensation_ret_t mq_compensation_load_certificate(MqCompensation *self, con
 
 
 /**
+ * @brief Load the compensation coefficients of a single channel from an EP-7d3 calibration certificate
+ *
+ * The hierarchy of the target @p path is checked and the compensation model ("comp") of the first result group
+ * of its last target taken under no configuration is loaded into the coefficients of the channel @p channel.
+ * With no @p path, the model of the first result group is loaded, eg. from a certificate of a single sensor.
+ * Absent steps of the model are loaded as identity. The certificate signatures are not verified.
+ *
+ * @param flash Flash partition the certificate is loaded from. It starts at the beginning of the partition.
+ * @param path Target identifiers delimited by '/' from the root target, eg. "dev0/adc0/ch0". NULL to load the
+ *             first result group.
+ * @param channel Index of the channel in the order the channels were added with mq_compensation_add_channel().
+ *
+ * @return MQ_COMPENSATION_RET_FAILED if the certificate or the channel cannot be loaded, MQ_COMPENSATION_RET_OK
+ *         otherwise.
+ */
+mq_compensation_ret_t mq_compensation_load_certificate_channel(MqCompensation *self, Flash *flash, const char *path, uint32_t channel);
+
+
+/**
+ * @brief Reset the coefficients of a channel to identity
+ *
+ * The channel passes the values unchanged, eg. when its calibration is not available.
+ *
+ * @param channel Index of the channel in the order the channels were added with mq_compensation_add_channel().
+ *
+ * @return MQ_COMPENSATION_RET_FAILED if there is no such channel, MQ_COMPENSATION_RET_OK otherwise.
+ */
+mq_compensation_ret_t mq_compensation_reset_channel(MqCompensation *self, uint32_t channel);
+
+
+/**
  * @brief Get the configuration tree root of the service
  *
  * The returned node can be attached to a parent configuration tree or handed to a service

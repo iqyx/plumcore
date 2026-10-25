@@ -541,6 +541,19 @@ mq_compensation_ret_t mq_compensation_cert_log_info(struct mq_compensation_cert 
 }
 
 
+mq_compensation_ret_t mq_compensation_cert_get_id(struct mq_compensation_cert *self, char *id, size_t size) {
+	CborValue e;
+	bool found = false;
+	if (cert_enter_top(self, "adm", &e) != MQ_COMPENSATION_RET_OK ||
+	    cert_find_key(&e, "id", &found) != MQ_COMPENSATION_RET_OK ||
+	    !found ||
+	    cert_copy_text(&e, id, size) != MQ_COMPENSATION_RET_OK) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+	return MQ_COMPENSATION_RET_OK;
+}
+
+
 mq_compensation_ret_t mq_compensation_cert_find_cfg(struct mq_compensation_cert *self, const struct mq_compensation_cert_kv *kv, char *id, size_t size) {
 	size_t kv_count = 0;
 	while (kv[kv_count].key != NULL) {
@@ -598,6 +611,33 @@ mq_compensation_ret_t mq_compensation_cert_find_cfg(struct mq_compensation_cert 
 }
 
 
+/* Check the target @p tgt exists and has the parent @p parent, NULL for a root target with no parent. */
+static mq_compensation_ret_t cert_check_parent(struct mq_compensation_cert *self, const char *tgt, const char *parent) {
+	CborValue tgts;
+	CborValue e;
+	bool found = false;
+	if (cert_enter_top(self, "tgt", &tgts) != MQ_COMPENSATION_RET_OK ||
+	    cert_find_key(&tgts, tgt, &found) != MQ_COMPENSATION_RET_OK ||
+	    !found ||
+	    !cbor_value_is_map(&tgts) ||
+	    cbor_value_enter_container(&tgts, &e) != CborNoError ||
+	    cert_find_key(&e, "p", &found) != MQ_COMPENSATION_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("target '%s' not found"), tgt);
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	bool parent_ok = (parent == NULL) && !found;
+	if (parent != NULL && found && cert_value_equals(&e, parent, &parent_ok) != MQ_COMPENSATION_RET_OK) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+	if (!parent_ok) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("target '%s' has a different parent"), tgt);
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+	return MQ_COMPENSATION_RET_OK;
+}
+
+
 mq_compensation_ret_t mq_compensation_cert_check_path(struct mq_compensation_cert *self, const char *const *path, const char **tgt) {
 	if (path[0] == NULL) {
 		return MQ_COMPENSATION_RET_FAILED;
@@ -605,29 +645,7 @@ mq_compensation_ret_t mq_compensation_cert_check_path(struct mq_compensation_cer
 
 	/* Re-walk the targets for each element of the path, checking its parent is the preceding one. */
 	for (size_t i = 0; path[i] != NULL; i++) {
-		CborValue tgts;
-		CborValue e;
-		bool found = false;
-		if (cert_enter_top(self, "tgt", &tgts) != MQ_COMPENSATION_RET_OK ||
-		    cert_find_key(&tgts, path[i], &found) != MQ_COMPENSATION_RET_OK ||
-		    !found ||
-		    !cbor_value_is_map(&tgts) ||
-		    cbor_value_enter_container(&tgts, &e) != CborNoError ||
-		    cert_find_key(&e, "p", &found) != MQ_COMPENSATION_RET_OK) {
-			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("target '%s' not found"), path[i]);
-			return MQ_COMPENSATION_RET_FAILED;
-		}
-
-		/* The first target is the root without a parent, the others are children of the preceding one. */
-		bool parent_ok = !found;
-		if (i > 0 && found && cert_value_equals(&e, path[i - 1], &parent_ok) != MQ_COMPENSATION_RET_OK) {
-			return MQ_COMPENSATION_RET_FAILED;
-		}
-		if (i > 0 && !found) {
-			parent_ok = false;
-		}
-		if (!parent_ok) {
-			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("target '%s' has a different parent"), path[i]);
+		if (cert_check_parent(self, path[i], (i > 0) ? path[i - 1] : NULL) != MQ_COMPENSATION_RET_OK) {
 			return MQ_COMPENSATION_RET_FAILED;
 		}
 		*tgt = path[i];
@@ -636,9 +654,40 @@ mq_compensation_ret_t mq_compensation_cert_check_path(struct mq_compensation_cer
 }
 
 
+mq_compensation_ret_t mq_compensation_cert_check_path_str(struct mq_compensation_cert *self, const char *path, char *tgt, size_t size) {
+	char parent[MQ_COMPENSATION_CERT_STR_LEN] = {0};
+	const char *seg = path;
+	while (*seg != '\0') {
+		char cur[MQ_COMPENSATION_CERT_STR_LEN];
+		size_t n = strcspn(seg, "/");
+		if (n == 0 || n >= sizeof(cur)) {
+			return MQ_COMPENSATION_RET_FAILED;
+		}
+		memcpy(cur, seg, n);
+		cur[n] = '\0';
+
+		if (cert_check_parent(self, cur, (seg != path) ? parent : NULL) != MQ_COMPENSATION_RET_OK) {
+			return MQ_COMPENSATION_RET_FAILED;
+		}
+		memcpy(parent, cur, n + 1);
+
+		seg += n;
+		if (*seg == '/') {
+			seg++;
+		}
+	}
+	if (parent[0] == '\0' || strlen(parent) >= size) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+	strcpy(tgt, parent);
+	return MQ_COMPENSATION_RET_OK;
+}
+
+
 mq_compensation_ret_t mq_compensation_cert_find_comp(struct mq_compensation_cert *self, const char *tgt, const char *cfg, struct mq_compensation_channel_conf *comp) {
 	CborValue groups;
 	if (cert_enter_top(self, "res", &groups) != MQ_COMPENSATION_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no results in the certificate"));
 		return MQ_COMPENSATION_RET_FAILED;
 	}
 	while (!cbor_value_at_end(&groups)) {
@@ -659,9 +708,9 @@ mq_compensation_ret_t mq_compensation_cert_find_comp(struct mq_compensation_cert
 				return MQ_COMPENSATION_RET_FAILED;
 			}
 			mq_compensation_ret_t ret = MQ_COMPENSATION_RET_OK;
-			if (!strcmp(key, "tgt")) {
+			if (!strcmp(key, "tgt") && tgt != NULL) {
 				ret = cert_value_equals(&e, tgt, &tgt_match);
-			} else if (!strcmp(key, "cfg")) {
+			} else if (!strcmp(key, "cfg") && tgt != NULL) {
 				ret = cert_value_equals(&e, (cfg != NULL) ? cfg : "", &cfg_match);
 				cfg_match = cfg_match && (cfg != NULL);
 			} else if (!strcmp(key, "comp")) {
@@ -678,7 +727,12 @@ mq_compensation_ret_t mq_compensation_cert_find_comp(struct mq_compensation_cert
 			return MQ_COMPENSATION_RET_FAILED;
 		}
 
-		if (tgt_match && cfg_match && has_comp) {
+		/* With no target, only the first result group is used. */
+		if (tgt == NULL && !has_comp) {
+			u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no compensation model in the first result group"));
+			return MQ_COMPENSATION_RET_FAILED;
+		}
+		if ((tgt == NULL || (tgt_match && cfg_match)) && has_comp) {
 			comp->reciprocal = group_comp.reciprocal;
 			comp->x_ref = group_comp.x_ref;
 			memcpy(comp->c, group_comp.c, sizeof(comp->c));

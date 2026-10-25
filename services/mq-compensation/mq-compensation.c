@@ -387,6 +387,83 @@ mq_compensation_ret_t mq_compensation_load_certificate(MqCompensation *self, con
 }
 
 
+/* Get the channel @p channel in the order the channels were added. They are prepended to the list, the list is in
+ * the reverse order. */
+static struct mq_compensation_channel *mq_compensation_find_channel(MqCompensation *self, uint32_t channel) {
+	uint32_t count = 0;
+	for (struct mq_compensation_channel *ch = self->first_channel; ch != NULL; ch = ch->next) {
+		count++;
+	}
+
+	struct mq_compensation_channel *ch = NULL;
+	if (channel < count) {
+		ch = self->first_channel;
+		for (uint32_t i = count - 1; i > channel; i--) {
+			ch = ch->next;
+		}
+	}
+	if (ch == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no channel %u"), (unsigned int)channel);
+	}
+	return ch;
+}
+
+
+mq_compensation_ret_t mq_compensation_load_certificate_channel(MqCompensation *self, Flash *flash, const char *path, uint32_t channel) {
+	if (u_assert(self != NULL) ||
+	    u_assert(flash != NULL)) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	struct mq_compensation_channel *ch = mq_compensation_find_channel(self, channel);
+	if (ch == NULL) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	struct mq_compensation_cert cert;
+	if (mq_compensation_cert_init(&cert, flash) != MQ_COMPENSATION_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no calibration certificate found"));
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	/* Informational only, the administrative data and the targets are optional. */
+	mq_compensation_cert_log_info(&cert);
+
+	char tgt[MQ_COMPENSATION_CERT_STR_LEN];
+	if ((path != NULL && mq_compensation_cert_check_path_str(&cert, path, tgt, sizeof(tgt)) != MQ_COMPENSATION_RET_OK) ||
+	    mq_compensation_cert_find_comp(&cert, (path != NULL) ? tgt : NULL, NULL, &ch->conf) != MQ_COMPENSATION_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot load channel '%s' from the certificate"), ch->conf.name);
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("channel '%s' loaded from '%s'"), ch->conf.name, (path != NULL) ? path : "the first result group");
+	return MQ_COMPENSATION_RET_OK;
+}
+
+
+mq_compensation_ret_t mq_compensation_reset_channel(MqCompensation *self, uint32_t channel) {
+	if (u_assert(self != NULL)) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	struct mq_compensation_channel *ch = mq_compensation_find_channel(self, channel);
+	if (ch == NULL) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	ch->conf.reciprocal = false;
+	ch->conf.x_ref = 0.0f;
+	memset(ch->conf.c, 0, sizeof(ch->conf.c));
+	ch->conf.c[1] = 1.0f;
+	ch->conf.exp = 1.0f;
+	ch->conf.t_ref = MQ_COMPENSATION_DEFAULT_TEMP_C;
+	ch->conf.tc1 = 0.0f;
+	ch->conf.tc2 = 0.0f;
+
+	return MQ_COMPENSATION_RET_OK;
+}
+
+
 mq_compensation_ret_t mq_compensation_get_conf(MqCompensation *self, Conf **conf) {
 	if (u_assert(self != NULL) ||
 	    u_assert(conf != NULL)) {
