@@ -828,6 +828,7 @@ static void port_setup_display(void) {
 	lcd_st7586_init(&lcd, &spi2_lcd.dev, lcd_reset, lcd_cd);
 	lcd_st7586_set_contrast(&lcd, 0.30f);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FB, (Interface *)&lcd.fb, "lcd");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)&lcd.conf_tree.lcd.conf, "device lcd lcd0");
 }
 
 

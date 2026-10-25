@@ -240,6 +240,7 @@ menu "High level device drivers"
 
 	config SERVICE_LCD_ST7586
 		bool "ST7586 LCD driver"
+		select LIB_PLUMCORE_CONFIGLIB
 		default n
 
 	source "services/lcd-ssd1306/Kconfig"

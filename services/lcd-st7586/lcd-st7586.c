@@ -14,6 +14,8 @@
 #include <main.h>
 #include <interfaces/gpio.h>
 #include <interfaces/spi.h>
+#include <interfaces/conf.h>
+#include <configlib.h>
 
 #include "lcd-st7586.h"
 
@@ -167,6 +169,7 @@ static fb_ret_t lcd_st7586_fb_flush(Fb *self) {
 	uint8_t *buf = lcd->dmem;
 
 	uint8_t data[128] = {0};
+	xSemaphoreTake(lcd->lock, portMAX_DELAY);
 	lcd_send_command(lcd, 0x2c);
 	for(uint32_t i = 0; i < 160; i++) {
 		for (size_t j = 0; j < 60 ; j++) {
@@ -177,6 +180,7 @@ static fb_ret_t lcd_st7586_fb_flush(Fb *self) {
 		}
 		lcd_send_data_buf(lcd, data, 128);
 	}
+	xSemaphoreGive(lcd->lock);
 
 	return FB_RET_OK;
 }
@@ -205,12 +209,66 @@ static const struct fb_vmt lcd_st7586_fb_vmt = {
 };
 
 
+/***************************************************************************************************
+ * Configuration tree
+ ***************************************************************************************************/
+
+/* The "contrast" leaf is a configlib node with its read and write handlers overridden: the node's var
+ * points to the driver instance, a write programs the controller through lcd_st7586_set_contrast() and
+ * a read returns the stored contrast. The vmt is copied from the one configlib assigned to the node so
+ * walk/stat/get_* keep working. */
+static struct conf_vmt lcd_st7586_contrast_vmt;
+
+
+static conf_ret_t lcd_st7586_contrast_write(Conf *self, const union conf_val val) {
+	ConfiglibValue *value = self->parent;
+
+	if (lcd_st7586_set_contrast(value->var, val.f) != LCD_ST7586_RET_OK) {
+		return CONF_RET_FAILED;
+	}
+
+	return CONF_RET_OK;
+}
+
+
+static conf_ret_t lcd_st7586_contrast_read(Conf *self, union conf_val *val) {
+	ConfiglibValue *value = self->parent;
+
+	val->f = ((LcdSt7586 *)value->var)->contrast;
+
+	return CONF_RET_OK;
+}
+
+
+static void lcd_st7586_conf_init(LcdSt7586 *self) {
+	configlib_init_map(&self->conf_tree.lcd, "lcd", NULL, CONF_SUBTREE);
+
+	configlib_init_map_append(&self->conf_tree.contrast, "contrast", self, CONF_F, &self->conf_tree.lcd, CONF_DIR_CHILD);
+	self->conf_tree.contrast.flags = CONF_READ | CONF_WRITE;
+	configlib_set_constraint(&self->conf_tree.contrast, (union conf_constraint) {
+		.numeric = {.min.f = 0.0f, .max.f = 1.0f},
+	});
+	configlib_set_description(&self->conf_tree.contrast, "LCD contrast",
+		"Display contrast in the 0.0 - 1.0 range, mapped onto the Vop (electronic volume) voltage.");
+
+	lcd_st7586_contrast_vmt = *self->conf_tree.contrast.conf.vmt;
+	lcd_st7586_contrast_vmt.read = lcd_st7586_contrast_read;
+	lcd_st7586_contrast_vmt.write = lcd_st7586_contrast_write;
+	self->conf_tree.contrast.conf.vmt = &lcd_st7586_contrast_vmt;
+}
+
+
 lcd_st7586_ret_t lcd_st7586_init(LcdSt7586 *self, SpiDev *spi, Gpio *reset, Gpio *cd) {
 	memset(self, 0, sizeof(LcdSt7586));
 
 	self->spi = spi;
 	self->reset = reset;
 	self->cd = cd;
+
+	self->lock = xSemaphoreCreateMutex();
+	if (self->lock == NULL) {
+		return LCD_ST7586_RET_FAILED;
+	}
 
 	reset->vmt->set_mode(reset, MODE_OUTPUT);
 	cd->vmt->set_mode(cd, MODE_OUTPUT);
@@ -228,13 +286,17 @@ lcd_st7586_ret_t lcd_st7586_init(LcdSt7586 *self, SpiDev *spi, Gpio *reset, Gpio
 	self->fb.parent = self;
 	self->fb.vmt = &lcd_st7586_fb_vmt;
 
+	/* The controller init sequence programs Vop = 0x140, keep the contrast value in sync with it. */
+	self->contrast = (float)0x140 / 1023.0f;
+	lcd_st7586_conf_init(self);
+
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized"));
 	return LCD_ST7586_RET_OK;
 }
 
 
 lcd_st7586_ret_t lcd_st7586_free(LcdSt7586 *self) {
-	(void)self;
+	vSemaphoreDelete(self->lock);
 	return LCD_ST7586_RET_OK;
 }
 
@@ -248,13 +310,16 @@ lcd_st7586_ret_t lcd_st7586_set_contrast(LcdSt7586 *self, float contrast) {
 	if (contrast > 1.0f) {
 		contrast = 1.0f;
 	}
+	self->contrast = contrast;
 	uint16_t vop = (uint16_t)(contrast * 1023.0f);
 
 	/* The contrast is controlled by the Vop voltage, programmed with the 0xC0 "Set Vop" command
 	 * followed by the 10-bit value: Vop[7:0] in the first data byte and Vop[9:8] in the second. */
+	xSemaphoreTake(self->lock, portMAX_DELAY);
 	lcd_send_command(self, 0xC0);
 	lcd_send_data(self, vop & 0xff);
 	lcd_send_data(self, (vop >> 8) & 0x03);
+	xSemaphoreGive(self->lock);
 
 	return LCD_ST7586_RET_OK;
 }
@@ -265,6 +330,7 @@ lcd_st7586_ret_t lcd_st7586_set_sleep(LcdSt7586 *self, bool sleep) {
 	 * running. Sleep In (0x10) additionally stops the DC-DC converter, oscillator and panel drive for
 	 * minimum standby current while preserving the DDRAM contents. Waking reverses the order: Sleep Out
 	 * (0x11), a short settle for the booster, then Display ON (0x29). */
+	xSemaphoreTake(self->lock, portMAX_DELAY);
 	if (sleep) {
 		lcd_send_command(self, 0x28);
 		lcd_send_command(self, 0x10);
@@ -273,6 +339,7 @@ lcd_st7586_ret_t lcd_st7586_set_sleep(LcdSt7586 *self, bool sleep) {
 		vTaskDelay(10);
 		lcd_send_command(self, 0x29);
 	}
+	xSemaphoreGive(self->lock);
 
 	return LCD_ST7586_RET_OK;
 }
