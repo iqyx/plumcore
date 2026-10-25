@@ -674,6 +674,14 @@ menu "Communication protocols"
 			bool "NBUS flash access interface"
 			default n
 
+		config SERVICE_NBUS_FLASH_SESSIONS
+			int "Number of concurrently opened NBUS flash sessions"
+			depends on SERVICE_NBUS_FLASH
+			default 4
+			help
+				Each client opening a flash partition holds a session. When all sessions are taken,
+				opening a new one closes the least recently used session.
+
 		config SERVICE_NBUS_FLASH_PROXY
 			bool "NBUS flash access proxy (forwards to a remote nbus-flash over nbus2)"
 			default n

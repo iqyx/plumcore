@@ -128,7 +128,7 @@ class FlashClient:
 			raise ValueError(r.get('err', 'unknown error'))
 
 	def _close(self):
-		r = self._n.call({'c': 'close'})
+		r = self._n.call({'c': 'close', 'sid': self._sid})
 
 	def _read(self, addr, data_len):
 		r = self._n.call({'c': 'read', 'sid': self._sid, 'addr': addr, 'len': data_len})

@@ -64,6 +64,23 @@ static bool cbor_map_get_uint(CborValue *map, const char *key, uint32_t *i) {
 }
 
 
+/* Find the opened session given by the "sid" of the request and mark it as used. Returns NULL if there is none. */
+static struct nbus_flash_session *session_find(NbusFlash *self, CborValue *imap) {
+	uint32_t sid;
+	if (!cbor_map_get_uint(imap, "sid", &sid)) {
+		return NULL;
+	}
+	for (size_t i = 0; i < NBUS_FLASH_SESSIONS; i++) {
+		struct nbus_flash_session *session = &self->sessions[i];
+		if (session->flash != NULL && session->sid == sid) {
+			session->used = ++self->use_seq;
+			return session;
+		}
+	}
+	return NULL;
+}
+
+
 /* Beware this implementation accepts any flash partition name and is a serious
  * security hole. */
 static nbus_flash_ret_t process_cc_info(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
@@ -134,57 +151,71 @@ static nbus_flash_ret_t process_cc_list(NbusFlash *self, CborValue *imap, CborEn
 
 
 static nbus_flash_ret_t process_cc_open(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
-/*
-	if (self->flash != NULL) {
-		cbor_encode_text_stringz(omap, "err");
-		cbor_encode_text_stringz(omap, "session already opened, only one supported");
-		return NBUS_FLASH_RET_FAILED;
-	}
-*/
 	char dev_name[16];
 	cbor_map_get_str(imap, "n", dev_name, sizeof(dev_name));
 
 	Flash *flash = NULL;
-	if (iservicelocator_query_name_type(locator, dev_name, ISERVICELOCATOR_TYPE_FLASH, (Interface **)&flash) == ISERVICELOCATOR_RET_OK) {
-		self->flash = flash;
-		self->sid = (uint32_t)flash;
-
-		cbor_encode_text_stringz(omap, "sid");
-		cbor_encode_uint(omap, self->sid);
-	} else {
+	if (iservicelocator_query_name_type(locator, dev_name, ISERVICELOCATOR_TYPE_FLASH, (Interface **)&flash) != ISERVICELOCATOR_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "device not found");
+		return NBUS_FLASH_RET_OK;
 	}
+
+	/* Take a free session or reuse the least recently used one if all are taken (eg. by a client which
+	 * disappeared without closing its session). */
+	struct nbus_flash_session *session = &self->sessions[0];
+	for (size_t i = 0; i < NBUS_FLASH_SESSIONS; i++) {
+		if (self->sessions[i].flash == NULL) {
+			session = &self->sessions[i];
+			break;
+		}
+		if (self->sessions[i].used < session->used) {
+			session = &self->sessions[i];
+		}
+	}
+
+	/* Session IDs are never reused (until wrapping around) and 0 is never assigned. */
+	self->last_sid++;
+	if (self->last_sid == 0) {
+		self->last_sid = 1;
+	}
+	session->sid = self->last_sid;
+	session->flash = flash;
+	session->used = ++self->use_seq;
+
+	cbor_encode_text_stringz(omap, "sid");
+	cbor_encode_uint(omap, session->sid);
 
 	return NBUS_FLASH_RET_OK;
 }
 
 
 static nbus_flash_ret_t process_cc_close(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
-	(void)imap;
-	if (self->flash == NULL) {
+	struct nbus_flash_session *session = session_find(self, imap);
+	if (session == NULL) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "no session opened");
 		return NBUS_FLASH_RET_FAILED;
 	}
 
 	cbor_encode_text_stringz(omap, "sid");
-	cbor_encode_uint(omap, self->sid);
+	cbor_encode_uint(omap, session->sid);
 
-	self->flash = NULL;
-	self->sid = 0;
+	session->flash = NULL;
+	session->sid = 0;
 
 	return NBUS_FLASH_RET_OK;
 }
 
 
 static nbus_flash_ret_t process_cc_erase(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
-	uint32_t sid;
-	if (!cbor_map_get_uint(imap, "sid", &sid) || self->flash == NULL || sid != self->sid) {
+	struct nbus_flash_session *session = session_find(self, imap);
+	if (session == NULL) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "session error");
 		return NBUS_FLASH_RET_FAILED;
 	}
+	Flash *flash = session->flash;
 
 	uint32_t addr;
 	uint32_t len;
@@ -194,7 +225,7 @@ static nbus_flash_ret_t process_cc_erase(NbusFlash *self, CborValue *imap, CborE
 		return NBUS_FLASH_RET_FAILED;
 	}
 
-	if (self->flash->vmt->erase != NULL && self->flash->vmt->erase(self->flash, addr, len) != FLASH_RET_OK) {
+	if (flash->vmt->erase != NULL && flash->vmt->erase(flash, addr, len) != FLASH_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "erasing failed");
 		return NBUS_FLASH_RET_FAILED;
@@ -209,12 +240,13 @@ static nbus_flash_ret_t process_cc_erase(NbusFlash *self, CborValue *imap, CborE
 
 
 static nbus_flash_ret_t process_cc_write(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
-	uint32_t sid;
-	if (!cbor_map_get_uint(imap, "sid", &sid) || self->flash == NULL || sid != self->sid) {
+	struct nbus_flash_session *session = session_find(self, imap);
+	if (session == NULL) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "session error");
 		return NBUS_FLASH_RET_FAILED;
 	}
+	Flash *flash = session->flash;
 
 	uint32_t addr;
 	uint32_t len;
@@ -230,7 +262,7 @@ static nbus_flash_ret_t process_cc_write(NbusFlash *self, CborValue *imap, CborE
 		return NBUS_FLASH_RET_FAILED;
 	}
 
-	if (self->flash->vmt->write != NULL && self->flash->vmt->write(self->flash, addr, buf, len) != FLASH_RET_OK) {
+	if (flash->vmt->write != NULL && flash->vmt->write(flash, addr, buf, len) != FLASH_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "writing failed");
 		return NBUS_FLASH_RET_FAILED;
@@ -244,12 +276,13 @@ static nbus_flash_ret_t process_cc_write(NbusFlash *self, CborValue *imap, CborE
 
 
 static nbus_flash_ret_t process_cc_read(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
-	uint32_t sid;
-	if (!cbor_map_get_uint(imap, "sid", &sid) || self->flash == NULL || sid != self->sid) {
+	struct nbus_flash_session *session = session_find(self, imap);
+	if (session == NULL) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "session error");
 		return NBUS_FLASH_RET_FAILED;
 	}
+	Flash *flash = session->flash;
 
 	uint32_t addr;
 	uint32_t len;
@@ -260,7 +293,7 @@ static nbus_flash_ret_t process_cc_read(NbusFlash *self, CborValue *imap, CborEn
 	}
 
 	uint8_t buf[NBUS_FLASH_BLOCK_LEN];
-	if (self->flash->vmt->read != NULL && self->flash->vmt->read(self->flash, addr, buf, len) != FLASH_RET_OK) {
+	if (flash->vmt->read != NULL && flash->vmt->read(flash, addr, buf, len) != FLASH_RET_OK) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "reading failed");
 		return NBUS_FLASH_RET_FAILED;
@@ -281,14 +314,15 @@ static nbus_flash_ret_t process_cc_read(NbusFlash *self, CborValue *imap, CborEn
  * are erased. A block is considered erased if its first 32 bit word reads as 0xffffffff. "ba" is chosen as the smallest
  * value which lets the bitmap fit in NBUS_FLASH_BLOCK_LEN bytes. */
 static nbus_flash_ret_t process_cc_usage(NbusFlash *self, CborValue *imap, CborEncoder *omap) {
-	uint32_t sid;
-	if (!cbor_map_get_uint(imap, "sid", &sid) || self->flash == NULL || sid != self->sid) {
+	struct nbus_flash_session *session = session_find(self, imap);
+	if (session == NULL) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "session error");
 		return NBUS_FLASH_RET_FAILED;
 	}
+	Flash *flash = session->flash;
 
-	if (self->flash->vmt->get_size == NULL || self->flash->vmt->read == NULL) {
+	if (flash->vmt->get_size == NULL || flash->vmt->read == NULL) {
 		cbor_encode_text_stringz(omap, "err");
 		cbor_encode_text_stringz(omap, "not supported");
 		return NBUS_FLASH_RET_FAILED;
@@ -299,7 +333,7 @@ static nbus_flash_ret_t process_cc_usage(NbusFlash *self, CborValue *imap, CborE
 	size_t erase_size = 0;
 	size_t size = 0;
 	flash_block_ops_t ops;
-	for (uint32_t i = 0; self->flash->vmt->get_size(self->flash, i, &size, &ops) == FLASH_RET_OK; i++) {
+	for (uint32_t i = 0; flash->vmt->get_size(flash, i, &size, &ops) == FLASH_RET_OK; i++) {
 		if (i == 0) {
 			part_size = size;
 		}
@@ -324,7 +358,7 @@ static nbus_flash_ret_t process_cc_usage(NbusFlash *self, CborValue *imap, CborE
 			continue;
 		}
 		uint32_t word = 0;
-		if (self->flash->vmt->read(self->flash, i * erase_size, &word, sizeof(word)) != FLASH_RET_OK) {
+		if (flash->vmt->read(flash, i * erase_size, &word, sizeof(word)) != FLASH_RET_OK) {
 			cbor_encode_text_stringz(omap, "err");
 			cbor_encode_text_stringz(omap, "reading failed");
 			return NBUS_FLASH_RET_FAILED;
@@ -375,6 +409,14 @@ static nbus_flash_ret_t process_main_ep(NbusFlash *self, uint8_t *buf, size_t le
 			cbor_encoder_init(&encoder, self->tx_buf, NBUS_FLASH_TX_BUF_LEN, 0);
 			CborEncoder encoder_map;
 			cbor_encoder_create_map(&encoder, &encoder_map, CborIndefiniteLength);
+
+			/* Echo the request identifier so the client can match this reply to its request and reject a late
+			 * reply of an earlier request. */
+			uint32_t id = 0;
+			if (cbor_map_get_uint(&map, "id", &id)) {
+				cbor_encode_text_stringz(&encoder_map, "id");
+				cbor_encode_uint(&encoder_map, id);
+			}
 
 			nbus_flash_ret_t ret = NBUS_FLASH_RET_FAILED;
 
