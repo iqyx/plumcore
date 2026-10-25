@@ -77,6 +77,9 @@ typedef struct {
 	struct flash_cbor_mib_node *nodes;
 
 	TaskHandle_t task;
+
+	/** Task waiting in flash_cbor_mib_init() for the parsing task to finish. */
+	TaskHandle_t caller;
 } FlashCborMib;
 
 
@@ -85,7 +88,8 @@ typedef struct {
  *
  * Checks whether a MIB is present in the configured flash partition and, when it is, parses the
  * CBOR document record by record (recursing into subtrees) building a configlib-backed
- * configuration tree.
+ * configuration tree. The MIB is parsed in a separate task (with its own stack) and the call blocks until
+ * the parsing finishes, so the tree is complete when it returns. Must be called from a task.
  *
  * @return FLASH_CBOR_MIB_RET_OK on success,
  *         FLASH_CBOR_MIB_RET_NO_MIB if no MIB is present in the partition,

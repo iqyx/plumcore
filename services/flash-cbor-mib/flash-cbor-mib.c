@@ -619,6 +619,8 @@ static void flash_cbor_mib_task(void *p) {
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("MIB loaded (structure version %lu, %lu bytes)"),
 	      (unsigned long)version, (unsigned long)self->cbor_len);
 err:
+	/* Release the caller waiting in flash_cbor_mib_init(). */
+	xTaskNotifyGive(self->caller);
 	vTaskDelete(NULL);
 }
 
@@ -634,10 +636,14 @@ flash_cbor_mib_ret_t flash_cbor_mib_init(FlashCborMib *self, const struct flash_
 	memset(self, 0, sizeof(FlashCborMib));
 	memcpy(&self->config, config, sizeof(struct flash_cbor_mib_conf));
 
+	self->caller = xTaskGetCurrentTaskHandle();
 	xTaskCreate(flash_cbor_mib_task, "flash-cbor-mib", configMINIMAL_STACK_SIZE + 512, (void *)self, 1, &(self->task));
 	if (self->task == NULL) {
 		return FLASH_CBOR_MIB_RET_FAILED;
 	}
+
+	/* Wait until the MIB is parsed so the tree is complete when init returns. */
+	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
 	return FLASH_CBOR_MIB_RET_OK;
 }
