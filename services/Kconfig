@@ -686,6 +686,11 @@ menu "Communication protocols"
 			bool "NBUS flash access proxy (forwards to a remote nbus-flash over nbus2)"
 			default n
 
+		config SERVICE_NBUS_FLASH_CLIENT
+			bool "NBUS flash access client (a Flash interface of a remote nbus-flash partition)"
+			select LIB_TINYCBOR
+			default n
+
 		source "services/proto-conf/Kconfig"
 	endmenu
 endmenu
