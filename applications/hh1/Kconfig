@@ -21,6 +21,7 @@ menu "nwdaq-main-hh1 application configuration"
 			select SERVICE_PROTO_DGSTREAM
 			select SERVICE_NBUS_MQ_CLIENT
 			select SERVICE_NBUS_FLASH_PROXY
+			select SERVICE_NBUS_FLASH_CLIENT
 			select SERVICE_MQ_COMPENSATION
 	endchoice
 

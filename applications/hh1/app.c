@@ -478,6 +478,12 @@ app_ret_t app_init(App *self) {
 	/* Apply the stored configuration once everything is up. */
 	app_load_conf(self);
 
+	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
+		/* Started after the configuration load, the coefficients of a sensor calibration certificate take
+		 * precedence over the stored ones. */
+		app_sensor_calibration_init(self);
+	#endif
+
 	/* Discover the BLE device and build the GATT server on it. Done last, the advertised name is built from
 	 * the hostname, which is known only after the configuration load. */
 	app_ble_init(self);

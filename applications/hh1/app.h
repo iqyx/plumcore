@@ -40,6 +40,11 @@
 	#include <services/nbus-mq-client/nbus-mq-client.h>
 	#include <services/nbus-flash-proxy/nbus-flash-proxy.h>
 	#include <services/mq-compensation/mq-compensation.h>
+	#include <services/mq-compensation/mq-compensation-cert.h>
+	#include <services/nbus-flash-client/nbus-flash-client.h>
+
+	/* Number of TEDS partitions (teds0 to teds3) of the measurement card, each calibrating one force channel. */
+	#define APP_SENSOR_CALIBRATION_CHANNELS 4
 #endif
 
 typedef enum {
@@ -142,6 +147,19 @@ typedef struct {
 
 		/* Compensation converting the measurement card's raw channels 0-3 into force channels 0-3. */
 		MqCompensation force;
+
+		/* Socket connected to the measurement card's nbus-flash service and the client reading the sensor
+		 * calibration certificates from its TEDS partitions (see sensor-calibration.c). */
+		struct nbus_socket *nbus_flash_client_socket;
+		NbusFlashClient ff14_flash;
+		TaskHandle_t sensor_calibration_task;
+
+		/* Identifier of the certificate last loaded from each TEDS partition, empty if none. */
+		char teds_cert_id[APP_SENSOR_CALIBRATION_CHANNELS][MQ_COMPENSATION_CERT_STR_LEN];
+
+		/* Reason the certificate of each TEDS partition was last skipped for, NULL if it was not. Kept to log
+		 * each reason once only. */
+		const char *teds_skip[APP_SENSOR_CALIBRATION_CHANNELS];
 	#endif
 } App;
 
@@ -157,6 +175,21 @@ typedef struct {
  *         APP_RET_OK otherwise.
  */
 app_ret_t app_ble_init(App *self);
+
+#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
+/**
+ * @brief Start loading the sensor calibration certificates from the measurement card.
+ *
+ * Starts a thread periodically checking the TEDS partitions of the measurement card. When the certificate of a
+ * partition changes, its compensation is loaded into the corresponding force channel. Implemented in
+ * sensor-calibration.c.
+ *
+ * @param self Instance of the application
+ * @return APP_RET_FAILED if the backplane is not available or the thread cannot be started,
+ *         APP_RET_OK otherwise.
+ */
+app_ret_t app_sensor_calibration_init(App *self);
+#endif
 
 /**
  * @brief Prepare the new instance, allocate resources and start
