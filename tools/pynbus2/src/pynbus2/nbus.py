@@ -72,11 +72,8 @@ class NbusSocket:
 		"""
 		payload = bytes(data)
 		# Discard replies left over from an earlier request (e.g. a duplicate produced by a retransmit)
-		# so this request is matched against a reply that actually answers it, not a stale one. A
-		# non-zero drop count is a symptom worth surfacing: it means the previous exchange desynced.
-		dropped = self._backend.flush()
-		if dropped:
-			logger.debug('flushed %d stale repl%s before request', dropped, 'y' if dropped == 1 else 'ies')
+		# so this request is matched against a reply that actually answers it, not a stale one.
+		self.flush()
 		for attempt in range(retries):
 			self.send(payload)
 			reply = self.recv(timeout)
@@ -86,6 +83,15 @@ class NbusSocket:
 				return reply
 		logger.debug('no reply after %d attempt(s)', retries)
 		return None
+
+	def flush(self):
+		"""Discard the datagrams received and not read yet, e.g. stale replies before a new request.
+		Returns their number."""
+		dropped = self._backend.flush()
+		# A symptom worth surfacing: the previous exchange desynced.
+		if dropped:
+			logger.debug('flushed %d stale datagram%s', dropped, '' if dropped == 1 else 's')
+		return dropped
 
 	def close(self):
 		"""Close the socket and release its resources."""

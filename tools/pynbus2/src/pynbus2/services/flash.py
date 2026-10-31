@@ -24,7 +24,9 @@ Requests and replies are CBOR maps, the command is carried in ``"c"``::
     usage  sid                        {"ba": <aggregation>, "b": <bitmap>}
     reset                             {"ret": "ok"}
 
-Errors are reported as ``{"err": <message>}`` with the same messages the firmware uses. Addresses are
+A request may carry an ``"id"`` (an unsigned integer), the reply echoes it so the client can tell a late
+reply to an earlier request (see :class:`pynbus2.flash.FlashClient`). Errors are reported as
+``{"err": <message>}`` with the same messages the firmware uses. Addresses are
 relative to the start of the volume. ``sizes`` lists the volume size first, then the erase block sizes
 from the largest to the smallest and the program page size last, each with the operations it supports
 (``OPS_*``). ``usage`` estimates which erase blocks are in use: bit ``n / ba`` of the bitmap (LSB first in
@@ -119,6 +121,10 @@ class FlashService:
 
 		handler = getattr(self, '_cc_' + req['c'], None)
 		resp = handler(req) if handler is not None else {}
+		# Like the firmware, so the client can match the reply to its request.
+		id = self._uint(req, 'id')
+		if id is not None:
+			resp['id'] = id
 		return self._cbor.dumps(resp)
 
 	def close(self):

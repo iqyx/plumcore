@@ -22,8 +22,9 @@ ble = ["simplepyble>=1.2", "cbor2>=5"]
 swd = ["pyocd>=0.36", "cbor2>=5"]
 proxy = ["cbor2>=5"]
 mq = ["cbor2>=5"]
+flash = ["cbor2>=5"]
 ssh = ["cbor2>=5", "paramiko>=3.4"]
-all = ["pynbus2[serial,ble,swd,proxy,ssh,mq]"]
+all = ["pynbus2[serial,ble,swd,proxy,ssh,mq,flash]"]
 
 [project.scripts]
 pynbus2-ssh-proxy = "pynbus2.ssh_proxy:main"

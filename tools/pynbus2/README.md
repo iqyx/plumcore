@@ -28,6 +28,7 @@ optional dependencies, installed with an extra (`pip install pynbus2[<extra>]`, 
 | `ssh`    | `ssh`                               | paramiko, cbor2    |
 | `proxy`  | the `pynbus2-ssh-proxy` service     | cbor2              |
 | `mq`     | the `pynbus2.mq` message queue client | cbor2            |
+| `flash`  | the `pynbus2.flash` flash partition client | cbor2       |
 | `all`    | all of the above                    |                    |
 
 Another project can depend on the built sdist directly, e.g. with pdm:
