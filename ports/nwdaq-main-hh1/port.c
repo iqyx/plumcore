@@ -53,6 +53,8 @@
 #include <services/bq27441/bq27441.h>
 #include <services/lis2hh12/lis2hh12.h>
 #include <services/flash-cbor-mib/flash-cbor-mib.h>
+#include <services/stm32-rtc/rtc.h>
+#include <interfaces/clock.h>
 #include <interfaces/applet.h>
 #include <applets/hello-world/hello-world.h>
 #include <applets/hello-wren/generated/hello-wren.h>
@@ -493,6 +495,32 @@ static void port_setup_system_conf(void) {
 	system_conf_get_conf(&system_conf, &system_conf_root);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)system_conf_root, "system");
 }
+
+
+/**********************************************************************************************************************
+ * Internal RTC
+ **********************************************************************************************************************/
+
+#if !defined(CONFIG_APP_BL)
+
+Stm32Rtc rtc;
+
+static void port_setup_rtc(void) {
+	RCC->APB3ENR |= RCC_APB3ENR_RTCAPBEN;
+
+	/* Prefer the 32.768 kHz LSE crystal, the service falls back to the LSI if it does not start. */
+	if (stm32_rtc_init(&rtc, &(struct stm32_rtc_conf){
+		.lse = true,
+	}) != STM32_RTC_RET_OK) {
+		return;
+	}
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CLOCK, (Interface *)&rtc.clock, "rtc");
+#if defined(CONFIG_SERVICE_STM32_RTC_CONF)
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)&rtc.conf_tree.rtc.conf, "device clock rtc");
+#endif
+}
+
+#endif
 
 
 /**********************************************************************************************************************
@@ -1377,6 +1405,9 @@ int32_t port_init(void) {
 	port_setup_flash();
 	port_setup_iflash();
 	port_setup_system_conf();
+#if !defined(CONFIG_APP_BL)
+	port_setup_rtc();
+#endif
 	port_setup_keypad();
 	port_setup_beeper();
 #if !defined(CONFIG_APP_BL)
