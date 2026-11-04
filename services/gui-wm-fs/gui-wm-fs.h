@@ -21,6 +21,7 @@
 #include <interfaces/painter.h>
 #include <interfaces/beeper.h>
 #include <interfaces/sensor.h>
+#include <interfaces/clock.h>
 #include <interfaces/pm.h>
 #include <interfaces/waveform-source.h>
 #include <interfaces/conf.h>
@@ -64,6 +65,9 @@ struct gui_wm_fs_conf {
 
 	Sensor *bat_soc;
 	Sensor *bat_current;
+
+	/** Wall clock shown in the status bar (optional, may be NULL). */
+	Clock *clock;
 
 	/** Accelerometer read continuously by the accelerometer task (optional, may be NULL). */
 	WaveformSource *accel;

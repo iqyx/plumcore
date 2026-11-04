@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <time.h>
 
 #include <main.h>
 #include "u_log.h"
@@ -26,6 +27,7 @@
 #include <interfaces/painter.h>
 #include <interfaces/servicelocator.h>
 #include <services/fb-compositor/fb-compositor.h>
+#include <services/system-conf/system-conf.h>
 
 #include "status-bar.h"
 
@@ -40,8 +42,105 @@ static const struct painter_raw_image *bat_soc_images[11] = {
 	&battery_80_data, &battery_90_data, &battery_100_data
 };
 
-/* Paint the status bar: a white strip with a clock placeholder, the active window title and a few
- * status icons. */
+/* Find a direct child of a configuration node by name. */
+static conf_ret_t status_bar_conf_child(Conf *parent, const char *name, Conf **child) {
+	Conf *node = NULL;
+	if (parent->vmt->walk(parent, CONF_DIR_CHILD, &node) != CONF_RET_OK) {
+		return CONF_RET_FAILED;
+	}
+	while (node != NULL) {
+		const char *node_name = NULL;
+		enum conf_type type;
+		enum conf_flag flags;
+		if (node->vmt->stat(node, &node_name, &type, &flags) == CONF_RET_OK && node_name != NULL &&
+		    strcmp(node_name, name) == 0) {
+			*child = node;
+			return CONF_RET_OK;
+		}
+		if (node->vmt->walk(node, CONF_DIR_NEXT, &node) != CONF_RET_OK) {
+			return CONF_RET_FAILED;
+		}
+	}
+	return CONF_RET_FAILED;
+}
+
+
+/* Day of the month of the n-th Sunday of the month @p t falls into. */
+static int status_bar_nth_sunday(const struct tm *t, int n) {
+	int first_wday = (t->tm_wday - (t->tm_mday - 1) % 7 + 7) % 7;
+	return 1 + (7 - first_wday) % 7 + 7 * (n - 1);
+}
+
+
+/* Day of the month of the last Sunday of a 31-day month @p t falls into. */
+static int status_bar_last_sunday(const struct tm *t) {
+	return 31 - (t->tm_wday + 31 - t->tm_mday) % 7;
+}
+
+
+/* Whether DST is in effect at the time @p t, March and the transition month @p end_mon are checked against the
+ * transition day and hour, the months in between are always DST. */
+static bool status_bar_dst_active(const struct tm *t, int start_mday, int start_hour, int end_mon, int end_mday,
+                                  int end_hour) {
+	if (t->tm_mon > 2 && t->tm_mon < end_mon) {
+		return true;
+	}
+	if (t->tm_mon == 2) {
+		return t->tm_mday > start_mday || (t->tm_mday == start_mday && t->tm_hour >= start_hour);
+	}
+	if (t->tm_mon == end_mon) {
+		return t->tm_mday < end_mday || (t->tm_mday == end_mday && t->tm_hour < end_hour);
+	}
+	return false;
+}
+
+
+/* Offset of the local time from UTC at @p utc in seconds, determined from the "system timezone" configuration.
+ * UTC is used if the configuration is not available. */
+static int32_t status_bar_utc_offset(StatusBar *self, time_t utc) {
+	Conf *tz = NULL;
+	if (self->system == NULL || status_bar_conf_child(self->system, "timezone", &tz) != CONF_RET_OK) {
+		return 0;
+	}
+
+	Conf *node = NULL;
+	union conf_val offset = {0};
+	union conf_val dst = {0};
+	if (status_bar_conf_child(tz, "offset", &node) == CONF_RET_OK) {
+		node->vmt->read(node, &offset);
+	}
+	if (status_bar_conf_child(tz, "dst", &node) == CONF_RET_OK) {
+		node->vmt->read(node, &dst);
+	}
+
+	int32_t std_offset = offset.i16 * 60;
+	struct tm t = {0};
+	switch (dst.u32) {
+		case SYSTEM_CONF_DST_EU:
+			/* Transitions at 01:00 UTC, evaluated on the UTC time. */
+			gmtime_r(&utc, &t);
+			if (status_bar_dst_active(&t, status_bar_last_sunday(&t), 1, 9, status_bar_last_sunday(&t), 1)) {
+				return std_offset + 3600;
+			}
+			break;
+		case SYSTEM_CONF_DST_US: {
+			/* Transitions at 02:00 local time, evaluated on the standard time. DST ends at 02:00 DST, which
+			 * is 01:00 standard time. */
+			time_t std = utc + std_offset;
+			gmtime_r(&std, &t);
+			if (status_bar_dst_active(&t, status_bar_nth_sunday(&t, 2), 2, 10, status_bar_nth_sunday(&t, 1), 1)) {
+				return std_offset + 3600;
+			}
+			break;
+		}
+		default:
+			break;
+	}
+	return std_offset;
+}
+
+
+/* Paint the status bar: a white strip with the current time, the active window title and a few status icons. */
 static void status_bar_render(StatusBar *self) {
 	Painter *painter = &self->painter.painter;
 
@@ -61,7 +160,16 @@ static void status_bar_render(StatusBar *self) {
 
 	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, NULL);
 	painter->vmt->set_pen(painter, 0xffffffff, 1);
-	painter->vmt->text(painter, 2, 5, "12:34");
+	/* The clock runs in UTC, it is converted to local time for display only. */
+	char time_str[6] = "--:--";
+	struct timespec now = {0};
+	if (self->conf.clock != NULL && self->conf.clock->vmt->get(self->conf.clock, &now) == CLOCK_RET_OK) {
+		time_t local = now.tv_sec + status_bar_utc_offset(self, now.tv_sec);
+		struct tm tm = {0};
+		gmtime_r(&local, &tm);
+		strftime(time_str, sizeof(time_str), "%H:%M", &tm);
+	}
+	painter->vmt->text(painter, 2, 5, time_str);
 
 	struct window_stat stat = {.title = "Unknown"};
 	if (self->active_window && self->active_window->vmt->stat && self->active_window->vmt->stat(self->active_window, &stat) == WINDOW_RET_OK) {
@@ -154,6 +262,13 @@ status_bar_ret_t status_bar_init(StatusBar *self, const struct status_bar_conf *
 	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_BLE, 0, (Interface **)&self->ble) !=
 	    ISERVICELOCATOR_RET_OK) {
 		self->ble = NULL;
+	}
+
+	/* Discover the system configuration holding the timezone. Without it the time is shown in UTC. */
+	self->system = NULL;
+	if (iservicelocator_query_name_type(locator, "system", ISERVICELOCATOR_TYPE_CONF, (Interface **)&self->system) !=
+	    ISERVICELOCATOR_RET_OK) {
+		self->system = NULL;
 	}
 
 	if (self->conf.compositor->factory.vmt->create(&self->conf.compositor->factory, &self->conf.geometry,

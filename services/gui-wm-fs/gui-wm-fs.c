@@ -311,6 +311,7 @@ gui_wm_fs_ret_t gui_wm_fs_init(GuiWmFs *self, const struct gui_wm_fs_conf *conf)
 		},
 		.bat_soc = self->conf.bat_soc,
 		.bat_current = self->conf.bat_current,
+		.clock = self->conf.clock,
 	}) != STATUS_BAR_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the status bar"));
 		goto err;

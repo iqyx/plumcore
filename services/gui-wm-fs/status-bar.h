@@ -16,6 +16,8 @@
 #include <interfaces/window.h>
 #include <interfaces/sensor.h>
 #include <interfaces/ble.h>
+#include <interfaces/clock.h>
+#include <interfaces/conf.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 
@@ -38,6 +40,9 @@ struct status_bar_conf {
 
 	Sensor *bat_soc;
 	Sensor *bat_current;
+
+	/** UTC wall clock shown in the top left corner as local time, "--:--" is shown if NULL or it cannot be read. */
+	Clock *clock;
 };
 
 typedef struct {
@@ -51,6 +56,10 @@ typedef struct {
 	/* BLE device discovered through the service locator at init, or NULL if none is advertised. Polled on
 	 * each repaint through its get_status to decide whether the Bluetooth icon is shown. */
 	Ble *ble;
+
+	/* "system" configuration tree discovered through the service locator at init, or NULL if none is advertised.
+	 * Its "timezone" subtree is walked on each repaint to convert the UTC clock to local time. */
+	Conf *system;
 
 	/* Whether the Bluetooth icon was drawn on the previous repaint. Toggled each repaint while pairing so
 	 * the icon blinks at the repaint rate. */
