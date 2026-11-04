@@ -205,6 +205,7 @@ static app_ret_t app_setup_ui(App *self) {
 		.pm = self->pm,
 		.bat_soc = self->bat_soc,
 		.bat_current = self->bat_current,
+		.clock = self->rtc,
 		.accel = self->accel,
 		.off_state = PM_STATE_D3,
 		.on_state = PM_STATE_D0,
@@ -418,6 +419,12 @@ app_ret_t app_init(App *self) {
 	iservicelocator_query_name_type(locator, "bat_soc", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_soc);
 	iservicelocator_query_name_type(locator, "bat_soh", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_soh);
 	iservicelocator_query_name_type(locator, "bat_remaining", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_remaining);
+
+	/* Discover the RTC wall clock advertised by the port. */
+	self->rtc = NULL;
+	if (iservicelocator_query_name_type(locator, "rtc", ISERVICELOCATOR_TYPE_CLOCK, (Interface **)&self->rtc) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("RTC not found"));
+	}
 
 	/* Discover the accelerometer advertised by the port. */
 	self->accel = NULL;

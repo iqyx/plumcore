@@ -16,6 +16,7 @@
 #include <interfaces/window.h>
 #include <interfaces/stream.h>
 #include <interfaces/sensor.h>
+#include <interfaces/clock.h>
 #include <interfaces/waveform-source.h>
 #include <interfaces/painter.h>
 #include <interfaces/event.h>
@@ -73,6 +74,9 @@ typedef struct {
 	Sensor *bat_soc;
 	Sensor *bat_soh;
 	Sensor *bat_remaining;
+
+	/* RTC wall clock advertised by the port, shown in the GUI status bar. */
+	Clock *rtc;
 
 	/* LIS2HH12 accelerometer advertised by the port. */
 	WaveformSource *accel;
