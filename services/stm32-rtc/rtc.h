@@ -1,28 +1,9 @@
-/*
- * STM32 internal RTC clock driver service.
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Copyright (c) 2018, Marek Koza (qyx@krtko.org)
+ * STM32 internal RTC clock driver service
+ *
+ * Copyright (c) 2018-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #pragma once
@@ -31,9 +12,13 @@
 #include <stdbool.h>
 #include <time.h>
 
-#include "module.h"
-#include "interfaces/clock/descriptor.h"
-#include "interfaces/clock.h"
+#include <main.h>
+#include <interfaces/clock.h>
+
+#if defined(CONFIG_SERVICE_STM32_RTC_CONF)
+	#include <interfaces/conf.h>
+	#include <configlib.h>
+#endif
 
 
 typedef enum {
@@ -42,20 +27,48 @@ typedef enum {
 	STM32_RTC_RET_NULL,
 } stm32_rtc_ret_t;
 
+/* Configuration passed to stm32_rtc_init(). Not typedef'd per project policy. */
+struct stm32_rtc_conf {
+	/** Try to clock the RTC from the 32.768 kHz LSE crystal. The less accurate LSI is used if the LSE is not
+	 * requested or it fails to start. Ignored if the RTC clock source was already selected (it can be changed
+	 * only by a backup domain reset). */
+	bool lse;
+};
 
 typedef struct {
-	Module module;
-	bool initialized;
-	IClock iface;
-	bool lse_available;
+	struct stm32_rtc_conf conf;
+
+	/* Wall-clock interface (get/set/shift). */
 	Clock clock;
+
+#if defined(CONFIG_SERVICE_STM32_RTC_CONF)
+	/* Configuration subtree of the RTC with a read/write leaf for each UTC date and time field. */
+	struct {
+		ConfiglibValue rtc;
+		ConfiglibValue year;
+		ConfiglibValue month;
+		ConfiglibValue day;
+		ConfiglibValue hour;
+		ConfiglibValue minute;
+		ConfiglibValue second;
+	} conf_tree;
+
+	/* Backing fields of the date and time leaves, refreshed from the RTC on each access. */
+	struct {
+		uint16_t year;
+		uint8_t month;
+		uint8_t day;
+		uint8_t hour;
+		uint8_t minute;
+		uint8_t second;
+	} date;
+#endif
 } Stm32Rtc;
 
 
-stm32_rtc_ret_t stm32_rtc_init(Stm32Rtc *self);
+stm32_rtc_ret_t stm32_rtc_init(Stm32Rtc *self, const struct stm32_rtc_conf *conf);
 stm32_rtc_ret_t stm32_rtc_free(Stm32Rtc *self);
 
 clock_ret_t stm32_rtc_get(Stm32Rtc *self, struct timespec *time);
 clock_ret_t stm32_rtc_set(Stm32Rtc *self, const struct timespec *time);
 clock_ret_t stm32_rtc_shift(Stm32Rtc *self, int32_t time_ns);
-

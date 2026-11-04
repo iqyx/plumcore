@@ -9,6 +9,12 @@ menu "Low-level platform drivers"
 			bool "STM32 RTC clock support"
 			default y
 
+		config SERVICE_STM32_RTC_CONF
+			depends on SERVICE_STM32_RTC
+			bool "Provide a RTC configuration subtree"
+			select LIB_PLUMCORE_CONFIGLIB
+			default y
+
 		config SERVICE_STM32_ADC
 			bool "STM32 ADC support"
 			default y
