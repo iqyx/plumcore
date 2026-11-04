@@ -38,6 +38,9 @@ static struct conf_vmt system_conf_mem_used_vmt;
 #endif
 static struct conf_vmt system_conf_reset_vmt;
 
+/* Names of the enum system_conf_dst values, in the enum order. */
+static const char * const system_conf_dst_names[] = {"none", "eu", "us"};
+
 
 /* Turn an already-appended configlib node into a computed node: start from the vmt configlib assigned
  * to it (so walk/stat/get_* keep working) and override its read and write handlers. Pass NULL for a
@@ -180,6 +183,31 @@ system_conf_ret_t system_conf_init(SystemConf *self) {
 	self->mem_used_conf.flags = CONF_READ | CONF_STATUS;
 	system_conf_make_computed(&self->mem_used_conf, &system_conf_mem_used_vmt, system_conf_mem_used_read, NULL);
 #endif
+
+	/* "timezone" subtree, UTC without daylight saving time until configured. */
+	configlib_init_map_append(&self->timezone_conf, "timezone", NULL, CONF_SUBTREE, &self->root_conf, CONF_DIR_CHILD);
+	configlib_init_map_append(&self->tz_offset_conf, "offset", &self->tz_offset, CONF_S16, &self->timezone_conf,
+		CONF_DIR_CHILD);
+	self->tz_offset_conf.flags = CONF_READ | CONF_WRITE;
+	configlib_set_default(&self->tz_offset_conf, (union conf_val){.i16 = 0});
+	configlib_set_constraint(&self->tz_offset_conf, (union conf_constraint) {
+		.numeric = {.min.i16 = -720, .max.i16 = 840},
+	});
+	configlib_set_description(&self->tz_offset_conf, "Timezone offset",
+		"Standard (winter) time offset from UTC in minutes, positive east of Greenwich (eg. 60 for CET).");
+	configlib_init_map_append(&self->tz_dst_conf, "dst", &self->tz_dst, CONF_ENUM, &self->timezone_conf,
+		CONF_DIR_CHILD);
+	self->tz_dst_conf.flags = CONF_READ | CONF_WRITE;
+	configlib_set_default(&self->tz_dst_conf, (union conf_val){.u32 = SYSTEM_CONF_DST_NONE});
+	configlib_set_constraint(&self->tz_dst_conf, (union conf_constraint) {
+		.enumeration = {
+			.values = system_conf_dst_names,
+			.count = sizeof(system_conf_dst_names) / sizeof(system_conf_dst_names[0]),
+		},
+	});
+	configlib_set_description(&self->tz_dst_conf, "Daylight saving time rule",
+		"none - no DST, eu - last Sunday of March to last Sunday of October at 01:00 UTC, us - second Sunday of "
+		"March to first Sunday of November at 02:00 local time.");
 
 	/* "reset" trigger leaf under the root. Reads false; writing true resets the device. */
 	configlib_init_map_append(&self->reset_conf, "reset", NULL, CONF_B, &self->root_conf, CONF_DIR_CHILD);

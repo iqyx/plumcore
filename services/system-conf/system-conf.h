@@ -25,6 +25,16 @@ typedef enum {
 	SYSTEM_CONF_RET_FAILED,
 } system_conf_ret_t;
 
+/* Daylight saving time rules selectable in the "timezone dst" leaf, the values are the enum indices. */
+enum system_conf_dst {
+	/* No daylight saving time. */
+	SYSTEM_CONF_DST_NONE = 0,
+	/* EU: +1 h from the last Sunday of March 01:00 UTC to the last Sunday of October 01:00 UTC. */
+	SYSTEM_CONF_DST_EU,
+	/* US: +1 h from the second Sunday of March 02:00 to the first Sunday of November 02:00 local time. */
+	SYSTEM_CONF_DST_US,
+};
+
 
 typedef struct system_conf {
 	/* Root of the configuration tree, advertised as "system". */
@@ -63,6 +73,14 @@ typedef struct system_conf {
 	uint32_t mem_static;
 	uint32_t mem_heap;
 	uint32_t mem_used;
+
+	/* "timezone" subtree used to display the UTC system time as local time. The time itself is always kept in
+	 * UTC. "offset" is the standard time offset in minutes east of UTC, "dst" an enum system_conf_dst rule. */
+	ConfiglibValue timezone_conf;
+	ConfiglibValue tz_offset_conf;
+	ConfiglibValue tz_dst_conf;
+	int16_t tz_offset;
+	uint32_t tz_dst;
 
 	/* "reset" trigger leaf. Reads always false; writing true resets the device. */
 	ConfiglibValue reset_conf;
