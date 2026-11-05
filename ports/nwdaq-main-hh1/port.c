@@ -1162,7 +1162,7 @@ static void port_setup_keypad(void) {
 		.source = &keypad.event,
 		.layout = keypad_layout_map,
 		.long_press_ms = 1000,
-		.very_long_press_ms = 5000,
+		.very_long_press_ms = 3000,
 	};
 	keypad_layout_init(&keypad_layout, &keypad_layout_conf);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_EVENT, (Interface *)&keypad_layout.event, "keypad");
