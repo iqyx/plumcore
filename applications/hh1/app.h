@@ -75,6 +75,11 @@ typedef struct {
 	Sensor *bat_soh;
 	Sensor *bat_remaining;
 
+	/* Voltages of the two charger power sources advertised by the BQ25798 driver. */
+	Sensor *charger_vac1;
+	Sensor *charger_vac2;
+	Sensor *charger_ibus;
+
 	/* RTC wall clock advertised by the port, shown in the GUI status bar. */
 	Clock *rtc;
 
