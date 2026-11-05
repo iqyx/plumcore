@@ -43,6 +43,10 @@ typedef struct fb_painter {
 	 * style applied on top of it. */
 	painter_font_t font;
 	painter_font_style_t font_style;
+
+	/* Current point of path drawing, set by move_to and advanced by line_to. */
+	int16_t pos_x;
+	int16_t pos_y;
 } FbPainter;
 
 

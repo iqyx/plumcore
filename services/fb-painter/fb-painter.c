@@ -571,6 +571,35 @@ static painter_ret_t painter_line(Painter *self, int16_t x1, int16_t y1, int16_t
 }
 
 
+/* Reposition the current point of path drawing without drawing anything. */
+static painter_ret_t painter_move_to(Painter *self, int16_t x, int16_t y) {
+	FbPainter *p = self->parent;
+
+	if (!p->active) {
+		return PAINTER_RET_NOTARGET;
+	}
+	p->pos_x = x;
+	p->pos_y = y;
+
+	return PAINTER_RET_OK;
+}
+
+
+/* Stroke a segment from the current point to (x, y) and leave the current point there. */
+static painter_ret_t painter_line_to(Painter *self, int16_t x, int16_t y) {
+	FbPainter *p = self->parent;
+
+	painter_ret_t ret = painter_line(self, p->pos_x, p->pos_y, x, y);
+	if (ret != PAINTER_RET_OK) {
+		return ret;
+	}
+	p->pos_x = x;
+	p->pos_y = y;
+
+	return PAINTER_RET_OK;
+}
+
+
 static painter_ret_t painter_image(Painter *self, int16_t x, int16_t y, const struct painter_raw_image *image,
                                    enum painter_mode mode) {
 	FbPainter *p = self->parent;
@@ -638,6 +667,8 @@ static const struct painter_vmt fb_painter_vmt = {
 	.text = painter_text,
 	.text_size = painter_text_size,
 	.image = painter_image,
+	.move_to = painter_move_to,
+	.line_to = painter_line_to,
 };
 
 
