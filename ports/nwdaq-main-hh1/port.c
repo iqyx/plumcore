@@ -1038,6 +1038,12 @@ static void port_setup_fuel_gauge(void) {
 		return;
 	}
 
+	/* The gauge defaults do not match the battery. The charger terminates at 4100 mV, the 4000 mV Taper Voltage
+	 * leaves enough margin to detect the termination. */
+	if (bq27441_set_battery(&fuel_gauge, CONFIG_PORT_NWDAQ_MAIN_HH1_BATTERY_CAPACITY_MAH, 100, 4000) != BQ27441_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot configure the fuel gauge"));
+	}
+
 	/* Advertise the fuel gauge measurements as sensors for use in applications. */
 	Sensor *sensor = NULL;
 	bq27441_get_battery_voltage(&fuel_gauge, &sensor);

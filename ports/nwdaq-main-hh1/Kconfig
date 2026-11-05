@@ -27,6 +27,10 @@ config PORT_NWDAQ_MAIN_HH1
 			hex
 			default "0x08000000"
 
+		config PORT_NWDAQ_MAIN_HH1_BATTERY_CAPACITY_MAH
+			int "Battery design capacity (mAh)"
+			default 3350
+
 		config PORT_NWDAQ_MAIN_HH1_MIB_PUBKEY
 			string "Ed25519 public key for MIB verification (base64)"
 			default ""
