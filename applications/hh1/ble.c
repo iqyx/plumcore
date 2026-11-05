@@ -175,12 +175,13 @@ static void app_ble_event_handler(void *ctx, const struct ble_event *event) {
 		case BLE_EVENT_PASSKEY_DISPLAY:
 			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("BLE pairing PIN: %06lu"),
 			      (unsigned long)event->passkey);
-			/* Show the passkey to the user on the pairing dialog and bring it on top. */
+			/* Show the passkey to the user on the pairing dialog. It is moved to the overlay layer, landing above
+			 * the connection notification shown just before. */
 			snprintf(self->ble_passkey, sizeof(self->ble_passkey), "%06lu", (unsigned long)event->passkey);
 			app_ble_pair_redraw(self);
 			if (self->ble_pair_window != NULL) {
+				self->ble_pair_window->vmt->set_z(self->ble_pair_window, FB_COMPOSITOR_Z_OVERLAY);
 				self->ble_pair_window->vmt->show(self->ble_pair_window, true);
-				self->ble_pair_window->vmt->to_front(self->ble_pair_window);
 			}
 			break;
 		case BLE_EVENT_PAIRING_COMPLETE:
