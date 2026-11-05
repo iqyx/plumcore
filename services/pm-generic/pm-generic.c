@@ -251,6 +251,13 @@ static pm_ret_t pm_set_state(Pm *self, enum pm_state state) {
 
 	xSemaphoreTake(pmg->mutex, portMAX_DELAY);
 	pm_ret_t ret = pm_generic_transition(pmg, state);
+	if (ret == PM_RET_OK) {
+		/* Requesting the current state again refreshes it, its release_timeout countdown starts over. */
+		struct pm_generic_state *current = pm_generic_find_state(pmg, pmg->current_state);
+		if (current != NULL) {
+			current->free_time = 0;
+		}
+	}
 	xSemaphoreGive(pmg->mutex);
 	return ret;
 }
