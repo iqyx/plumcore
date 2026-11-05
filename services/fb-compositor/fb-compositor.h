@@ -23,6 +23,10 @@ typedef enum {
 /* Maximum window title length including the terminating NUL. */
 #define FB_COMPOSITOR_WINDOW_TITLE_LEN 32
 
+/* Stacking order of the overlay layer. Windows set to this z (set_z) stay above all other windows: to_front and
+ * newly created windows stack below the overlay layer. */
+#define FB_COMPOSITOR_Z_OVERLAY INT16_MAX
+
 /* Depth of each window's input event queue. */
 #define FB_COMPOSITOR_EVENT_QUEUE_LEN 8
 

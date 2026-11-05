@@ -161,12 +161,13 @@ static void window_list_insert(FbCompositor *self, FbCompositorWindow *win) {
 }
 
 
-static FbCompositorWindow *window_list_tail(FbCompositor *self) {
-	FbCompositorWindow *tail = self->windows;
-	while (tail != NULL && tail->next != NULL) {
-		tail = tail->next;
+/* Stacking order bringing a window in front of all windows except the ones in the overlay layer. */
+static int16_t window_list_front_z(FbCompositor *self) {
+	int16_t z = -1;
+	for (FbCompositorWindow *win = self->windows; win != NULL && win->z < FB_COMPOSITOR_Z_OVERLAY; win = win->next) {
+		z = win->z;
 	}
-	return tail;
+	return (int16_t)(z + 1);
 }
 
 
@@ -497,8 +498,7 @@ static window_ret_t window_mgmt_to_front(Window *self) {
 
 	xSemaphoreTake(c->lock, portMAX_DELAY);
 	window_list_remove(c, win);
-	FbCompositorWindow *tail = window_list_tail(c);
-	win->z = (tail != NULL) ? (int16_t)(tail->z + 1) : 0;
+	win->z = window_list_front_z(c);
 	window_list_insert(c, win);
 	xSemaphoreGive(c->lock);
 
@@ -644,9 +644,8 @@ static window_ret_t window_factory_create(WindowFactory *self, const struct wind
 	win->event.vmt = &window_event_vmt;
 
 	xSemaphoreTake(c->lock, portMAX_DELAY);
-	/* New windows land on top of the stack. */
-	FbCompositorWindow *tail = window_list_tail(c);
-	win->z = (tail != NULL) ? (int16_t)(tail->z + 1) : 0;
+	/* New windows land on top of the stack, below the overlay layer. */
+	win->z = window_list_front_z(c);
 	window_list_insert(c, win);
 	xSemaphoreGive(c->lock);
 
