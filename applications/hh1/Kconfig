@@ -25,4 +25,18 @@ menu "nwdaq-main-hh1 application configuration"
 			select SERVICE_MQ_COMPENSATION
 	endchoice
 
+	config APP_HH1_BAT_LOW_NOTIFY_ENABLE
+		bool "Low battery notification"
+		default n
+
+	config APP_HH1_BAT_LOW_NOTIFY_PERIOD
+		int "Low battery notification period (s)"
+		depends on APP_HH1_BAT_LOW_NOTIFY_ENABLE
+		default 60
+
+	config APP_HH1_BAT_LOW_NOTIFY_VOLTAGE
+		int "Low battery notification voltage threshold (mV)"
+		depends on APP_HH1_BAT_LOW_NOTIFY_ENABLE
+		default 3000
+
 endmenu

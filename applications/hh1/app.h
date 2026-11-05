@@ -133,6 +133,9 @@ typedef struct {
 	QueueHandle_t ble_notify_queue;
 	TaskHandle_t ble_notify_task;
 
+	/* Task periodically showing the low battery notification (see bat-low.c). */
+	TaskHandle_t bat_low_task;
+
 	/* LCD framebuffer advertised by the port, driven through the compositor below. */
 	Fb *lcd;
 
@@ -189,6 +192,21 @@ typedef struct {
  *         APP_RET_OK otherwise.
  */
 app_ret_t app_ble_init(App *self);
+
+#if defined(CONFIG_APP_HH1_BAT_LOW_NOTIFY_ENABLE)
+/**
+ * @brief Start the low battery notification.
+ *
+ * Starts a thread checking the battery every CONFIG_APP_HH1_BAT_LOW_NOTIFY_PERIOD seconds. While the battery voltage
+ * is below CONFIG_APP_HH1_BAT_LOW_NOTIFY_VOLTAGE and it is not charging, a notification is shown. Implemented in
+ * bat-low.c.
+ *
+ * @param self Instance of the application
+ * @return APP_RET_FAILED if the GUI or the battery sensors are not available or the thread cannot be started,
+ *         APP_RET_OK otherwise.
+ */
+app_ret_t app_bat_low_init(App *self);
+#endif
 
 #if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 /**

@@ -503,6 +503,10 @@ app_ret_t app_init(App *self) {
 	 * the hostname, which is known only after the configuration load. */
 	app_ble_init(self);
 
+	#if defined(CONFIG_APP_HH1_BAT_LOW_NOTIFY_ENABLE)
+		app_bat_low_init(self);
+	#endif
+
 	/* The auto-start applet is configurable, launch it only once the stored configuration is applied. */
 	if (self->lcd != NULL) {
 		gui_launcher_autostart(&self->gui.launcher);
