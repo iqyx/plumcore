@@ -985,6 +985,18 @@ static void port_setup_charger(void) {
 	bq25798_get_battery_voltage(&charger, &vbat);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)vbat, "charger_vbat");
 
+	/* Advertise the voltages of both input power sources as sensors. */
+	Sensor *vac = NULL;
+	bq25798_get_input_voltage(&charger, 1, &vac);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)vac, "charger_vac1");
+	bq25798_get_input_voltage(&charger, 2, &vac);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)vac, "charger_vac2");
+
+	/* Advertise the current drawn from the selected input power source as a sensor. */
+	Sensor *ibus = NULL;
+	bq25798_get_input_current(&charger, &ibus);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)ibus, "charger_ibus");
+
 	/* Advertise the battery charging control as a power device. */
 	Power *power = NULL;
 	bq25798_get_power(&charger, &power);
