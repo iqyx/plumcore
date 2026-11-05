@@ -52,6 +52,7 @@
 #include <services/bq25798/bq25798.h>
 #include <services/bq27441/bq27441.h>
 #include <services/lis2hh12/lis2hh12.h>
+#include <services/shtc3/shtc3.h>
 #include <services/flash-cbor-mib/flash-cbor-mib.h>
 #include <services/stm32-rtc/rtc.h>
 #include <interfaces/clock.h>
@@ -1054,6 +1055,23 @@ static void port_setup_accel(void) {
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&accel.temp, "accel_temp");
 }
 
+
+/**********************************************************************************************************************
+ * SHTC3 temperature and humidity sensor on I2C1 (shared with the accelerometer)
+ **********************************************************************************************************************/
+
+Shtc3 thermo;
+
+static void port_setup_thermo(void) {
+	if (shtc3_init(&thermo, &i2c1.bus) != SHTC3_RET_OK) {
+		return;
+	}
+
+	/* Advertise the temperature and relative humidity measurements. */
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&thermo.temp, "temp");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)&thermo.rh, "rh");
+}
+
 #endif
 
 
@@ -1397,6 +1415,7 @@ int32_t port_init(void) {
 	port_setup_vbus_lp();
 	port_setup_fuel_gauge();
 	port_setup_accel();
+	port_setup_thermo();
 #endif
 	/* The power manager owns the system clock and runs in both the application and the bootloader. It must
 	 * come up after the LCD backlight (lp5810) and the clock-derived peripherals its transitions reprogram
