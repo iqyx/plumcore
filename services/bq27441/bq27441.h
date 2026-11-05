@@ -9,6 +9,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 #include <interfaces/i2c-bus.h>
 #include <interfaces/sensor.h>
@@ -21,6 +22,15 @@ typedef enum {
 	BQ27441_RET_OK = 0,
 	BQ27441_RET_FAILED,
 } bq27441_ret_t;
+
+/* A single data memory parameter, see the data memory summary tables in the TRM (SLUUAC9). */
+struct bq27441_dm_param {
+	uint8_t subclass;
+	uint8_t offset;
+	/* Parameter size in bytes, 1 or 2. */
+	uint8_t size;
+	int16_t value;
+};
 
 
 typedef struct {
@@ -39,6 +49,15 @@ typedef struct {
 
 bq27441_ret_t bq27441_init(Bq27441 *self, I2cBus *i2c, uint8_t addr);
 bq27441_ret_t bq27441_free(Bq27441 *self);
+
+/* Write the data memory parameters which differ from the requested values. The gauge enters the CONFIG UPDATE mode
+ * only if a change is needed. The SEALED state is restored afterwards. Data memory is RAM based, call this on every
+ * startup to restore the configuration after a gauge reset. */
+bq27441_ret_t bq27441_dm_update(Bq27441 *self, const struct bq27441_dm_param *params, size_t count);
+
+/* Configure the battery: Design Capacity, Design Energy (derived using a nominal cell voltage), Taper Rate (derived
+ * from the charge termination @p taper_current_ma) and the Taper Voltage charge termination qualifier. */
+bq27441_ret_t bq27441_set_battery(Bq27441 *self, uint16_t capacity_mah, uint16_t taper_current_ma, uint16_t taper_voltage_mv);
 
 /* Return the battery temperature Sensor interface (degrees Celsius) through @p sensor. */
 bq27441_ret_t bq27441_get_battery_temperature(Bq27441 *self, Sensor **sensor);
