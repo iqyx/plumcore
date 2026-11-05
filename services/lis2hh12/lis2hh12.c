@@ -259,13 +259,12 @@ static sensor_ret_t temp_sensor_value_f(Sensor *sensor, float *value) {
 		return SENSOR_RET_FAILED;
 	}
 
-	/* 12 bit, two's complement, 8 LSB/degC with 0 LSB representing 25 degC.
-	 * Sign-extend the 12 bit value held in a 16 bit container. */
+	/* 11 bit, two's complement, left-justified in the 16 bit container, 8 LSB/degC with 0 LSB representing 25 degC.
+	 * Shifting right by 5 and dividing by 8 is the same as dividing the full 16 bit value by 256. */
 	int16_t raw = (int16_t)((buf[1] << 8) | buf[0]);
-	raw = (int16_t)(raw << 4) >> 4;
 
 	if (value != NULL) {
-		*value = 25.0f + (float)raw / 8.0f;
+		*value = 25.0f + (float)raw / 256.0f;
 		return SENSOR_RET_OK;
 	}
 
