@@ -40,6 +40,14 @@ typedef struct {
 	/* Current drawn from the selected input power source exposed through the Sensor interface. */
 	Sensor input_current;
 
+	/* Battery temperature measured by the NTC thermistor on the TS pin, exposed through the Sensor interface.
+	 * Available after bq25798_enable_ts(). */
+	Sensor battery_temperature;
+	struct {
+		float rt1_ohm;
+		float rt2_ohm;
+	} ts;
+
 	/* Battery charging exposed through the Power interface. */
 	Power power;
 } Bq25798;
@@ -56,6 +64,13 @@ bq25798_ret_t bq25798_get_input_voltage(Bq25798 *self, uint8_t input, Sensor **s
 
 /* Return the input current Sensor interface through @p sensor. */
 bq25798_ret_t bq25798_get_input_current(Bq25798 *self, Sensor **sensor);
+
+/* Enable the battery NTC thermistor (103AT-2) on the TS pin, biased by @p rt1_ohm from REGN to TS and @p rt2_ohm
+ * from TS to GND. The TS ADC channel is enabled and the charger follows the TS feedback. */
+bq25798_ret_t bq25798_enable_ts(Bq25798 *self, float rt1_ohm, float rt2_ohm);
+
+/* Return the battery temperature Sensor interface (degrees Celsius) through @p sensor. */
+bq25798_ret_t bq25798_get_battery_temperature(Bq25798 *self, Sensor **sensor);
 
 /* Return the battery charging Power interface through @p power. */
 bq25798_ret_t bq25798_get_power(Bq25798 *self, Power **power);

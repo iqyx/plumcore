@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 #include <main.h>
 
@@ -44,8 +45,15 @@
 #define BQ25798_REG_CHARGER_CONTROL_5       0x14
 #define BQ25798_CHARGER_CONTROL_5_EN_IBAT   (1 << 5)
 
+/* NTC control 1, TS_IGNORE makes the charger disregard the TS pin feedback. */
+#define BQ25798_REG_NTC_CONTROL_1           0x18
+#define BQ25798_NTC_CONTROL_1_TS_IGNORE     (1 << 0)
+
 #define BQ25798_REG_ADC_CONTROL             0x2e
 #define BQ25798_ADC_CONTROL_ADC_EN          (1 << 7)
+
+#define BQ25798_REG_ADC_FUNCTION_DISABLE_0  0x2f
+#define BQ25798_ADC_FUNCTION_DISABLE_0_TS_ADC_DIS (1 << 2)
 
 /* Input current (IBUS) ADC result, 16-bit 2's complement, 1 mA per LSB. Positive while drawing current from
  * the selected input source. */
@@ -62,6 +70,9 @@
 /* Battery remote sensing (VBATP) voltage ADC result, 16 bits, 1 mV per LSB. */
 #define BQ25798_REG_VBAT_ADC                0x3b
 
+/* TS pin voltage ADC result, 16 bits, as a ratio of REGN, 0.0976563 % per LSB. */
+#define BQ25798_REG_TS_ADC                  0x3f
+
 /* Part information: device part number in bits 5:3 and silicon revision in bits 2:0. */
 #define BQ25798_REG_PART_INFORMATION        0x48
 #define BQ25798_PART_INFORMATION_PN_MASK    0x38
@@ -70,6 +81,10 @@
 
 /* Charge current limit field range (9 bits). */
 #define BQ25798_CHARGE_CURRENT_LIMIT_MAX    0x1ff
+
+/* 103AT-2 battery NTC thermistor parameters, as recommended by the datasheet. */
+#define BQ25798_NTC_R25_OHM                 10000.0f
+#define BQ25798_NTC_BETA                    3435.0f
 
 
 static bq25798_ret_t bq25798_write_u8(Bq25798 *self, uint8_t reg, uint8_t val) {
@@ -222,6 +237,47 @@ static const struct sensor_vmt input_current_vmt = {
 static const struct sensor_info input_current_info = {
 	.description = "input current",
 	.unit = "A",
+};
+
+
+/***************************************************************************************************
+ * Sensor interface for the battery temperature (NTC thermistor on the TS pin)
+ ***************************************************************************************************/
+
+static sensor_ret_t battery_temperature_value_f(Sensor *self, float *value) {
+	Bq25798 *bq = (Bq25798 *)self->parent;
+
+	uint16_t raw = 0;
+	if (bq25798_read_u16(bq, BQ25798_REG_TS_ADC, &raw) != BQ25798_RET_OK) {
+		return SENSOR_RET_FAILED;
+	}
+
+	/* The TS pin sits in a REGN - RT1 - TS - (RT2 || NTC) - GND divider. Recover the lower leg resistance from
+	 * the TS/REGN ratio, then remove RT2 to get the NTC resistance. */
+	float ratio = (float)raw * 0.000976563f;
+	if (ratio <= 0.0f || ratio >= 1.0f) {
+		return SENSOR_RET_FAILED;
+	}
+	float r_low = bq->ts.rt1_ohm * ratio / (1.0f - ratio);
+	if (r_low >= bq->ts.rt2_ohm) {
+		return SENSOR_RET_FAILED;
+	}
+	float r_ntc = r_low * bq->ts.rt2_ohm / (bq->ts.rt2_ohm - r_low);
+
+	/* Beta equation of the NTC thermistor, in degrees Celsius. */
+	*value = 1.0f / (1.0f / 298.15f + logf(r_ntc / BQ25798_NTC_R25_OHM) / BQ25798_NTC_BETA) - 273.15f;
+
+	return SENSOR_RET_OK;
+}
+
+
+static const struct sensor_vmt battery_temperature_vmt = {
+	.value_f = battery_temperature_value_f,
+};
+
+static const struct sensor_info battery_temperature_info = {
+	.description = "battery temperature",
+	.unit = "°C",
 };
 
 
@@ -427,6 +483,36 @@ bq25798_ret_t bq25798_get_input_current(Bq25798 *self, Sensor **sensor) {
 		return BQ25798_RET_FAILED;
 	}
 	*sensor = &self->input_current;
+
+	return BQ25798_RET_OK;
+}
+
+
+bq25798_ret_t bq25798_enable_ts(Bq25798 *self, float rt1_ohm, float rt2_ohm) {
+	self->ts.rt1_ohm = rt1_ohm;
+	self->ts.rt2_ohm = rt2_ohm;
+
+	/* Make sure the TS ADC channel is converting and the charger follows the TS feedback. Both are the
+	 * reset defaults, set them explicitly anyway. */
+	if (bq25798_update_u8(self, BQ25798_REG_ADC_FUNCTION_DISABLE_0, BQ25798_ADC_FUNCTION_DISABLE_0_TS_ADC_DIS, false) != BQ25798_RET_OK ||
+	    bq25798_update_u8(self, BQ25798_REG_NTC_CONTROL_1, BQ25798_NTC_CONTROL_1_TS_IGNORE, false) != BQ25798_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot enable the battery thermistor"));
+		return BQ25798_RET_FAILED;
+	}
+
+	self->battery_temperature.vmt = &battery_temperature_vmt;
+	self->battery_temperature.info = &battery_temperature_info;
+	self->battery_temperature.parent = self;
+
+	return BQ25798_RET_OK;
+}
+
+
+bq25798_ret_t bq25798_get_battery_temperature(Bq25798 *self, Sensor **sensor) {
+	if (sensor == NULL || self->battery_temperature.vmt == NULL) {
+		return BQ25798_RET_FAILED;
+	}
+	*sensor = &self->battery_temperature;
 
 	return BQ25798_RET_OK;
 }
