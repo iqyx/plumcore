@@ -423,3 +423,37 @@ gui_wm_fs_ret_t gui_wm_fs_free(GuiWmFs *self) {
 }
 
 
+gui_wm_fs_ret_t gui_wm_fs_notify(GuiWmFs *self, enum notify_window_icon icon, const char *message,
+                                 const struct notify_window_action *actions, size_t count, uint32_t timeout_ms,
+                                 size_t *index) {
+	if (u_assert(self != NULL) ||
+	    u_assert(index != NULL) ||
+	    u_assert(self->compositor_up)) {
+		return GUI_WM_FS_RET_FAILED;
+	}
+
+	/* A notification counts as activity, bring the system back to full power so it is visible. Leaving the off
+	 * state would reboot the device, the notification is skipped instead, returning the default index. */
+	if (self->conf.pm != NULL) {
+		enum pm_state state = PM_STATE_NONE;
+		self->conf.pm->vmt->pm_get_state(self->conf.pm, &state);
+		if (state == self->conf.off_state) {
+			*index = 0;
+			return GUI_WM_FS_RET_OK;
+		}
+		self->conf.pm->vmt->pm_set_state(self->conf.pm, PM_STATE_D0);
+	}
+
+	/* The notification covers the area below the top bar like the other windows. */
+	const struct window_geometry geometry = {
+		.x = 0,
+		.y = GUI_WM_FS_TOPBAR_H,
+		.w = (uint16_t)self->compositor.out_w,
+		.h = (uint16_t)(self->compositor.out_h - GUI_WM_FS_TOPBAR_H),
+	};
+	if (notify_window_run(&self->compositor, &geometry, icon, message, actions, count, timeout_ms,
+	                      index) != NOTIFY_WINDOW_RET_OK) {
+		return GUI_WM_FS_RET_FAILED;
+	}
+	return GUI_WM_FS_RET_OK;
+}

@@ -33,6 +33,7 @@
 #include "status-bar.h"
 #include "window-list.h"
 #include "charge-window.h"
+#include "notify-window.h"
 
 /* Height of the top status bar, in pixels. */
 #define GUI_WM_FS_TOPBAR_H 18
@@ -143,6 +144,13 @@ typedef struct {
 
 gui_wm_fs_ret_t gui_wm_fs_init(GuiWmFs *self, const struct gui_wm_fs_conf *conf);
 gui_wm_fs_ret_t gui_wm_fs_free(GuiWmFs *self);
+
+/* Show a notification and block until one of the @p actions is selected or @p timeout_ms elapses. The index of the
+ * selected action is returned in @p index, 0 on timeout. The system is brought to full power (D0) while the
+ * notification is displayed. See notify_window_run(). */
+gui_wm_fs_ret_t gui_wm_fs_notify(GuiWmFs *self, enum notify_window_icon icon, const char *message,
+                                 const struct notify_window_action *actions, size_t count, uint32_t timeout_ms,
+                                 size_t *index);
 
 /* Set the GUI settings to their defaults and build the configuration tree (conf.c). */
 gui_wm_fs_ret_t gui_wm_fs_conf_init(GuiWmFs *self);
