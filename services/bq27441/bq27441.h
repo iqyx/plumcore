@@ -28,6 +28,7 @@ typedef struct {
 	uint8_t addr;
 
 	/* Fuel gauge measurements exposed through the Sensor interface. */
+	Sensor battery_temperature;
 	Sensor battery_voltage;
 	Sensor battery_current;
 	Sensor state_of_charge;
@@ -38,6 +39,9 @@ typedef struct {
 
 bq27441_ret_t bq27441_init(Bq27441 *self, I2cBus *i2c, uint8_t addr);
 bq27441_ret_t bq27441_free(Bq27441 *self);
+
+/* Return the battery temperature Sensor interface (degrees Celsius) through @p sensor. */
+bq27441_ret_t bq27441_get_battery_temperature(Bq27441 *self, Sensor **sensor);
 
 /* Return the battery voltage Sensor interface (volts) through @p sensor. */
 bq27441_ret_t bq27441_get_battery_voltage(Bq27441 *self, Sensor **sensor);
@@ -53,6 +57,9 @@ bq27441_ret_t bq27441_get_state_of_health(Bq27441 *self, Sensor **sensor);
 
 /* Return the remaining capacity Sensor interface (milliamp-hours) through @p sensor. */
 bq27441_ret_t bq27441_get_remaining_capacity(Bq27441 *self, Sensor **sensor);
+
+/* Read the latest battery temperature in tenths of a kelvin. */
+bq27441_ret_t bq27441_read_temperature_dk(Bq27441 *self, uint16_t *dk);
 
 /* Read the latest battery voltage in millivolts. */
 bq27441_ret_t bq27441_read_voltage_mv(Bq27441 *self, uint16_t *mv);

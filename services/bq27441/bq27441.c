@@ -28,6 +28,9 @@
 /* Control() takes a two-byte subcommand and returns its two-byte result at the same address. */
 #define BQ27441_CMD_CONTROL                 0x00
 
+/* Battery temperature used by the gauging algorithm, 0.1 K per LSB. */
+#define BQ27441_CMD_TEMPERATURE             0x02
+
 /* Battery voltage, 1 mV per LSB. */
 #define BQ27441_CMD_VOLTAGE                 0x04
 
@@ -84,6 +87,11 @@ static bq27441_ret_t bq27441_control(Bq27441 *self, uint16_t subcmd, uint16_t *r
  * Raw measurement accessors (device-native units)
  ***************************************************************************************************/
 
+bq27441_ret_t bq27441_read_temperature_dk(Bq27441 *self, uint16_t *dk) {
+	return bq27441_read_u16(self, BQ27441_CMD_TEMPERATURE, dk);
+}
+
+
 bq27441_ret_t bq27441_read_voltage_mv(Bq27441 *self, uint16_t *mv) {
 	return bq27441_read_u16(self, BQ27441_CMD_VOLTAGE, mv);
 }
@@ -124,6 +132,27 @@ bq27441_ret_t bq27441_read_remaining_capacity_mah(Bq27441 *self, uint16_t *mah) 
 /***************************************************************************************************
  * Sensor interfaces. All values are reported in SI base units (V, A, Ah, dimensionless ratio).
  ***************************************************************************************************/
+
+static sensor_ret_t battery_temperature_value_f(Sensor *self, float *value) {
+	uint16_t dk = 0;
+	if (bq27441_read_temperature_dk((Bq27441 *)self->parent, &dk) != BQ27441_RET_OK) {
+		return SENSOR_RET_FAILED;
+	}
+	/* Convert from tenths of a kelvin to degrees Celsius. */
+	*value = (float)dk / 10.0f - 273.15f;
+	return SENSOR_RET_OK;
+}
+
+
+static const struct sensor_vmt battery_temperature_vmt = {
+	.value_f = battery_temperature_value_f,
+};
+
+static const struct sensor_info battery_temperature_info = {
+	.description = "battery temperature",
+	.unit = "°C",
+};
+
 
 static sensor_ret_t battery_voltage_value_f(Sensor *self, float *value) {
 	uint16_t mv = 0;
@@ -261,6 +290,10 @@ bq27441_ret_t bq27441_init(Bq27441 *self, I2cBus *i2c, uint8_t addr) {
 	/* The fuel gauge is pre-configured for its cell chemistry through its OTP memory and starts
 	 * gauging on its own, so no runtime configuration is required to read the measurements. */
 
+	self->battery_temperature.vmt = &battery_temperature_vmt;
+	self->battery_temperature.info = &battery_temperature_info;
+	self->battery_temperature.parent = self;
+
 	self->battery_voltage.vmt = &battery_voltage_vmt;
 	self->battery_voltage.info = &battery_voltage_info;
 	self->battery_voltage.parent = self;
@@ -287,6 +320,16 @@ bq27441_ret_t bq27441_init(Bq27441 *self, I2cBus *i2c, uint8_t addr) {
 
 bq27441_ret_t bq27441_free(Bq27441 *self) {
 	(void)self;
+	return BQ27441_RET_OK;
+}
+
+
+bq27441_ret_t bq27441_get_battery_temperature(Bq27441 *self, Sensor **sensor) {
+	if (sensor == NULL) {
+		return BQ27441_RET_FAILED;
+	}
+	*sensor = &self->battery_temperature;
+
 	return BQ27441_RET_OK;
 }
 
