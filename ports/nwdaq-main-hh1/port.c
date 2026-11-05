@@ -997,6 +997,14 @@ static void port_setup_charger(void) {
 	bq25798_get_input_current(&charger, &ibus);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)ibus, "charger_ibus");
 
+	/* The battery NTC R30 (or a fixed 10k resistor in its place) is on the TS pin, biased by R32 = 5k6 from
+	 * REGN (RT1) and R31 = 27k to ground (RT2). */
+	Sensor *bat_temp = NULL;
+	if (bq25798_enable_ts(&charger, 5600.0f, 27000.0f) == BQ25798_RET_OK &&
+	    bq25798_get_battery_temperature(&charger, &bat_temp) == BQ25798_RET_OK) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)bat_temp, "bat_temp");
+	}
+
 	/* Advertise the battery charging control as a power device. */
 	Power *power = NULL;
 	bq25798_get_power(&charger, &power);
@@ -1046,6 +1054,9 @@ static void port_setup_fuel_gauge(void) {
 
 	bq27441_get_remaining_capacity(&fuel_gauge, &sensor);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)sensor, "bat_remaining");
+
+	bq27441_get_battery_temperature(&fuel_gauge, &sensor);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)sensor, "gauge_temp");
 }
 
 
