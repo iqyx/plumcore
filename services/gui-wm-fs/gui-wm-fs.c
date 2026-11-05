@@ -348,6 +348,27 @@ gui_wm_fs_ret_t gui_wm_fs_init(GuiWmFs *self, const struct gui_wm_fs_conf *conf)
 	}
 	self->launcher_up = true;
 
+	/* Charging window overlay filling the area below the top bar. Created after the launcher, so it gets on top
+	 * of it if a power source is already connected at startup. */
+	if (charge_window_init(&self->charge_window, &(struct charge_window_conf){
+		.compositor = &self->compositor,
+		.geometry = {
+			.x = 0,
+			.y = GUI_WM_FS_TOPBAR_H,
+			.w = (uint16_t)self->compositor.out_w,
+			.h = (uint16_t)(self->compositor.out_h - GUI_WM_FS_TOPBAR_H),
+		},
+		.bat_soc = self->conf.bat_soc,
+		.bat_current = self->conf.bat_current,
+		.source1_voltage = self->conf.source1_voltage,
+		.source2_voltage = self->conf.source2_voltage,
+		.source_current = self->conf.source_current,
+	}) != CHARGE_WINDOW_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the charging window"));
+		goto err;
+	}
+	self->charge_window_up = true;
+
 	/* Bring the launcher up right away so it is the top-level window after startup. */
 	gui_launcher_show(&self->launcher);
 
@@ -376,6 +397,10 @@ gui_wm_fs_ret_t gui_wm_fs_free(GuiWmFs *self) {
 	}
 
 	/* Tear the overlays down before the compositor, they destroy their windows through the factory. */
+	if (self->charge_window_up) {
+		charge_window_free(&self->charge_window);
+		self->charge_window_up = false;
+	}
 	if (self->launcher_up) {
 		gui_launcher_free(&self->launcher);
 		self->launcher_up = false;

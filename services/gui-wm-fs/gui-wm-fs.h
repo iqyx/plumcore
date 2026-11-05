@@ -32,6 +32,7 @@
 
 #include "status-bar.h"
 #include "window-list.h"
+#include "charge-window.h"
 
 /* Height of the top status bar, in pixels. */
 #define GUI_WM_FS_TOPBAR_H 18
@@ -66,6 +67,13 @@ struct gui_wm_fs_conf {
 	Sensor *bat_soc;
 	Sensor *bat_current;
 
+	/** Voltages of the two charger power sources, the charging window is shown while any of them is connected
+	 * (optional, may be NULL). */
+	Sensor *source1_voltage;
+	Sensor *source2_voltage;
+	/** Current drawn from the selected charger power source (optional, may be NULL). */
+	Sensor *source_current;
+
 	/** Wall clock shown in the status bar (optional, may be NULL). */
 	Clock *clock;
 
@@ -92,6 +100,10 @@ typedef struct {
 	/* Applet launcher overlay, shown on demand (F2). */
 	GuiLauncher launcher;
 	bool launcher_up;
+
+	/* Charging window overlay, shown while a charger power source is connected. */
+	ChargeWindow charge_window;
+	bool charge_window_up;
 
 	/* Event source handed to the compositor. Its listen() pumps conf.event in the compositor input
 	 * task's context, consumes global keys and forwards the rest to the top-level window. */
