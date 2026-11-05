@@ -21,6 +21,8 @@
 #define APP_BLE_PAIR_PAD 6
 #define APP_BLE_PAIR_LINE_H 11
 
+#define APP_BLE_NOTIFY_TIMEOUT_MS 5000
+
 
 /* Repaint the pairing dialog window: a black background, the instruction text at the top and the current
  * passkey drawn large and centred below it. Does nothing when the window was never created. */
@@ -100,6 +102,55 @@ static void app_ble_pair_window_init(App *self) {
 }
 
 
+/* Show a notification for every connection state change queued by the BLE event handler. */
+static void app_ble_notify_task(void *p) {
+	App *self = p;
+
+	const struct notify_window_action actions[] = {
+		{.key = EV_KEY_ESC, .label = "ESC: Dismiss"},
+	};
+	while (true) {
+		bool connected = false;
+		if (xQueueReceive(self->ble_notify_queue, &connected, portMAX_DELAY) != pdTRUE) {
+			continue;
+		}
+		size_t index = 0;
+		gui_wm_fs_notify(&self->gui, connected ? NOTIFY_WINDOW_ICON_INFO : NOTIFY_WINDOW_ICON_WARNING,
+		                 connected ? "Bluetooth connection received" : "Bluetooth connection lost",
+		                 actions, sizeof(actions) / sizeof(actions[0]), APP_BLE_NOTIFY_TIMEOUT_MS, &index);
+	}
+}
+
+
+/* Start the connection notification task. Requires the GUI window manager to be up, a headless build gets no
+ * notifications. */
+static void app_ble_notify_init(App *self) {
+	if (!self->gui.compositor_up) {
+		return;
+	}
+
+	self->ble_notify_queue = xQueueCreate(4, sizeof(bool));
+	if (self->ble_notify_queue == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create the notification queue"));
+		return;
+	}
+	xTaskCreate(app_ble_notify_task, "ble-notify", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &self->ble_notify_task);
+	if (self->ble_notify_task == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create the notification task"));
+		vQueueDelete(self->ble_notify_queue);
+		self->ble_notify_queue = NULL;
+	}
+}
+
+
+/* Queue a connection state change for the notification task without blocking the driver. */
+static void app_ble_notify(App *self, bool connected) {
+	if (self->ble_notify_queue != NULL) {
+		xQueueSend(self->ble_notify_queue, &connected, 0);
+	}
+}
+
+
 /* BLE event handler. Runs in the driver's receive task, so it only logs and paints here (which touches the
  * compositor, not the driver); anything that needs to call back into the driver (e.g. reflecting a written
  * value with set_value) must be deferred to another task. @p ctx is the owning App. */
@@ -108,9 +159,11 @@ static void app_ble_event_handler(void *ctx, const struct ble_event *event) {
 	switch (event->type) {
 		case BLE_EVENT_CONNECTED:
 			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("BLE connected (conn %u)"), (unsigned)event->conn);
+			app_ble_notify(self, true);
 			break;
 		case BLE_EVENT_DISCONNECTED:
 			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("BLE disconnected (conn %u)"), (unsigned)event->conn);
+			app_ble_notify(self, false);
 			break;
 		case BLE_EVENT_WRITE:
 			//u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("BLE write of %u bytes"), (unsigned)event->len);
@@ -223,6 +276,7 @@ app_ret_t app_ble_init(App *self) {
 	/* Prepare the (hidden) pairing dialog before advertising starts, so it is ready when the first peer
 	 * connects and pairing begins. */
 	app_ble_pair_window_init(self);
+	app_ble_notify_init(self);
 
 	/* Bring BLE up through the generic Ble interface and advertise this device under its hostname. */
 	self->ble->vmt->start(self->ble);

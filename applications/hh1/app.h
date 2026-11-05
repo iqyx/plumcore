@@ -128,6 +128,11 @@ typedef struct {
 	FbPainter ble_pair_painter;
 	char ble_passkey[8];
 
+	/* Connection state changes handed off from the BLE event handler to a task showing them as notifications.
+	 * The handler runs in the driver's receive task and must not block on the notification. */
+	QueueHandle_t ble_notify_queue;
+	TaskHandle_t ble_notify_task;
+
 	/* LCD framebuffer advertised by the port, driven through the compositor below. */
 	Fb *lcd;
 
