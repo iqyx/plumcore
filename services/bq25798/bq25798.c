@@ -47,9 +47,17 @@
 #define BQ25798_REG_ADC_CONTROL             0x2e
 #define BQ25798_ADC_CONTROL_ADC_EN          (1 << 7)
 
+/* Input current (IBUS) ADC result, 16-bit 2's complement, 1 mA per LSB. Positive while drawing current from
+ * the selected input source. */
+#define BQ25798_REG_IBUS_ADC                0x31
+
 /* Battery current (IBAT) ADC result, 16-bit 2's complement, 1 mA per LSB. Positive while charging,
  * negative while discharging. */
 #define BQ25798_REG_IBAT_ADC                0x33
+
+/* Input source voltage (VAC1, VAC2) ADC results, 16 bits, 1 mV per LSB. */
+#define BQ25798_REG_VAC1_ADC                0x37
+#define BQ25798_REG_VAC2_ADC                0x39
 
 /* Battery remote sensing (VBATP) voltage ADC result, 16 bits, 1 mV per LSB. */
 #define BQ25798_REG_VBAT_ADC                0x3b
@@ -141,6 +149,79 @@ static const struct sensor_vmt battery_voltage_vmt = {
 static const struct sensor_info battery_voltage_info = {
 	.description = "battery voltage",
 	.unit = "V",
+};
+
+
+/***************************************************************************************************
+ * Sensor interfaces for the two input source (VAC1, VAC2) voltages
+ ***************************************************************************************************/
+
+/* Read a voltage ADC result register scaled to 1 mV per LSB, in volts. */
+static sensor_ret_t input_voltage_read(Bq25798 *self, uint8_t reg, float *value) {
+	uint16_t mv = 0;
+	if (bq25798_read_u16(self, reg, &mv) != BQ25798_RET_OK) {
+		return SENSOR_RET_FAILED;
+	}
+	*value = (float)mv / 1000.0f;
+
+	return SENSOR_RET_OK;
+}
+
+
+static sensor_ret_t input1_voltage_value_f(Sensor *self, float *value) {
+	return input_voltage_read((Bq25798 *)self->parent, BQ25798_REG_VAC1_ADC, value);
+}
+
+
+static sensor_ret_t input2_voltage_value_f(Sensor *self, float *value) {
+	return input_voltage_read((Bq25798 *)self->parent, BQ25798_REG_VAC2_ADC, value);
+}
+
+
+static const struct sensor_vmt input1_voltage_vmt = {
+	.value_f = input1_voltage_value_f,
+};
+
+static const struct sensor_vmt input2_voltage_vmt = {
+	.value_f = input2_voltage_value_f,
+};
+
+static const struct sensor_info input1_voltage_info = {
+	.description = "input 1 (VAC1) voltage",
+	.unit = "V",
+};
+
+static const struct sensor_info input2_voltage_info = {
+	.description = "input 2 (VAC2) voltage",
+	.unit = "V",
+};
+
+
+/***************************************************************************************************
+ * Sensor interface for the input (IBUS) current
+ ***************************************************************************************************/
+
+static sensor_ret_t input_current_value_f(Sensor *self, float *value) {
+	Bq25798 *bq = (Bq25798 *)self->parent;
+
+	/* The IBUS ADC result is a 2's complement value scaled to 1 mA per LSB. */
+	uint16_t raw = 0;
+	if (bq25798_read_u16(bq, BQ25798_REG_IBUS_ADC, &raw) != BQ25798_RET_OK) {
+		return SENSOR_RET_FAILED;
+	}
+	*value = (float)(int16_t)raw / 1000.0f;
+
+	return SENSOR_RET_OK;
+}
+
+
+static const struct sensor_vmt input_current_vmt = {
+	.value_f = input_current_value_f,
+};
+
+static const struct sensor_info input_current_info = {
+	.description = "input current",
+	.unit = "A",
 };
 
 
@@ -296,6 +377,18 @@ bq25798_ret_t bq25798_init(Bq25798 *self, I2cBus *i2c, uint8_t addr) {
 	self->battery_voltage.info = &battery_voltage_info;
 	self->battery_voltage.parent = self;
 
+	self->input1_voltage.vmt = &input1_voltage_vmt;
+	self->input1_voltage.info = &input1_voltage_info;
+	self->input1_voltage.parent = self;
+
+	self->input2_voltage.vmt = &input2_voltage_vmt;
+	self->input2_voltage.info = &input2_voltage_info;
+	self->input2_voltage.parent = self;
+
+	self->input_current.vmt = &input_current_vmt;
+	self->input_current.info = &input_current_info;
+	self->input_current.parent = self;
+
 	self->power.vmt = &power_vmt;
 	self->power.parent = self;
 
@@ -314,6 +407,26 @@ bq25798_ret_t bq25798_get_battery_voltage(Bq25798 *self, Sensor **sensor) {
 		return BQ25798_RET_FAILED;
 	}
 	*sensor = &self->battery_voltage;
+
+	return BQ25798_RET_OK;
+}
+
+
+bq25798_ret_t bq25798_get_input_voltage(Bq25798 *self, uint8_t input, Sensor **sensor) {
+	if (sensor == NULL || input < 1 || input > 2) {
+		return BQ25798_RET_FAILED;
+	}
+	*sensor = (input == 1) ? &self->input1_voltage : &self->input2_voltage;
+
+	return BQ25798_RET_OK;
+}
+
+
+bq25798_ret_t bq25798_get_input_current(Bq25798 *self, Sensor **sensor) {
+	if (sensor == NULL) {
+		return BQ25798_RET_FAILED;
+	}
+	*sensor = &self->input_current;
 
 	return BQ25798_RET_OK;
 }

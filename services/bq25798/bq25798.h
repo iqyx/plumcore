@@ -33,6 +33,13 @@ typedef struct {
 	/* Battery (VBATP remote sensing) voltage exposed through the Sensor interface. */
 	Sensor battery_voltage;
 
+	/* Voltages of the two input power sources (VAC1, VAC2) exposed through the Sensor interface. */
+	Sensor input1_voltage;
+	Sensor input2_voltage;
+
+	/* Current drawn from the selected input power source exposed through the Sensor interface. */
+	Sensor input_current;
+
 	/* Battery charging exposed through the Power interface. */
 	Power power;
 } Bq25798;
@@ -43,6 +50,12 @@ bq25798_ret_t bq25798_free(Bq25798 *self);
 
 /* Return the battery voltage Sensor interface through @p sensor. */
 bq25798_ret_t bq25798_get_battery_voltage(Bq25798 *self, Sensor **sensor);
+
+/* Return the Sensor interface of the input source @p input (1 = VAC1, 2 = VAC2) voltage through @p sensor. */
+bq25798_ret_t bq25798_get_input_voltage(Bq25798 *self, uint8_t input, Sensor **sensor);
+
+/* Return the input current Sensor interface through @p sensor. */
+bq25798_ret_t bq25798_get_input_current(Bq25798 *self, Sensor **sensor);
 
 /* Return the battery charging Power interface through @p power. */
 bq25798_ret_t bq25798_get_power(Bq25798 *self, Power **power);
