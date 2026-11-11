@@ -5,10 +5,20 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:1e32595259c9eac3f2f74c3b6edc3ca72e7edb868210c3321f12ff5b01732e2c"
+content_hash = "sha256:a0c687be2b1f38fca37eb00b521574274b80ddc6b90ea5dba85c1adc21d03849"
 
 [[metadata.targets]]
 requires_python = ">=3.10"
+
+[[package]]
+name = "bdflib"
+version = "2.1.0"
+summary = "Library for working with BDF font files."
+groups = ["default"]
+files = [
+    {file = "bdflib-2.1.0-py3-none-any.whl", hash = "sha256:1e381eee7b047d40ef4e354e12cde123384da89470f02e3c9a73fa51112c9ee0"},
+    {file = "bdflib-2.1.0.tar.gz", hash = "sha256:6eb7fe0e6f6b06b41a79b194558f07e881299b548c6748b53ec357f51457f2ee"},
+]
 
 [[package]]
 name = "beartype"
@@ -496,6 +506,22 @@ files = [
     {file = "fonttools-4.65.0-cp315-cp315t-win_amd64.whl", hash = "sha256:d9484b7ee1b49b6b8a0231c849f3983723dec29e3a7366d9b1b02f4036f71944"},
     {file = "fonttools-4.65.0-py3-none-any.whl", hash = "sha256:3060b8c1fc2329fa20265b7c138614143ea7c1624e26c5c180c76aeb74deae6f"},
     {file = "fonttools-4.65.0.tar.gz", hash = "sha256:762ba5431358d0dbd4a01982484a1d494fb267e91f974cdcf20b80eab8560f6f"},
+]
+
+[[package]]
+name = "freetype-py"
+version = "2.5.1"
+requires_python = ">=3.7"
+summary = "Freetype python bindings"
+groups = ["default"]
+files = [
+    {file = "freetype-py-2.5.1.zip", hash = "sha256:cfe2686a174d0dd3d71a9d8ee9bf6a2c23f5872385cf8ce9f24af83d076e2fbd"},
+    {file = "freetype_py-2.5.1-py3-none-macosx_10_9_universal2.whl", hash = "sha256:d01ded2557694f06aa0413f3400c0c0b2b5ebcaabeef7aaf3d756be44f51e90b"},
+    {file = "freetype_py-2.5.1-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5d2f6b3d68496797da23204b3b9c4e77e67559c80390fc0dc8b3f454ae1cd819"},
+    {file = "freetype_py-2.5.1-py3-none-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:289b443547e03a4f85302e3ac91376838e0d11636050166662a4f75e3087ed0b"},
+    {file = "freetype_py-2.5.1-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:cd3bfdbb7e1a84818cfbc8025fca3096f4f2afcd5d4641184bf0a3a2e6f97bbf"},
+    {file = "freetype_py-2.5.1-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:3c1aefc4f0d5b7425f014daccc5fdc7c6f914fb7d6a695cc684f1c09cd8c1660"},
+    {file = "freetype_py-2.5.1-py3-none-win_amd64.whl", hash = "sha256:0b7f8e0342779f65ca13ef8bc103938366fecade23e6bb37cb671c2b8ad7f124"},
 ]
 
 [[package]]

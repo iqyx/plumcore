@@ -1,0 +1,26 @@
+Import("env")
+Import("conf")
+Import("objs")
+
+if conf["LIB_MCU_RENDERER"] == "y":
+
+	env.Git('https://github.com/Gissio/mcu-renderer', branch='1.0.19')
+
+	# fontconv improvements: a --hinting option to select the FreeType hinting mode used when rasterizing vector
+	# fonts (upstream always uses the default hinting), pixel coverage rounded to the nearest level instead of
+	# truncated (which drops faint edge pixels) and the cap height measured from the 'H' glyph instead of being
+	# derived from the ascender/descender. Applied once, right after cloning.
+	env.Patch('0001-fontconv-improvements.patch')
+
+	ddir = env['LIB_DEFAULT_REPO_DIR']
+
+	# Only the display-independent core (drawing primitives, font decoding and text layout) is
+	# built. The bundled display drivers (ST7789, ST7565, SDL) are not used, rendering is done
+	# through the fb-painter service. Prebuilt fonts are header-only in mcu-renderer-fonts/.
+	objs.append(env.Object([
+		File(ddir + '/src/mcu-renderer.c'),
+	]))
+
+	env.Append(CPPPATH = [
+		Dir(ddir + '/src'),
+	])

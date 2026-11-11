@@ -1,0 +1,94 @@
+diff --git a/tools/fontconv.py b/tools/fontconv.py
+index 50ccb17..b4a34ef 100644
+--- a/tools/fontconv.py
++++ b/tools/fontconv.py
+@@ -208,7 +208,17 @@ def load_bitmap_font(path, codepoint_set, font_variable_name):
+         return None
+ 
+ 
+-def load_vector_font(path, codepoint_set, font_variable_name, pixels, pixel_bitnum):
++HINTING_LOAD_FLAGS = {
++    'none': freetype.FT_LOAD_NO_HINTING,
++    'light': freetype.FT_LOAD_TARGET_LIGHT,
++    'normal': freetype.FT_LOAD_DEFAULT,
++    # Hint for monochrome output (strongest snapping to the pixel grid), but still render antialiased.
++    'mono': freetype.FT_LOAD_TARGET_MONO,
++    'auto': freetype.FT_LOAD_FORCE_AUTOHINT,
++}
++
++
++def load_vector_font(path, codepoint_set, font_variable_name, pixels, pixel_bitnum, hinting='normal'):
+     try:
+         codepoints = parse_codepoint_set(codepoint_set)
+ 
+@@ -258,7 +268,8 @@ def load_vector_font(path, codepoint_set, font_variable_name, pixels, pixel_bitn
+             if len(codepoints) > 0 and codepoint not in codepoints:
+                 continue
+ 
+-            face.load_glyph(glyph_index, freetype.FT_LOAD_RENDER)
++            face.load_glyph(glyph_index, HINTING_LOAD_FLAGS[hinting])
++            face.glyph.render(freetype.FT_RENDER_MODE_NORMAL)
+ 
+             glyph = Glyph()
+ 
+@@ -279,6 +290,11 @@ def load_vector_font(path, codepoint_set, font_variable_name, pixels, pixel_bitn
+         # Size, ascent, descent, cap height
+         font.size = int(pixels)
+         font.cap_height = (face.size.ascender + face.size.descender) // 64
++        # Measure the real cap height (top of a rendered 'H') when the font has the glyph.
++        if face.get_char_index(ord('H')):
++            face.load_char('H', HINTING_LOAD_FLAGS[hinting])
++            face.glyph.render(freetype.FT_RENDER_MODE_NORMAL)
++            font.cap_height = face.glyph.bitmap_top
+         font.ascent = face.size.ascender // 64
+         font.descent = -face.size.descender // 64
+         font.pixel_bitnum = pixel_bitnum
+@@ -404,7 +420,6 @@ def get_bitnum_minmax(min_max):
+ 
+ 
+ def encode_glyph(glyph, settings, encoded_block):
+-    bitshift = 8 - settings.pixel_bitnum
+     white_value = (1 << settings.pixel_bitnum) - 1
+ 
+     symbols = []
+@@ -412,7 +427,8 @@ def encode_glyph(glyph, settings, encoded_block):
+     # Pixels
+     bitmap_index = 0
+     while bitmap_index < len(glyph.bitmap):
+-        value = glyph.bitmap[bitmap_index] >> bitshift
++        # Round to the nearest level instead of truncating, so faint edge pixels are not dropped.
++        value = (glyph.bitmap[bitmap_index] * white_value + 127) // 255
+         bitmap_index += 1
+ 
+         symbol = Bitstream()
+@@ -423,7 +439,7 @@ def encode_glyph(glyph, settings, encoded_block):
+             # RLE black/white pixels
+             run_length = 1
+             while bitmap_index < len(glyph.bitmap):
+-                new_value = glyph.bitmap[bitmap_index] >> bitshift
++                new_value = (glyph.bitmap[bitmap_index] * white_value + 127) // 255
+                 if value != new_value:
+                     break
+ 
+@@ -679,6 +695,11 @@ def main():
+                         default=DEFAULT_BITS_PER_PIXEL,
+                         choices=range(1, 9),
+                         help=f'set bits per pixel (default: {DEFAULT_BITS_PER_PIXEL})')
++    parser.add_argument('-H', '--hinting',
++                        dest='hinting',
++                        choices=sorted(HINTING_LOAD_FLAGS.keys()),
++                        default='normal',
++                        help='FreeType hinting mode for vector fonts (default: normal)')
+     parser.add_argument('-a', '--ascent',
+                         dest='ascent',
+                         type=int,
+@@ -725,7 +746,8 @@ def main():
+                                 args.codepoint_set,
+                                 font_variable_name,
+                                 args.pixels,
+-                                args.bits_per_pixel)
++                                args.bits_per_pixel,
++                                args.hinting)
+ 
+     if font is None:
+         exit(1)

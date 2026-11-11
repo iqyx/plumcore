@@ -27,6 +27,8 @@ dependencies = [
     "zensical>=0.0.61",
     "markdown-gfm-admonition>=0.3",
     "weasyprint>=60",
+    "freetype-py>=2.4",
+    "bdflib>=2.0",
 ]
 
 # Managed with PDM. This repository is an application, not a distributable

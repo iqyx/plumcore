@@ -42,6 +42,10 @@ config LIB_GRAVITY
 	bool "Gravity language compiler & VM"
 	default n
 
+config LIB_MCU_RENDERER
+	bool "mcu-renderer graphics and font rendering library"
+	default n
+
 config LIB_PKPY
 	bool "pocketpy Python interpreter & VM"
 	default n
