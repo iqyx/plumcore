@@ -22,13 +22,17 @@ typedef enum {
 /* A single mcu-renderer font together with its bounding box size (the largest glyph cell), which sizes the
  * text rendering buffer, and its vertical metrics: the ascent (distance from the top of the text line to the
  * baseline) and the cap height (height of capital letters and digits above the baseline). A NULL data pointer
- * marks a missing style variant. */
+ * marks a missing style variant. The optional glyph offset table (SERVICE_FB_PAINTER_FONTS_GLYPH_TABLE) covers
+ * glyph_count codepoints starting at glyph_first, without it the glyphs are looked up in the font blocks. */
 struct fb_painter_font {
 	const uint8_t *data;
 	uint8_t bbox_w;
 	uint8_t bbox_h;
 	uint8_t ascent;
 	uint8_t cap_height;
+	const uint16_t *glyph_table;
+	uint16_t glyph_first;
+	uint16_t glyph_count;
 };
 
 /* A font face bundles the style variants of a font, a missing style falls back to the normal one. Additional faces

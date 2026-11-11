@@ -548,6 +548,22 @@ menu "User interface services"
 		config SERVICE_FB_PAINTER_FONTS_CODEPOINTS
 			string "Unicode codepoints to convert"
 			default "0x20-0x7e"
+
+		config SERVICE_FB_PAINTER_FONTS_BLOCK_SIZE
+			int "Maximum number of glyphs in a font block"
+			default 16
+			help
+			  The glyph lookup skips whole blocks of glyphs, but walks the glyphs inside a block one
+			  by one. Smaller blocks make the lookup faster at the cost of a few bytes per block. 0
+			  keeps the default fontconv blocks (split only at gaps and at "A" and "a").
+
+		config SERVICE_FB_PAINTER_FONTS_GLYPH_TABLE
+			bool "Generate glyph offset tables"
+			default n
+			help
+			  Generate a table of glyph offsets (2 bytes per glyph in flash) for every font. The glyph
+			  lookup becomes a direct table access, which mostly speeds up measuring text (text_size,
+			  crop and wrap).
 	endmenu
 
 	config SERVICE_GUI_WM_FS

@@ -57,8 +57,12 @@ if conf["SERVICE_FB_PAINTER"] == "y":
 
 	# Convert the configured host-installed fonts into mcu-renderer font headers in assets/fonts/ using the
 	# fontconv tool shipped with the library. The headers are generated during the build as fonts.c includes
-	# them, the "fonts" target builds just them.
+	# them, the "fonts" target builds just them. The glyph lookup options apply to all fonts: blocks of at most
+	# SERVICE_FB_PAINTER_FONTS_BLOCK_SIZE glyphs and optionally a glyph offset table for direct lookup.
 	fontconv = File('#lib/mcu-renderer/src/tools/fontconv.py')
+	glyph_table = conf["SERVICE_FB_PAINTER_FONTS_GLYPH_TABLE"] == "y"
+	lookup_args = ['-B', conf["SERVICE_FB_PAINTER_FONTS_BLOCK_SIZE"]] + (['-t'] if glyph_table else [])
+	lookup_deps = [env.Value(conf["SERVICE_FB_PAINTER_FONTS_BLOCK_SIZE"]), env.Value(glyph_table)]
 
 	def build_font(target, source, env):
 		pattern = source[1].read()
@@ -81,6 +85,7 @@ if conf["SERVICE_FB_PAINTER"] == "y":
 			'-b', conf["SERVICE_FB_PAINTER_FONTS_BPP"],
 			'-H', conf["SERVICE_FB_PAINTER_FONTS_HINTING"],
 			'-n', target[0].name.removesuffix('.h'),
+			*lookup_args,
 			file, target[0].path,
 		])
 
@@ -95,37 +100,96 @@ if conf["SERVICE_FB_PAINTER"] == "y":
 				env.Value(conf["SERVICE_FB_PAINTER_FONTS_BPP"]),
 				env.Value(conf["SERVICE_FB_PAINTER_FONTS_HINTING"]),
 				env.Value(conf["SERVICE_FB_PAINTER_FONTS_CODEPOINTS"]),
-			],
+			] + lookup_deps,
 			build_font,
 		)
+
+	# The built-in Nokia 3310 small font is kept as glyph bitmap tables in nokia-fonts.inc. Both styles are
+	# written out as BDF fonts and converted with fontconv like the other fonts.
+	builtin = [
+		{'name': 'font_nokia_small', 'face': 'nokia_small', 'style': 'normal', 'table': 'nokia_small_data',
+		 'weight': 'Regular'},
+		{'name': 'font_nokia_small_bold', 'face': 'nokia_small', 'style': 'bold', 'table': 'nokia_small_bold_data',
+		 'weight': 'Bold'},
+	]
+
+	def build_nokia_bdf(target, source, env):
+		src = source[0].get_text_contents()
+		for font, bdf in zip(builtin, target):
+			body = re.search(r'%s\[\] =\s*\{(.*?)\n\};' % font['table'], src, re.S).group(1)
+			glyphs = [(int(w), int(a), [int(r, 16) for r in rows.split(',')])
+			          for w, a, rows in re.findall(r'\{\s*(\d+),\s*(\d+),\s*\{([^}]*)\}\s*\}', body)]
+			with open(bdf.path, 'w') as f:
+				f.write('STARTFONT 2.1\nFONT -nokia-small-%s\nSIZE 8 75 75\nFONTBOUNDINGBOX 8 8 0 -1\n' %
+				        font['weight'].lower())
+				f.write('STARTPROPERTIES 7\nFAMILY_NAME "Nokia Small"\nWEIGHT_NAME "%s"\n' %
+				        (font['weight'] if font['weight'] != 'Regular' else ''))
+				f.write('COPYRIGHT "Copyright (c) 2013, Premysl Eric Janouch, '
+				        'https://git.janouch.name/p/nokia-3310-fonts"\n')
+				f.write('POINT_SIZE 8\nFONT_ASCENT 7\nFONT_DESCENT 1\nCAP_HEIGHT 7\nENDPROPERTIES\nCHARS %d\n' %
+				        len(glyphs))
+				for i, (w, a, rows) in enumerate(glyphs):
+					f.write('STARTCHAR U+%04X\nENCODING %d\nSWIDTH %d 0\nDWIDTH %d 0\nBBX %d 8 0 -1\nBITMAP\n' %
+					        (32 + i, 32 + i, a * 125, a, max(w, 1)))
+					f.write(''.join('%02X\n' % r for r in rows))
+					f.write('ENDCHAR\n')
+				f.write('ENDFONT\n')
+
+	bdfs = env.Command([File('assets/fonts/%s.bdf' % font['name']) for font in builtin], File('nokia-fonts.inc'),
+	                   build_nokia_bdf)
+
+	def build_bitmap_font(target, source, env):
+		print(f'{Fore.BLUE}{Style.BRIGHT}Converting font{Style.RESET_ALL} {source[1]} to {target[0]}')
+		return subprocess.call([sys.executable, source[0].path, '-s', conf["SERVICE_FB_PAINTER_FONTS_CODEPOINTS"],
+		                        '-n', target[0].name.removesuffix('.h'), *lookup_args, source[1].path, target[0].path])
+
+	for font, bdf in zip(builtin, bdfs):
+		headers += env.Command(File('assets/fonts/%s.h' % font['name']),
+		                       [fontconv, bdf, env.Value(conf["SERVICE_FB_PAINTER_FONTS_CODEPOINTS"])] + lookup_deps,
+		                       build_bitmap_font)
 	env.Alias("fonts", headers)
 
 	# Generate the font face table: fonts.c includes every font header (they contain the font data definitions)
-	# and bundles the style variants of each face, fonts.h declares the faces for painter clients.
+	# and bundles the style variants of each face, fonts.h declares the faces for painter clients. The built-in
+	# Nokia face (declared in fb-painter.h) is part of the table too. fonts.c also defines the text rendering
+	# buffer shared by all painters, sized for two glyph cells of the biggest font: a union with a member per
+	# font gets the size of the largest one.
 	faces = {}
-	for font in fonts:
+	for font in builtin + fonts:
 		faces.setdefault(font['face'], {})[font['style']] = font['name']
 
 	def build_face_table(target, source, env):
 		with open(target[0].path, 'w') as c:
-			c.write('#include "fb-painter.h"\n')
-			for font in fonts:
+			c.write('#include "fb-painter.h"\n#include "fonts.h"\n')
+			for font in builtin + fonts:
 				c.write('#include "%s.h"\n' % font['name'])
 			for face, styles in faces.items():
 				c.write('\nconst struct fb_painter_font_face fb_painter_face_%s = {\n' % face)
 				for style, name in styles.items():
-					c.write('\t.%s = {%s, %s_BOUNDINGBOX_WIDTH, %s_BOUNDINGBOX_HEIGHT, %s_ASCENT, %s_CAP_HEIGHT},\n' %
-					        (style, name, *[name.upper()] * 4))
+					table = ', %s_glyph_table, %s_GLYPH_TABLE_FIRST, %s_GLYPH_TABLE_COUNT' % (
+						name, name.upper(), name.upper()) if glyph_table else ''
+					c.write('\t.%s = {%s, %s_BOUNDINGBOX_WIDTH, %s_BOUNDINGBOX_HEIGHT, %s_ASCENT, %s_CAP_HEIGHT%s},\n' %
+					        (style, name, *[name.upper()] * 4, table))
 				c.write('};\n')
+			c.write('\nunion fb_painter_text_buffer_sizes {\n')
+			for font in builtin + fonts:
+				c.write('\tuint8_t %s[2 * %s_BOUNDINGBOX_WIDTH * %s_BOUNDINGBOX_HEIGHT];\n' %
+				        (font['name'], *[font['name'].upper()] * 2))
+			c.write('};\n\n')
+			c.write('uint8_t fb_painter_text_buffer[sizeof(union fb_painter_text_buffer_sizes)];\n')
+			c.write('const size_t fb_painter_text_buffer_size = sizeof(fb_painter_text_buffer);\n')
 
 		with open(target[1].path, 'w') as h:
 			h.write('#pragma once\n\n#include "fb-painter.h"\n\n')
 			for face in faces:
-				h.write('extern const struct fb_painter_font_face fb_painter_face_%s;\n' % face)
+				if face != 'nokia_small':
+					h.write('extern const struct fb_painter_font_face fb_painter_face_%s;\n' % face)
+			h.write('\nextern uint8_t fb_painter_text_buffer[];\n')
+			h.write('extern const size_t fb_painter_text_buffer_size;\n')
 
 	env.Command(
 		[File("assets/fonts/fonts.c"), File("assets/fonts/fonts.h")],
-		env.Value(conf["SERVICE_FB_PAINTER_FONTS"]),
+		[env.Value(conf["SERVICE_FB_PAINTER_FONTS"]), env.Value(glyph_table)],
 		build_face_table,
 	)
 	objs.append(env.Object(File("assets/fonts/fonts.c")))

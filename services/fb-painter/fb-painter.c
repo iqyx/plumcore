@@ -31,8 +31,7 @@
 #include <mcu-renderer.h>
 
 #include "fb-painter.h"
-#include "font_nokia_small.h"
-#include "font_nokia_small_bold.h"
+#include "fonts.h"
 
 #define MODULE_NAME "fb-painter"
 
@@ -41,13 +40,10 @@
  * Fonts
  ***************************************************************************************************/
 
-/* Built-in default face, the Nokia 3310 small font converted to the mcu-renderer format. */
-const struct fb_painter_font_face fb_painter_face_nokia_small = {
-	.normal = {font_nokia_small, FONT_NOKIA_SMALL_BOUNDINGBOX_WIDTH, FONT_NOKIA_SMALL_BOUNDINGBOX_HEIGHT,
-	           FONT_NOKIA_SMALL_ASCENT, FONT_NOKIA_SMALL_CAP_HEIGHT},
-	.bold = {font_nokia_small_bold, FONT_NOKIA_SMALL_BOLD_BOUNDINGBOX_WIDTH, FONT_NOKIA_SMALL_BOLD_BOUNDINGBOX_HEIGHT,
-	         FONT_NOKIA_SMALL_BOLD_ASCENT, FONT_NOKIA_SMALL_BOLD_CAP_HEIGHT},
-};
+/* The text rendering buffer (fb_painter_text_buffer, generated in fonts.c) is sized for the biggest font and
+ * shared by all painter instances, smaller fonts use it whole and get a wider buffer. Painters may draw from
+ * different tasks, hence the buffer has its own lock, held only while a string is rendered. */
+static SemaphoreHandle_t text_buffer_lock;
 
 
 /* Pick the font of the current face in the current style. A missing style falls back to the normal variant,
@@ -81,6 +77,15 @@ static const struct fb_painter_font *font_select(const FbPainter *self) {
 }
 
 
+/* Select the font in an mcu-renderer instance, including its glyph offset table if it has one. */
+static void font_set(mr_t *mr, const struct fb_painter_font *font) {
+	mr_set_font(mr, font->data);
+	if (font->glyph_table != NULL) {
+		mr_set_glyph_table(mr, font->glyph_table, font->glyph_first, font->glyph_count);
+	}
+}
+
+
 /***************************************************************************************************
  * Packed framebuffer pixel helpers (operating on a single scanline buffer)
  ***************************************************************************************************/
@@ -106,51 +111,88 @@ static size_t fb_packed_size(size_t w, enum fb_mode mode) {
 }
 
 
-/* Set pixel x in a packed scanline. Bytes-per-pixel modes are stored big-endian, sub-byte modes are
- * packed MSB-first (leftmost pixel in the high bits), matching the compositor and the LCD driver. */
-static void scan_set_pixel(uint8_t *row, enum fb_mode mode, size_t x, uint32_t value) {
+/* Scanlines are packed the same way as in the compositor and the LCD driver: bytes-per-pixel modes are stored
+ * big-endian, sub-byte modes MSB-first (leftmost pixel in the high bits). The helpers below never touch single
+ * pixels through a generic accessor, they work on whole bytes and runs instead. */
+
+/* Fill n pixels of a packed scanline starting at pixel x with a native value. Sub-byte modes replicate the value
+ * into a byte pattern, mask the partial head and tail bytes and memset the whole bytes in between. Byte modes
+ * write the first pixel and replicate it with doubling memcpy. */
+static void scan_fill(uint8_t *row, enum fb_mode mode, size_t x, size_t n, uint32_t value) {
 	size_t bpp = (size_t)mode;
+
+	if (n == 0) {
+		return;
+	}
 
 	if (bpp >= 8) {
 		size_t bytes = bpp / 8;
-		size_t off = x * bytes;
+		uint8_t *d = row + x * bytes;
 		for (size_t i = 0; i < bytes; i++) {
-			row[off + bytes - 1 - i] = value & 0xff;
-			value >>= 8;
+			d[bytes - 1 - i] = (value >> (8 * i)) & 0xff;
+		}
+		for (size_t done = bytes; done < n * bytes; done *= 2) {
+			memcpy(d + done, d, (done < n * bytes - done) ? done : n * bytes - done);
 		}
 		return;
 	}
 
-	size_t ppb = 8 / bpp;
-	size_t off = x / ppb;
-	size_t sub = x % ppb;
-	size_t shift = 8 - bpp * (sub + 1);
-	uint32_t mask = (1u << bpp) - 1;
-	row[off] = (row[off] & ~(mask << shift)) | ((value & mask) << shift);
+	uint32_t maxv = (1u << bpp) - 1;
+	uint8_t pattern = (uint8_t)((value & maxv) * (0xff / maxv));
+	size_t bit0 = x * bpp;
+	size_t bit1 = (x + n) * bpp;
+	uint8_t *b = row + bit0 / 8;
+	uint8_t *e = row + bit1 / 8;
+	uint8_t head = 0xff >> (bit0 & 7);
+	uint8_t tail = (uint8_t)~(0xff >> (bit1 & 7));
+	if (b == e) {
+		*b = (*b & ~(head & tail)) | (pattern & head & tail);
+		return;
+	}
+	*b = (*b & ~head) | (pattern & head);
+	b++;
+	memset(b, pattern, e - b);
+	if (bit1 & 7) {
+		*e = (*e & ~tail) | (pattern & tail);
+	}
 }
 
 
-/* Read pixel x from a packed scanline. The exact inverse of scan_set_pixel: bytes-per-pixel modes
- * are read big-endian, sub-byte modes MSB-first. */
-static uint32_t scan_get_pixel(const uint8_t *row, enum fb_mode mode, size_t x) {
+/* Copy n pixels from src (starting at pixel sx) to dst (starting at pixel dx), both packed in the same mode,
+ * optionally inverting them. Byte modes are copied with memcpy, sub-byte modes one destination byte at a time:
+ * the bits for the byte are fetched from at most two source bytes and merged in with a mask. */
+static void scan_copy(uint8_t *dst, size_t dx, const uint8_t *src, size_t sx, size_t n, enum fb_mode mode,
+                      bool invert) {
 	size_t bpp = (size_t)mode;
 
-	if (bpp >= 8) {
-		size_t bytes = bpp / 8;
-		size_t off = x * bytes;
-		uint32_t value = 0;
-		for (size_t i = 0; i < bytes; i++) {
-			value = (value << 8) | row[off + i];
-		}
-		return value;
+	if (bpp >= 8 && !invert) {
+		memcpy(dst + dx * bpp / 8, src + sx * bpp / 8, n * bpp / 8);
+		return;
 	}
 
-	size_t ppb = 8 / bpp;
-	size_t off = x / ppb;
-	size_t sub = x % ppb;
-	size_t shift = 8 - bpp * (sub + 1);
-	uint32_t mask = (1u << bpp) - 1;
-	return (row[off] >> shift) & mask;
+	size_t dbit = dx * bpp;
+	size_t sbit = sx * bpp;
+	size_t end = dbit + n * bpp;
+	while (dbit < end) {
+		uint32_t chunk = 8 - (dbit & 7);
+		if (chunk > end - dbit) {
+			chunk = end - dbit;
+		}
+		uint32_t off = sbit & 7;
+		uint32_t w = (uint32_t)src[sbit / 8] << 8;
+		if (off + chunk > 8) {
+			w |= src[sbit / 8 + 1];
+		}
+		uint32_t bits = (w >> (16 - off - chunk)) & ((1u << chunk) - 1);
+		if (invert) {
+			bits = ~bits & ((1u << chunk) - 1);
+		}
+		uint32_t shift = 8 - (dbit & 7) - chunk;
+		uint8_t mask = (uint8_t)(((1u << chunk) - 1) << shift);
+		dst[dbit / 8] = (dst[dbit / 8] & ~mask) | (uint8_t)(bits << shift);
+		dbit += chunk;
+		sbit += chunk;
+	}
 }
 
 
@@ -209,6 +251,73 @@ static uint32_t color_to_native(const FbPainter *self, painter_color_t color) {
 			return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 		default:
 			return 0;
+	}
+}
+
+
+/* Blend a run of n text coverage values (0..32) in the pen color onto the scratch row starting at pixel x. Sub-byte
+ * modes keep the current destination byte in a register, walk the pixel shift inside it and store each byte once.
+ * Gray modes blend directly on the native gray levels, RGB modes per channel. Zero coverage leaves the pixel. */
+static void scan_blend(FbPainter *self, size_t x, const uint8_t *alpha, size_t n, uint32_t pen) {
+	size_t bpp = (size_t)self->mode;
+
+	if (bpp < 8) {
+		uint32_t maxv = (1u << bpp) - 1;
+		uint8_t *b = self->row + x * bpp / 8;
+		uint32_t shift = 8 - bpp - ((x * bpp) & 7);
+		uint32_t byte = *b;
+		for (size_t i = 0; i < n; i++) {
+			if (alpha[i] != 0) {
+				uint32_t v = pen;
+				if (alpha[i] < 32) {
+					v = (pen * alpha[i] + ((byte >> shift) & maxv) * (32 - alpha[i]) + 16) >> 5;
+				}
+				byte = (byte & ~(maxv << shift)) | (v << shift);
+			}
+			if (shift == 0) {
+				*b++ = (uint8_t)byte;
+				if ((i + 1) < n) {
+					byte = *b;
+				}
+				shift = 8 - bpp;
+			} else {
+				shift -= bpp;
+			}
+		}
+		if (shift != 8 - bpp) {
+			*b = (uint8_t)byte;
+		}
+		return;
+	}
+
+	size_t bytes = bpp / 8;
+	uint8_t *d = self->row + x * bytes;
+	for (size_t i = 0; i < n; i++, d += bytes) {
+		if (alpha[i] == 0) {
+			continue;
+		}
+		uint32_t v = pen;
+		if (alpha[i] < 32) {
+			uint32_t bg = 0;
+			for (size_t j = 0; j < bytes; j++) {
+				bg = (bg << 8) | d[j];
+			}
+			if (self->mode == FB_MODE_G8) {
+				v = (pen * alpha[i] + bg * (32 - alpha[i]) + 16) >> 5;
+			} else {
+				painter_color_t bgc = native_to_color(self->mode, bg);
+				painter_color_t color = 0;
+				for (uint32_t sh = 0; sh < 24; sh += 8) {
+					uint32_t f = (self->pen_color >> sh) & 0xff;
+					uint32_t c = (bgc >> sh) & 0xff;
+					color |= ((f * alpha[i] + c * (32 - alpha[i])) / 32) << sh;
+				}
+				v = color_to_native(self, color);
+			}
+		}
+		for (size_t j = 0; j < bytes; j++) {
+			d[bytes - 1 - j] = (v >> (8 * j)) & 0xff;
+		}
 	}
 }
 
@@ -314,46 +423,31 @@ static void text_draw_rectangle(mr_t *mr, const mr_rectangle_t *rectangle) {
 
 
 /* Blend a chunk of rendered text onto the framebuffer. The buffer contains a coverage (alpha) value 0..32 for
- * every pixel of the screen rectangle, the pen color is blended over the current framebuffer content with
- * it. Fully covered pixels get the pen color directly, uncovered pixels and rows are left untouched. */
+ * every pixel of the screen rectangle. Each row is trimmed to its covered part and blended in a single run,
+ * rows without any coverage are not touched at all. */
 static void text_draw_textbuffer(mr_t *mr, uint8_t *buffer, uint32_t buffer_pitch, mr_rectangle_t *rectangle) {
 	struct text_ctx *ctx = mr->display;
-	FbPainter *p = ctx->p;
 
 	for (int16_t ty = 0; ty < rectangle->height; ty++) {
 		const uint8_t *alpha = buffer + ty * buffer_pitch;
-		int16_t tx = 0;
-		while (tx < rectangle->width && alpha[tx] == 0) {
-			tx++;
+		int16_t tx0 = 0;
+		int16_t tx1 = rectangle->width;
+		while (tx0 < tx1 && alpha[tx0] == 0) {
+			tx0++;
 		}
-		if (tx == rectangle->width) {
+		if (tx0 == tx1) {
 			continue;
 		}
+		while (alpha[tx1 - 1] == 0) {
+			tx1--;
+		}
 
-		int32_t yy = rectangle->y + ty;
-		if (row_read(p, yy) != FB_RET_OK) {
+		if (row_read(ctx->p, rectangle->y + ty) != FB_RET_OK) {
 			ctx->failed = true;
 			return;
 		}
-		for (; tx < rectangle->width; tx++) {
-			if (alpha[tx] == 0) {
-				continue;
-			}
-			size_t xx = rectangle->x + tx;
-			uint32_t value = ctx->pen;
-			if (alpha[tx] < 32) {
-				painter_color_t bg = native_to_color(p->mode, scan_get_pixel(p->row, p->mode, xx));
-				painter_color_t color = 0;
-				for (uint32_t shift = 0; shift < 24; shift += 8) {
-					uint32_t f = (p->pen_color >> shift) & 0xff;
-					uint32_t b = (bg >> shift) & 0xff;
-					color |= ((f * alpha[tx] + b * (32 - alpha[tx])) / 32) << shift;
-				}
-				value = color_to_native(p, color);
-			}
-			scan_set_pixel(p->row, p->mode, xx, value);
-		}
-		if (row_write(p, yy) != FB_RET_OK) {
+		scan_blend(ctx->p, rectangle->x + tx0, alpha + tx0, tx1 - tx0, ctx->pen);
+		if (row_write(ctx->p, rectangle->y + ty) != FB_RET_OK) {
 			ctx->failed = true;
 			return;
 		}
@@ -371,17 +465,9 @@ static painter_ret_t painter_text(Painter *self, int16_t x, int16_t y, const cha
 		return PAINTER_RET_FAILED;
 	}
 
-	/* mcu-renderer renders the string into a coverage buffer in chunks and hands each chunk over to
-	 * text_draw_textbuffer. The buffer is one glyph cell high and two glyph cells wide (a chunk must fit at
-	 * least the widest glyph). It is allocated only for the duration of the call as it may be too large for
-	 * the stack of the calling task with big fonts. */
-	const struct fb_painter_font *font = font_select(p);
-	size_t buffer_size = (size_t)font->bbox_w * 2 * font->bbox_h;
-	uint8_t *buffer = calloc(buffer_size, sizeof(uint8_t));
-	if (buffer == NULL) {
-		return PAINTER_RET_FAILED;
-	}
-
+	/* mcu-renderer renders the string into the coverage buffer in chunks as wide as the buffer allows and
+	 * hands each chunk over to text_draw_textbuffer. It clears what it has drawn after every chunk, hence the
+	 * buffer stays zeroed between calls. */
 	struct text_ctx ctx = {
 		.p = p,
 		.pen = color_to_native(p, p->pen_color),
@@ -395,17 +481,17 @@ static painter_ret_t painter_text(Painter *self, int16_t x, int16_t y, const cha
 	mr.display_width = (int16_t)p->w;
 	mr.display_height = (int16_t)p->h;
 	mr.display = &ctx;
-	mr.buffer = buffer;
-	mr.buffer_size = buffer_size;
-	mr_set_font(&mr, font->data);
+	mr.buffer = fb_painter_text_buffer;
+	mr.buffer_size = fb_painter_text_buffer_size;
+	font_set(&mr, font_select(p));
 
 	/* The whole framebuffer is the clipping rectangle, the offset places the top (ascent) left corner of the
 	 * text at (x, y). */
 	mr_rectangle_t clip = {0, 0, (int16_t)p->w, (int16_t)p->h};
 	mr_point_t offset = {x, y};
+	xSemaphoreTake(text_buffer_lock, portMAX_DELAY);
 	mr_draw_text(&mr, text, &clip, &offset);
-
-	free(buffer);
+	xSemaphoreGive(text_buffer_lock);
 
 	return ctx.failed ? PAINTER_RET_FAILED : PAINTER_RET_OK;
 }
@@ -423,7 +509,7 @@ static painter_ret_t painter_text_size(Painter *self, const char *text, uint16_t
 
 	mr_t mr;
 	mr_init(&mr);
-	mr_set_font(&mr, font_select(p)->data);
+	font_set(&mr, font_select(p));
 
 	if (w != NULL) {
 		*w = (uint16_t)mr_get_text_width(&mr, text);
@@ -436,11 +522,37 @@ static painter_ret_t painter_text_size(Painter *self, const char *text, uint16_t
 }
 
 
+/* Compose one scanline of the rectangle [x0, x1) clipped to the framebuffer in the scratch row as up to three
+ * runs. A border row is all pen, any other row is pen on the left and right pw columns with the brush (if set)
+ * in between. */
+static void rect_fill_row(FbPainter *p, int32_t x0, int32_t x1, int32_t pw, bool border_row, uint32_t pen,
+                          uint32_t brush) {
+	int32_t cx0 = (x0 < 0) ? 0 : x0;
+	int32_t cx1 = (x1 > (int32_t)p->w) ? (int32_t)p->w : x1;
+	if (cx0 >= cx1) {
+		return;
+	}
+	if (border_row) {
+		scan_fill(p->row, p->mode, cx0, cx1 - cx0, pen);
+		return;
+	}
+
+	int32_t l = x0 + pw;
+	int32_t r = x1 - pw;
+	l = (l < cx0) ? cx0 : (l > cx1) ? cx1 : l;
+	r = (r < l) ? l : (r > cx1) ? cx1 : r;
+	scan_fill(p->row, p->mode, cx0, l - cx0, pen);
+	if (p->brush_set) {
+		scan_fill(p->row, p->mode, l, r - l, brush);
+	}
+	scan_fill(p->row, p->mode, r, cx1 - r, pen);
+}
+
+
 /* Fast path for a filled rectangle spanning the whole framebuffer width. Every scanline it covers is
  * fully defined by the rectangle (nothing outside to preserve), and only two distinct scanlines ever
  * occur: an all-pen border row (top/bottom pw rows) and a pen-edges + brush middle row. Each is built
- * once in the scratch row and written to every row that shares it, turning an O(w*h) fill into O(w)
- * pixel work plus h scanline writes. */
+ * once in the scratch row and written to every row that shares it, without reading the framebuffer. */
 static painter_ret_t painter_rect_fill_full_width(FbPainter *p, int32_t x0, int32_t x1,
                                                   int32_t y0, int32_t y1, uint32_t pen, uint32_t brush, int32_t pw) {
 	int32_t cy0 = (y0 < 0) ? 0 : y0;
@@ -455,15 +567,10 @@ static painter_ret_t painter_rect_fill_full_width(FbPainter *p, int32_t x0, int3
 
 		/* (Re)build the scratch row only when the required scanline type changes. */
 		if (border_row && ready != ROW_BORDER) {
-			for (int32_t xx = 0; xx < (int32_t)p->w; xx++) {
-				scan_set_pixel(p->row, p->mode, xx, pen);
-			}
+			rect_fill_row(p, x0, x1, pw, true, pen, brush);
 			ready = ROW_BORDER;
 		} else if (!border_row && ready != ROW_MIDDLE) {
-			for (int32_t xx = 0; xx < (int32_t)p->w; xx++) {
-				bool on_border = (xx < x0 + pw) || (xx >= x1 - pw);
-				scan_set_pixel(p->row, p->mode, xx, on_border ? pen : brush);
-			}
+			rect_fill_row(p, x0, x1, pw, false, pen, brush);
 			ready = ROW_MIDDLE;
 		}
 
@@ -490,7 +597,7 @@ static painter_ret_t painter_rect(Painter *self, int16_t x, int16_t y, uint16_t 
 	uint32_t pen = color_to_native(p, p->pen_color);
 	int32_t pw = p->pen_width;
 
-	/* Half-open rectangle [x0, x1) x [y0, y1), clipped per pixel to the framebuffer. */
+	/* Half-open rectangle [x0, x1) x [y0, y1), clipped to the framebuffer. */
 	int32_t x0 = x;
 	int32_t y0 = y;
 	int32_t x1 = (int32_t)x + w;
@@ -509,17 +616,7 @@ static painter_ret_t painter_rect(Painter *self, int16_t x, int16_t y, uint16_t 
 		if (row_read(p, yy) != FB_RET_OK) {
 			return PAINTER_RET_FAILED;
 		}
-		for (int32_t xx = x0; xx < x1; xx++) {
-			if (xx < 0 || xx >= (int32_t)p->w) {
-				continue;
-			}
-			bool on_border = pw > 0 && (xx < x0 + pw || xx >= x1 - pw || yy < y0 + pw || yy >= y1 - pw);
-			if (on_border) {
-				scan_set_pixel(p->row, p->mode, xx, pen);
-			} else if (p->brush_set) {
-				scan_set_pixel(p->row, p->mode, xx, brush);
-			}
-		}
+		rect_fill_row(p, x0, x1, pw, pw > 0 && (yy < y0 + pw || yy >= y1 - pw), pen, brush);
 		if (row_write(p, yy) != FB_RET_OK) {
 			return PAINTER_RET_FAILED;
 		}
@@ -530,27 +627,24 @@ static painter_ret_t painter_rect(Painter *self, int16_t x, int16_t y, uint16_t 
 
 
 /* Plot a pen-width x pen-width native-colour block centred on (cx, cy) through per-scanline read-modify-write,
- * clipped per pixel to the framebuffer. A width of 1 draws a single pixel. */
+ * clipped to the framebuffer. A width of 1 draws a single pixel. */
 static painter_ret_t painter_plot_thick(FbPainter *p, int32_t cx, int32_t cy, uint32_t color, int32_t pw) {
-	int32_t half = pw / 2;
-	for (int32_t oy = -half; oy < pw - half; oy++) {
-		int32_t yy = cy + oy;
+	int32_t l = cx - pw / 2;
+	int32_t r = l + pw;
+	l = (l < 0) ? 0 : l;
+	r = (r > (int32_t)p->w) ? (int32_t)p->w : r;
+	if (l >= r) {
+		return PAINTER_RET_OK;
+	}
+	for (int32_t yy = cy - pw / 2; yy < cy - pw / 2 + pw; yy++) {
 		if (yy < 0 || yy >= (int32_t)p->h) {
 			continue;
 		}
 		if (row_read(p, yy) != FB_RET_OK) {
 			return PAINTER_RET_FAILED;
 		}
-		bool dirty = false;
-		for (int32_t ox = -half; ox < pw - half; ox++) {
-			int32_t xx = cx + ox;
-			if (xx < 0 || xx >= (int32_t)p->w) {
-				continue;
-			}
-			scan_set_pixel(p->row, p->mode, xx, color);
-			dirty = true;
-		}
-		if (dirty && row_write(p, yy) != FB_RET_OK) {
+		scan_fill(p->row, p->mode, l, r - l, color);
+		if (row_write(p, yy) != FB_RET_OK) {
 			return PAINTER_RET_FAILED;
 		}
 	}
@@ -645,15 +739,21 @@ static painter_ret_t painter_image(Painter *self, int16_t x, int16_t y, const st
 		return PAINTER_RET_FAILED;
 	}
 
-	size_t src_row_bytes = fb_packed_size(image->w, image->mode);
+	/* The horizontally visible part of the image [ix0, ix1), the rest is clipped. */
+	int32_t ix0 = (x < 0) ? -x : 0;
+	int32_t ix1 = ((int32_t)x + (int32_t)image->w > (int32_t)p->w) ? (int32_t)p->w - x : (int32_t)image->w;
+	if (ix0 >= ix1) {
+		return PAINTER_RET_OK;
+	}
 
-	/* When the image is already in the framebuffer's native mode (the common case, as
-	 * tools/imtocdata.py generates images in the target mode) the pixel value is copied straight
-	 * through. Only a genuine mode mismatch pays for the (lossy) per-pixel colour conversion. */
+	/* When the image is already in the framebuffer's native mode (the common case, as tools/imtocdata.py
+	 * generates images in the target mode) each visible row is copied as a single run. Only a genuine mode
+	 * mismatch pays for the (lossy) colour conversion, which is inherently done pixel by pixel. Inversion is a
+	 * plain bitwise complement: every packed mode encodes intensity/channels directly, and only the relevant
+	 * low bits of a value are stored, so ~value negates it. */
 	bool inverted = (mode == PAINTER_MODE_INVERTED);
-	bool same_mode = (image->mode == p->mode);
+	size_t sbpp = (size_t)image->mode;
 
-	/* Blit the image one scanline at a time. Pixels outside the framebuffer are clipped. */
 	for (size_t iy = 0; iy < image->h; iy++) {
 		int32_t yy = y + (int32_t)iy;
 		if (yy < 0 || yy >= (int32_t)p->h) {
@@ -662,26 +762,23 @@ static painter_ret_t painter_image(Painter *self, int16_t x, int16_t y, const st
 		if (row_read(p, yy) != FB_RET_OK) {
 			return PAINTER_RET_FAILED;
 		}
-		const uint8_t *src_row = image->data + iy * src_row_bytes;
-		bool dirty = false;
-		for (size_t ix = 0; ix < image->w; ix++) {
-			int32_t xx = x + (int32_t)ix;
-			if (xx < 0 || xx >= (int32_t)p->w) {
-				continue;
-			}
-			uint32_t value = scan_get_pixel(src_row, image->mode, ix);
-			if (!same_mode) {
+		const uint8_t *src_row = image->data + iy * fb_packed_size(image->w, image->mode);
+		if (image->mode == p->mode) {
+			scan_copy(p->row, x + ix0, src_row, ix0, ix1 - ix0, p->mode, inverted);
+		} else {
+			for (int32_t ix = ix0; ix < ix1; ix++) {
+				uint32_t value = 0;
+				for (size_t j = 0; j < (sbpp + 7) / 8; j++) {
+					value = (value << 8) | src_row[ix * sbpp / 8 + j];
+				}
+				if (sbpp < 8) {
+					value = (value >> (8 - sbpp - ((ix * sbpp) & 7))) & ((1u << sbpp) - 1);
+				}
 				value = color_to_native(p, native_to_color(image->mode, value));
+				scan_fill(p->row, p->mode, x + ix, 1, inverted ? ~value : value);
 			}
-			/* Inversion is a plain bitwise complement: every packed mode encodes intensity/channels
-			 * directly, and scan_set_pixel only consumes the relevant low bits, so ~value negates it. */
-			if (inverted) {
-				value = ~value;
-			}
-			scan_set_pixel(p->row, p->mode, xx, value);
-			dirty = true;
 		}
-		if (dirty && row_write(p, yy) != FB_RET_OK) {
+		if (row_write(p, yy) != FB_RET_OK) {
 			return PAINTER_RET_FAILED;
 		}
 	}
@@ -724,28 +821,35 @@ fb_painter_ret_t fb_painter_crop_text(FbPainter *self, char *text, uint16_t w) {
 	}
 
 	/* Too wide: the ellipsis overwrites the tail of the string instead of being appended to it, so
-	 * the result never grows and the buffer cannot overflow. Shorten the kept prefix one character
-	 * at a time until the prefix with the ellipsis fits. */
+	 * the result never grows and the buffer cannot overflow. The width is the sum of the glyph advances,
+	 * hence the kept prefix is shortened one character at a time by subtracting the advance of the
+	 * dropped character instead of measuring the whole string again. */
 	size_t len = strlen(text);
 	size_t ellipsis = (len < 3) ? len : 3;
 	size_t keep = len - ellipsis;
-	while (true) {
-		memset(text + keep, '.', ellipsis);
-		text[keep + ellipsis] = '\0';
-		if (painter_text_size(&self->painter, text, &tw, NULL) != PAINTER_RET_OK) {
-			return FB_PAINTER_RET_FAILED;
-		}
-		if (tw <= w) {
+	uint16_t dots_w = 0;
+	uint16_t tail_w = 0;
+	if (painter_text_size(&self->painter, &"..."[3 - ellipsis], &dots_w, NULL) != PAINTER_RET_OK ||
+	    painter_text_size(&self->painter, text + keep, &tail_w, NULL) != PAINTER_RET_OK) {
+		return FB_PAINTER_RET_FAILED;
+	}
+	tw -= tail_w;
+	while ((tw + dots_w) > w) {
+		if (keep == 0) {
+			/* Not even the ellipsis alone fits in the requested width. */
+			text[0] = '\0';
 			return FB_PAINTER_RET_OK;
 		}
-		if (keep == 0) {
-			break;
-		}
 		keep--;
+		char c[2] = {text[keep], '\0'};
+		uint16_t c_w = 0;
+		if (painter_text_size(&self->painter, c, &c_w, NULL) != PAINTER_RET_OK) {
+			return FB_PAINTER_RET_FAILED;
+		}
+		tw -= c_w;
 	}
-
-	/* Not even the ellipsis alone fits in the requested width. */
-	text[0] = '\0';
+	memset(text + keep, '.', ellipsis);
+	text[keep + ellipsis] = '\0';
 
 	return FB_PAINTER_RET_OK;
 }
@@ -903,6 +1007,15 @@ fb_painter_ret_t fb_painter_init(FbPainter *self, Fb *fb) {
 	if (self->lock == NULL) {
 		goto err;
 	}
+	/* The text buffer lock is shared by all instances, the first one creates it. */
+	vTaskSuspendAll();
+	if (text_buffer_lock == NULL) {
+		text_buffer_lock = xSemaphoreCreateMutex();
+	}
+	xTaskResumeAll();
+	if (text_buffer_lock == NULL) {
+		goto err;
+	}
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("initialized, target %ux%u, mode %u bpp"),
 	      (unsigned)self->w, (unsigned)self->h, (unsigned)self->mode);
@@ -912,6 +1025,10 @@ err:
 	if (self->row != NULL) {
 		free(self->row);
 		self->row = NULL;
+	}
+	if (self->lock != NULL) {
+		vSemaphoreDelete(self->lock);
+		self->lock = NULL;
 	}
 	u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot initialize the service"));
 	return FB_PAINTER_RET_FAILED;
