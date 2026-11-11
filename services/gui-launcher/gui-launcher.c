@@ -51,7 +51,7 @@
 #define GUI_LAUNCHER_ICON_TOP 8
 #define GUI_LAUNCHER_SEL_PAD 2
 #define GUI_LAUNCHER_NAME_GAP 4
-#define GUI_LAUNCHER_LINE_H 10
+#define GUI_LAUNCHER_LINE_GAP 2
 
 /* Width of the scroll bar drawn along the right edge of the window, in pixels. */
 #define GUI_LAUNCHER_SCROLLBAR_W 8
@@ -108,6 +108,8 @@ static int16_t gui_launcher_draw_wrapped(GuiLauncher *self, const char *text, in
 	size_t line_len = 0;
 	line[0] = '\0';
 	int16_t y = top;
+	uint16_t line_h = 0;
+	painter->vmt->text_size(painter, "", NULL, &line_h);
 
 	const char *p = text;
 	while (*p != '\0') {
@@ -147,7 +149,7 @@ static int16_t gui_launcher_draw_wrapped(GuiLauncher *self, const char *text, in
 		if (w > max_w && line_len > 0) {
 			/* The word does not fit: flush the current line and start a new one with just the word. */
 			gui_launcher_draw_line(self, line, cx, y, max_w, highlight);
-			y = (int16_t)(y + GUI_LAUNCHER_LINE_H);
+			y = (int16_t)(y + line_h + GUI_LAUNCHER_LINE_GAP);
 			memcpy(line, word, word_len);
 			line[word_len] = '\0';
 			line_len = word_len;
@@ -158,7 +160,7 @@ static int16_t gui_launcher_draw_wrapped(GuiLauncher *self, const char *text, in
 	}
 	if (line_len > 0) {
 		gui_launcher_draw_line(self, line, cx, y, max_w, highlight);
-		y = (int16_t)(y + GUI_LAUNCHER_LINE_H);
+		y = (int16_t)(y + line_h + GUI_LAUNCHER_LINE_GAP);
 	}
 	return y;
 }
