@@ -9,8 +9,16 @@ if conf["LIB_MCU_RENDERER"] == "y":
 	# fontconv improvements: a --hinting option to select the FreeType hinting mode used when rasterizing vector
 	# fonts (upstream always uses the default hinting), pixel coverage rounded to the nearest level instead of
 	# truncated (which drops faint edge pixels) and the cap height measured from the 'H' glyph instead of being
-	# derived from the ascender/descender. Applied once, right after cloning.
-	env.Patch('0001-fontconv-improvements.patch')
+	# derived from the ascender/descender.
+	#
+	# The second patch speeds up the glyph lookup, which otherwise walks all glyphs of a block from its start:
+	# fontconv gets a --block-size option limiting the number of glyphs per block and a --glyph-table option
+	# writing a table of glyph offsets, which the renderer uses for a direct lookup when set with
+	# mr_set_glyph_table. Both patches are applied once, right after cloning.
+	env.Patch([
+		'0001-fontconv-improvements.patch',
+		'0002-glyph-lookup.patch',
+	])
 
 	ddir = env['LIB_DEFAULT_REPO_DIR']
 
