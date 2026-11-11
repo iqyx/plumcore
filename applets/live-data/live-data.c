@@ -24,6 +24,7 @@
 
 /* The applet requires the fb-painter service (see its Kconfig depends), so its assets are always available. */
 #include <services/fb-painter/assets/assets.h>
+#include <services/fb-painter/assets/fonts/fonts.h>
 
 #include "live-data.h"
 
@@ -43,10 +44,6 @@
 
 /* Side of the check_small image drawn in the rightmost list column marking a sensor as selected, in pixels. */
 #define LIVE_DATA_SEL_BOX 10
-
-/* Thickness of a seven-segment stroke and the vertical padding of the big value on the detail tab. */
-#define LIVE_DATA_SEG_THICK 4
-#define LIVE_DATA_DETAIL_PAD 8
 
 /* Period at which the polling task refreshes the cached sensor values, in milliseconds. */
 #define LIVE_DATA_POLL_INTERVAL_MS 200
@@ -129,7 +126,7 @@ static void live_data_draw_tabs(LiveDataApplet *self) {
 	int16_t bar_y = (int16_t)(self->h - LIVE_DATA_TAB_BAR_H);
 	uint16_t cell_w = (uint16_t)(self->w / LIVE_DATA_TAB_COUNT);
 
-	painter->vmt->set_font(painter, PAINTER_FONT_NORMAL, NULL);
+	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, NULL);
 	for (enum live_data_tab i = 0; i < LIVE_DATA_TAB_COUNT; i++) {
 		int16_t cell_x = (int16_t)(i * cell_w);
 		/* The last cell takes the remaining width so rounding never leaves a gap on the right. */
@@ -304,156 +301,25 @@ static void live_data_draw_list(LiveDataApplet *self) {
 }
 
 
-/* Seven-segment layout, one bit per segment:
- *
- *      aaa
- *     f   b
- *     f   b
- *      ggg
- *     e   c
- *     e   c
- *      ddd
- */
-#define LIVE_DATA_SEG_A 0x01
-#define LIVE_DATA_SEG_B 0x02
-#define LIVE_DATA_SEG_C 0x04
-#define LIVE_DATA_SEG_D 0x08
-#define LIVE_DATA_SEG_E 0x10
-#define LIVE_DATA_SEG_F 0x20
-#define LIVE_DATA_SEG_G 0x40
-
-/* Segments lit for each supported glyph: the digits 0..9 and a dash. Anything else is blank. */
-static uint8_t live_data_digit_segments(char c) {
-	switch (c) {
-		case '0': return LIVE_DATA_SEG_A | LIVE_DATA_SEG_B | LIVE_DATA_SEG_C | LIVE_DATA_SEG_D | LIVE_DATA_SEG_E | LIVE_DATA_SEG_F;
-		case '1': return LIVE_DATA_SEG_B | LIVE_DATA_SEG_C;
-		case '2': return LIVE_DATA_SEG_A | LIVE_DATA_SEG_B | LIVE_DATA_SEG_G | LIVE_DATA_SEG_E | LIVE_DATA_SEG_D;
-		case '3': return LIVE_DATA_SEG_A | LIVE_DATA_SEG_B | LIVE_DATA_SEG_G | LIVE_DATA_SEG_C | LIVE_DATA_SEG_D;
-		case '4': return LIVE_DATA_SEG_F | LIVE_DATA_SEG_G | LIVE_DATA_SEG_B | LIVE_DATA_SEG_C;
-		case '5': return LIVE_DATA_SEG_A | LIVE_DATA_SEG_F | LIVE_DATA_SEG_G | LIVE_DATA_SEG_C | LIVE_DATA_SEG_D;
-		case '6': return LIVE_DATA_SEG_A | LIVE_DATA_SEG_F | LIVE_DATA_SEG_G | LIVE_DATA_SEG_E | LIVE_DATA_SEG_C | LIVE_DATA_SEG_D;
-		case '7': return LIVE_DATA_SEG_A | LIVE_DATA_SEG_B | LIVE_DATA_SEG_C;
-		case '8': return LIVE_DATA_SEG_A | LIVE_DATA_SEG_B | LIVE_DATA_SEG_C | LIVE_DATA_SEG_D | LIVE_DATA_SEG_E | LIVE_DATA_SEG_F | LIVE_DATA_SEG_G;
-		case '9': return LIVE_DATA_SEG_A | LIVE_DATA_SEG_B | LIVE_DATA_SEG_C | LIVE_DATA_SEG_D | LIVE_DATA_SEG_F | LIVE_DATA_SEG_G;
-		case '-': return LIVE_DATA_SEG_G;
-		default: return 0;
-	}
-}
+/* Fonts for the big value on the detail tab, largest first. The largest one fitting the cell is used. */
+static const struct fb_painter_font_face *const live_data_detail_faces[] = {
+	&fb_painter_face_maple_mono_48,
+	&fb_painter_face_maple_mono_32,
+	&fb_painter_face_maple_mono_24,
+	&fb_painter_face_maple_mono_16,
+};
 
 
-/* Stroke thickness for a seven-segment glyph of cell width w: a quarter of the width so the strokes shrink
- * to 3 or 2 pixels for small digits (which stay legible only with thin strokes), capped at LIVE_DATA_SEG_THICK
- * for large ones and never below 2. */
-static uint16_t live_data_seg_thick(uint16_t w) {
-	uint16_t t = (uint16_t)(w / 4);
-	if (t > LIVE_DATA_SEG_THICK) {
-		t = LIVE_DATA_SEG_THICK;
-	}
-	if (t < 2) {
-		t = 2;
-	}
-	return t;
-}
-
-
-/* Draw one seven-segment glyph (a digit 0..9 or a dash) as white rectangles inside the w x h box with its
- * top-left corner at (x, y). The segment thickness scales with the digit width; the horizontal segments are
- * inset by the thickness at both ends so the corners read as a real seven-segment display. The caller must
- * have an active painter frame. */
-static void live_data_draw_digit(Painter *painter, char c, int16_t x, int16_t y, uint16_t w, uint16_t h) {
-	uint8_t seg = live_data_digit_segments(c);
-	uint16_t t = live_data_seg_thick(w);
-	int16_t half = (int16_t)((h - t) / 2);   /* y offset of the middle segment */
-	uint16_t hseg_w = (uint16_t)(w - 2 * t); /* horizontal segment length */
-	uint16_t vseg_h = (uint16_t)(half - t);  /* vertical segment length in each half */
-
-	painter->vmt->set_pen(painter, 0xffffffff, 0);
-	painter->vmt->set_brush(painter, 0xffffffff);
-
-	/* Horizontal segments: top, middle and bottom. */
-	if (seg & LIVE_DATA_SEG_A) {
-		painter->vmt->rect(painter, (int16_t)(x + t), y, hseg_w, t);
-	}
-	if (seg & LIVE_DATA_SEG_G) {
-		painter->vmt->rect(painter, (int16_t)(x + t), (int16_t)(y + half), hseg_w, t);
-	}
-	if (seg & LIVE_DATA_SEG_D) {
-		painter->vmt->rect(painter, (int16_t)(x + t), (int16_t)(y + h - t), hseg_w, t);
-	}
-
-	/* Vertical segments: the two in the top half then the two in the bottom half. */
-	if (seg & LIVE_DATA_SEG_F) {
-		painter->vmt->rect(painter, x, (int16_t)(y + t), t, vseg_h);
-	}
-	if (seg & LIVE_DATA_SEG_B) {
-		painter->vmt->rect(painter, (int16_t)(x + w - t), (int16_t)(y + t), t, vseg_h);
-	}
-	if (seg & LIVE_DATA_SEG_E) {
-		painter->vmt->rect(painter, x, (int16_t)(y + half + t), t, vseg_h);
-	}
-	if (seg & LIVE_DATA_SEG_C) {
-		painter->vmt->rect(painter, (int16_t)(x + w - t), (int16_t)(y + half + t), t, vseg_h);
-	}
-}
-
-
-/* Horizontal advance of one glyph in a seven-segment string: a decimal point is a narrow column, every
- * other glyph is a full w-wide cell, and each is followed by spacing. */
-static uint16_t live_data_digit_advance(char c, uint16_t w, uint16_t spacing) {
-	if (c == '.') {
-		return (uint16_t)(w / 4 + spacing);
-	}
-	return (uint16_t)(w + spacing);
-}
-
-
-/* Total width a seven-segment string occupies when drawn with digit cell width w and the given spacing,
- * without the trailing gap after the last glyph. */
-static uint16_t live_data_digits_width(const char *s, uint16_t w, uint16_t spacing) {
-	uint16_t total = 0;
-	for (const char *p = s; *p != '\0'; p++) {
-		total = (uint16_t)(total + live_data_digit_advance(*p, w, spacing));
-	}
-	if (total >= spacing) {
-		total = (uint16_t)(total - spacing);
-	}
-	return total;
-}
-
-
-/* Draw a string of seven-segment glyphs left to right starting at (x, y): the digits 0..9 and a dash are
- * full glyphs, a '.' is a small square on the baseline, and any other character advances a cell without
- * drawing. The caller must have an active painter frame. */
-static void live_data_draw_digits(Painter *painter, const char *s, int16_t x, int16_t y, uint16_t w,
-                                  uint16_t h, uint16_t spacing) {
-	for (const char *p = s; *p != '\0'; p++) {
-		if (*p == '.') {
-			/* Decimal point: a small square sitting on the glyph baseline. */
-			uint16_t dot = (uint16_t)(w / 4);
-			uint16_t min_dot = live_data_seg_thick(w);
-			if (dot < min_dot) {
-				dot = min_dot;
-			}
-			painter->vmt->set_pen(painter, 0xffffffff, 0);
-			painter->vmt->set_brush(painter, 0xffffffff);
-			painter->vmt->rect(painter, x, (int16_t)(y + h - dot), dot, dot);
-		} else {
-			live_data_draw_digit(painter, *p, x, y, w, h);
-		}
-		x = (int16_t)(x + live_data_digit_advance(*p, w, spacing));
-	}
-}
-
-
-/* Draw one sensor's detail view into the cell at (cx, cy) of size cw x ch: the current value as big
- * seven-segment digits centred in the cell with its unit just to the right. The caller must have an active
+/* Draw one sensor's detail view into the cell at (cx, cy) of size cw x ch: a label line on top with the sensor
+ * name on the left (only when the area is split across several sensors) and the unit on the right, and the
+ * current value centred in the rest of the cell in the largest font it fits. The caller must have an active
  * painter frame. */
 static void live_data_draw_detail_cell(LiveDataApplet *self, struct live_data_sensor *s, int16_t cx,
                                        int16_t cy, uint16_t cw, uint16_t ch, bool show_name) {
 	Painter *painter = &self->painter.painter;
 
-	/* The current value as big seven-segment digits formatted as configured in layout/detail, shown as three
-	 * dashes until the first successful read. */
+	/* The current value formatted as configured in layout/detail, shown as three dashes until the first
+	 * successful read. */
 	char value[24];
 	if (s->valid) {
 		live_data_format_value(value, sizeof(value), s->value, live_data_conf.settings.layout.detail.int_digits,
@@ -463,52 +329,50 @@ static void live_data_draw_detail_cell(LiveDataApplet *self, struct live_data_se
 		strcpy(value, "---");
 	}
 
-	/* Measure the unit first (bold font) so the digits can be sized to leave room for it on the right. MQ
-	 * topics carry no unit. */
+	/* Unit in the top-right corner in the default bold font. MQ topics carry no unit. */
 	const char *unit = (s->sensor != NULL && s->sensor->info != NULL && s->sensor->info->unit != NULL) ?
 	                   s->sensor->info->unit : "";
 	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, NULL);
 	uint16_t unit_w = 0;
-	uint16_t unit_h = 0;
-	painter->vmt->text_size(painter, unit, &unit_w, &unit_h);
-
-	/* Fill the cell height leaving LIVE_DATA_DETAIL_PAD above and below; digits are half as wide as they
-	 * are tall. If the value would not fit the width remaining after the unit, scale the digits down to fit
-	 * while keeping the aspect ratio. */
-	uint16_t reserve = (unit_w > 0) ? (uint16_t)(unit_w + 4) : 0;
-	uint16_t avail = (uint16_t)(cw - 2 * LIVE_DATA_DETAIL_PAD - reserve);
-	uint16_t digit_h = (uint16_t)(ch - 2 * LIVE_DATA_DETAIL_PAD);
-	uint16_t digit_w = (uint16_t)(digit_h / 2);
-	uint16_t spacing = (uint16_t)(digit_w / 6);
-	uint16_t total = live_data_digits_width(value, digit_w, spacing);
-	if (total > avail && total > 0) {
-		digit_w = (uint16_t)((uint32_t)digit_w * avail / total);
-		digit_h = (uint16_t)(digit_w * 2);
-		spacing = (uint16_t)(digit_w / 6);
-		total = live_data_digits_width(value, digit_w, spacing);
-	}
-
-	/* Centre the value + unit group horizontally, and the digits vertically within the cell. */
-	int16_t value_x = (int16_t)(cx + (cw - (total + reserve)) / 2);
-	int16_t value_y = (int16_t)(cy + (ch - digit_h) / 2);
-	live_data_draw_digits(painter, value, value_x, value_y, digit_w, digit_h, spacing);
-
-	/* Unit to the right of the value, in the bold font (still selected from the measurement above), sitting
-	 * on the digits' baseline. */
+	uint16_t label_h = 0;
+	painter->vmt->text_size(painter, unit, &unit_w, &label_h);
 	painter->vmt->set_pen(painter, 0xffffffff, 1);
-	painter->vmt->text(painter, (int16_t)(value_x + total + 4), (int16_t)(value_y + digit_h - unit_h), unit);
+	painter->vmt->text(painter, (int16_t)(cx + cw - 2 - unit_w), (int16_t)(cy + 1), unit);
 
-	/* When the area is split across several sensors, label each cell with its sensor name in the top-left
-	 * corner using the normal font, cropped to the cell width. */
+	/* Sensor name in the top-left corner on the same line in the normal font, cropped to leave room for the
+	 * unit. */
 	if (show_name) {
 		char name[32];
 		strncpy(name, (s->name != NULL) ? s->name : "", sizeof(name) - 1);
 		name[sizeof(name) - 1] = '\0';
 		painter->vmt->set_font(painter, PAINTER_FONT_NORMAL, NULL);
-		fb_painter_crop_text(&self->painter, name, (uint16_t)(cw - 4));
-		painter->vmt->set_pen(painter, 0xffffffff, 1);
+		uint16_t reserve = (unit_w > 0) ? (uint16_t)(unit_w + 4) : 0;
+		fb_painter_crop_text(&self->painter, name, (uint16_t)(cw - 4 - reserve));
 		painter->vmt->text(painter, (int16_t)(cx + 2), (int16_t)(cy + 1), name);
 	}
+
+	/* The value takes the area below the label line, which is only reserved when there is a label. */
+	uint16_t top = (show_name || unit_w > 0) ? (uint16_t)(label_h + 2) : 0;
+	uint16_t area_w = (uint16_t)(cw - 4);
+	uint16_t area_h = (uint16_t)(ch - top);
+
+	/* Pick the largest font the value fits in, falling back to the smallest one. The value only contains
+	 * digits, signs and a decimal point, so only the cap height has to fit vertically, not the whole text line
+	 * with its spacing above and below. */
+	const struct fb_painter_font *font = NULL;
+	uint16_t value_w = 0;
+	for (size_t i = 0; i < sizeof(live_data_detail_faces) / sizeof(live_data_detail_faces[0]); i++) {
+		font = &live_data_detail_faces[i]->bold;
+		painter->vmt->set_font(painter, PAINTER_FONT_BOLD, live_data_detail_faces[i]);
+		painter->vmt->text_size(painter, value, &value_w, NULL);
+		if (value_w <= area_w && font->cap_height <= area_h) {
+			break;
+		}
+	}
+
+	/* Centre the digits (cap height above the baseline) vertically, the text is drawn by its line top. */
+	painter->vmt->text(painter, (int16_t)(cx + (cw - value_w) / 2),
+	                   (int16_t)(cy + top + (area_h - font->cap_height) / 2 - (font->ascent - font->cap_height)), value);
 }
 
 
