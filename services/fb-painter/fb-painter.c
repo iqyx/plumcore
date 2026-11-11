@@ -28,63 +28,56 @@
 #include <interfaces/fb.h>
 #include <interfaces/painter.h>
 
+#include <mcu-renderer.h>
+
 #include "fb-painter.h"
+#include "font_nokia_small.h"
+#include "font_nokia_small_bold.h"
 
 #define MODULE_NAME "fb-painter"
 
 
 /***************************************************************************************************
- * Font glyphs
+ * Fonts
  ***************************************************************************************************/
 
-/* A single 8-row glyph: width is the number of used columns (packed MSB-first in each row byte) and
- * advance is how far the cursor moves after drawing it. */
-struct small_char {
-	uint8_t width;
-	uint8_t advance;
-	uint8_t rows[8];
-};
-
-#include "nokia-fonts.inc"
-
-/* A font face bundles the glyph tables for each supported style. A missing style (e.g. italic) falls
- * back to the normal table. max_char is the highest ASCII code present in every bundled table. */
-struct painter_font {
-	const struct small_char *normal;
-	const struct small_char *bold;
-	const struct small_char *italic;
-	uint8_t max_char;
-};
-
-/* Built-in default face used whenever the caller has not set an explicit font. */
-static const struct painter_font painter_default_font = {
-	.normal = nokia_small_data,
-	.bold = nokia_small_bold_data,
-	.italic = NULL,
-	.max_char = 126,
+/* Built-in default face, the Nokia 3310 small font converted to the mcu-renderer format. */
+const struct fb_painter_font_face fb_painter_face_nokia_small = {
+	.normal = {font_nokia_small, FONT_NOKIA_SMALL_BOUNDINGBOX_WIDTH, FONT_NOKIA_SMALL_BOUNDINGBOX_HEIGHT,
+	           FONT_NOKIA_SMALL_ASCENT, FONT_NOKIA_SMALL_CAP_HEIGHT},
+	.bold = {font_nokia_small_bold, FONT_NOKIA_SMALL_BOLD_BOUNDINGBOX_WIDTH, FONT_NOKIA_SMALL_BOLD_BOUNDINGBOX_HEIGHT,
+	         FONT_NOKIA_SMALL_BOLD_ASCENT, FONT_NOKIA_SMALL_BOLD_CAP_HEIGHT},
 };
 
 
-static const struct small_char *font_glyphs(const struct painter_font *font, painter_font_style_t style) {
-	const struct small_char *glyphs = NULL;
+/* Pick the font of the current face in the current style. A missing style falls back to the normal variant,
+ * a face without a normal variant to whichever style it has. */
+static const struct fb_painter_font *font_select(const FbPainter *self) {
+	const struct fb_painter_font_face *face = (self->font != NULL) ? self->font : &fb_painter_face_nokia_small;
+	const struct fb_painter_font *font = &face->normal;
 
-	switch (style) {
+	switch (self->font_style) {
 		case PAINTER_FONT_BOLD:
-			glyphs = font->bold;
+			font = &face->bold;
 			break;
 		case PAINTER_FONT_ITALIC:
-			glyphs = font->italic;
+			font = &face->italic;
 			break;
 		case PAINTER_FONT_NORMAL:
 		default:
-			glyphs = font->normal;
 			break;
 	}
-	if (glyphs == NULL) {
-		glyphs = font->normal;
+	if (font->data == NULL) {
+		font = &face->normal;
+	}
+	if (font->data == NULL) {
+		font = &face->bold;
+	}
+	if (font->data == NULL) {
+		font = &face->italic;
 	}
 
-	return glyphs;
+	return font;
 }
 
 
@@ -304,6 +297,70 @@ static painter_ret_t painter_set_font(Painter *self, painter_font_style_t style,
 }
 
 
+/* State shared with the mcu-renderer callbacks while a string is drawn, passed in mr_t.display. */
+struct text_ctx {
+	FbPainter *p;
+	uint32_t pen;
+	bool failed;
+};
+
+
+/* mcu-renderer fills the text rectangle background with this callback. Text is drawn transparently, hence
+ * there is nothing to do. */
+static void text_draw_rectangle(mr_t *mr, const mr_rectangle_t *rectangle) {
+	(void)mr;
+	(void)rectangle;
+}
+
+
+/* Blend a chunk of rendered text onto the framebuffer. The buffer contains a coverage (alpha) value 0..32 for
+ * every pixel of the screen rectangle, the pen color is blended over the current framebuffer content with
+ * it. Fully covered pixels get the pen color directly, uncovered pixels and rows are left untouched. */
+static void text_draw_textbuffer(mr_t *mr, uint8_t *buffer, uint32_t buffer_pitch, mr_rectangle_t *rectangle) {
+	struct text_ctx *ctx = mr->display;
+	FbPainter *p = ctx->p;
+
+	for (int16_t ty = 0; ty < rectangle->height; ty++) {
+		const uint8_t *alpha = buffer + ty * buffer_pitch;
+		int16_t tx = 0;
+		while (tx < rectangle->width && alpha[tx] == 0) {
+			tx++;
+		}
+		if (tx == rectangle->width) {
+			continue;
+		}
+
+		int32_t yy = rectangle->y + ty;
+		if (row_read(p, yy) != FB_RET_OK) {
+			ctx->failed = true;
+			return;
+		}
+		for (; tx < rectangle->width; tx++) {
+			if (alpha[tx] == 0) {
+				continue;
+			}
+			size_t xx = rectangle->x + tx;
+			uint32_t value = ctx->pen;
+			if (alpha[tx] < 32) {
+				painter_color_t bg = native_to_color(p->mode, scan_get_pixel(p->row, p->mode, xx));
+				painter_color_t color = 0;
+				for (uint32_t shift = 0; shift < 24; shift += 8) {
+					uint32_t f = (p->pen_color >> shift) & 0xff;
+					uint32_t b = (bg >> shift) & 0xff;
+					color |= ((f * alpha[tx] + b * (32 - alpha[tx])) / 32) << shift;
+				}
+				value = color_to_native(p, color);
+			}
+			scan_set_pixel(p->row, p->mode, xx, value);
+		}
+		if (row_write(p, yy) != FB_RET_OK) {
+			ctx->failed = true;
+			return;
+		}
+	}
+}
+
+
 static painter_ret_t painter_text(Painter *self, int16_t x, int16_t y, const char *text) {
 	FbPainter *p = self->parent;
 
@@ -314,50 +371,43 @@ static painter_ret_t painter_text(Painter *self, int16_t x, int16_t y, const cha
 		return PAINTER_RET_FAILED;
 	}
 
-	const struct painter_font *font = (p->font != NULL) ? (const struct painter_font *)p->font : &painter_default_font;
-	const struct small_char *glyphs = font_glyphs(font, p->font_style);
-	uint32_t pen = color_to_native(p, p->pen_color);
-
-	/* Glyphs are drawn in the pen color with their top-left corner following the cursor, one 8-row
-	 * glyph at a time. Set (lit) pixels are written; the rest of the surface is left untouched. */
-	int32_t cx = x;
-	for (const char *s = text; *s != '\0'; s++) {
-		uint8_t c = (uint8_t)*s;
-		if (c < 32 || c > font->max_char) {
-			continue;
-		}
-		const struct small_char *g = &glyphs[c - 32];
-		for (uint32_t row = 0; row < 8; row++) {
-			if (g->rows[row] == 0) {
-				continue;
-			}
-			int32_t yy = y + (int32_t)row;
-			if (yy < 0 || yy >= (int32_t)p->h) {
-				continue;
-			}
-			if (row_read(p, yy) != FB_RET_OK) {
-				return PAINTER_RET_FAILED;
-			}
-			bool dirty = false;
-			for (uint32_t col = 0; col < g->width; col++) {
-				if ((g->rows[row] & (0x80 >> col)) == 0) {
-					continue;
-				}
-				int32_t xx = cx + (int32_t)col;
-				if (xx < 0 || xx >= (int32_t)p->w) {
-					continue;
-				}
-				scan_set_pixel(p->row, p->mode, xx, pen);
-				dirty = true;
-			}
-			if (dirty && row_write(p, yy) != FB_RET_OK) {
-				return PAINTER_RET_FAILED;
-			}
-		}
-		cx += g->advance;
+	/* mcu-renderer renders the string into a coverage buffer in chunks and hands each chunk over to
+	 * text_draw_textbuffer. The buffer is one glyph cell high and two glyph cells wide (a chunk must fit at
+	 * least the widest glyph). It is allocated only for the duration of the call as it may be too large for
+	 * the stack of the calling task with big fonts. */
+	const struct fb_painter_font *font = font_select(p);
+	size_t buffer_size = (size_t)font->bbox_w * 2 * font->bbox_h;
+	uint8_t *buffer = calloc(buffer_size, sizeof(uint8_t));
+	if (buffer == NULL) {
+		return PAINTER_RET_FAILED;
 	}
 
-	return PAINTER_RET_OK;
+	struct text_ctx ctx = {
+		.p = p,
+		.pen = color_to_native(p, p->pen_color),
+		.failed = false,
+	};
+	mr_t mr;
+	mr_init(&mr);
+	mr.draw_rectangle_callback = text_draw_rectangle;
+	mr.draw_string_callback = mr_draw_string_textbuffer;
+	mr.draw_textbuffer_callback = text_draw_textbuffer;
+	mr.display_width = (int16_t)p->w;
+	mr.display_height = (int16_t)p->h;
+	mr.display = &ctx;
+	mr.buffer = buffer;
+	mr.buffer_size = buffer_size;
+	mr_set_font(&mr, font->data);
+
+	/* The whole framebuffer is the clipping rectangle, the offset places the top (ascent) left corner of the
+	 * text at (x, y). */
+	mr_rectangle_t clip = {0, 0, (int16_t)p->w, (int16_t)p->h};
+	mr_point_t offset = {x, y};
+	mr_draw_text(&mr, text, &clip, &offset);
+
+	free(buffer);
+
+	return ctx.failed ? PAINTER_RET_FAILED : PAINTER_RET_OK;
 }
 
 
@@ -371,31 +421,15 @@ static painter_ret_t painter_text_size(Painter *self, const char *text, uint16_t
 		return PAINTER_RET_FAILED;
 	}
 
-	const struct painter_font *font = (p->font != NULL) ? (const struct painter_font *)p->font : &painter_default_font;
-	const struct small_char *glyphs = font_glyphs(font, p->font_style);
-
-	/* Walk the string exactly like painter_text does, advancing the cursor by the glyph advance and
-	 * tracking how far to the right the glyph pixels themselves reach. The trailing advance gap of
-	 * the last glyph is not part of the drawn extent. */
-	uint32_t cx = 0;
-	uint32_t extent = 0;
-	for (const char *s = text; *s != '\0'; s++) {
-		uint8_t c = (uint8_t)*s;
-		if (c < 32 || c > font->max_char) {
-			continue;
-		}
-		const struct small_char *g = &glyphs[c - 32];
-		if ((cx + g->width) > extent) {
-			extent = cx + g->width;
-		}
-		cx += g->advance;
-	}
+	mr_t mr;
+	mr_init(&mr);
+	mr_set_font(&mr, font_select(p)->data);
 
 	if (w != NULL) {
-		*w = (uint16_t)extent;
+		*w = (uint16_t)mr_get_text_width(&mr, text);
 	}
 	if (h != NULL) {
-		*h = 8;
+		*h = (uint16_t)mr_get_line_height(&mr);
 	}
 
 	return PAINTER_RET_OK;

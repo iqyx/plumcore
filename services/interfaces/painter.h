@@ -37,9 +37,9 @@ enum painter_mode {
 	PAINTER_MODE_INVERTED = 1,
 };
 
-/* Opaque handle to a font face. The concrete meaning is defined by the painter implementation; how a
- * caller obtains such a handle is still TBD. A NULL handle selects the painter's default face. */
-typedef void *painter_font_t;
+/* Opaque handle to a font face. The concrete meaning is defined by the painter implementation, which
+ * also provides the handles. A NULL handle selects the painter's default face. */
+typedef const void *painter_font_t;
 
 typedef struct painter Painter;
 
@@ -79,10 +79,9 @@ struct painter_vmt {
 	painter_ret_t (*text)(Painter *self, int16_t x, int16_t y, const char *text);
 
 	/* Measure the string the text method would draw with the current font and style without drawing
-	 * anything, ie. drawing at (x, y) covers [x, x + w) x [y, y + h). The width is the horizontal
-	 * extent of the drawn glyphs (no trailing advance gap), the height is the glyph cell height of
-	 * the font and does not depend on the string. Either output pointer may be NULL if the caller is
-	 * not interested in that dimension. */
+	 * anything, ie. drawing at (x, y) covers roughly [x, x + w) x [y, y + h). The width is the sum of
+	 * the glyph advances, the height is the line height of the font and does not depend on the string.
+	 * Either output pointer may be NULL if the caller is not interested in that dimension. */
 	painter_ret_t (*text_size)(Painter *self, const char *text, uint16_t *w, uint16_t *h);
 
 	/* Blit an uncompressed raster image with its top-left corner at (x, y). The image is converted

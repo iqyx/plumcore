@@ -2,9 +2,15 @@ Import("env")
 Import("objs")
 Import("conf")
 
+import re
+import subprocess
+import sys
+from colorama import Fore, Style
+
 env.Append(CPPPATH = [
 	Dir("."),
 	Dir("assets"),
+	Dir("assets/fonts"),
 ])
 
 if conf["SERVICE_FB_PAINTER"] == "y":
@@ -31,3 +37,95 @@ if conf["SERVICE_FB_PAINTER"] == "y":
 	)
 
 	objs.append(env.Object(File("assets/assets.c")))
+
+	# Each configured font is a fontconfig pattern ("family-size:style", see SERVICE_FB_PAINTER_FONTS). Patterns
+	# differing only in style are grouped into a single font face with normal/bold/italic variants.
+	def sanitize(text):
+		return re.sub('[^a-z0-9]+', '_', text.lower()).strip('_')
+
+	fonts = []
+	for pattern in filter(None, map(str.strip, conf["SERVICE_FB_PAINTER_FONTS"].split(';'))):
+		face, _, props = pattern.partition(':')
+		props = props.lower()
+		if 'italic' in props or 'oblique' in props:
+			style = 'italic'
+		elif 'bold' in props:
+			style = 'bold'
+		else:
+			style = 'normal'
+		fonts.append({'pattern': pattern, 'name': 'font_' + sanitize(pattern), 'face': sanitize(face), 'style': style})
+
+	# Convert the configured host-installed fonts into mcu-renderer font headers in assets/fonts/ using the
+	# fontconv tool shipped with the library. The headers are generated during the build as fonts.c includes
+	# them, the "fonts" target builds just them.
+	fontconv = File('#lib/mcu-renderer/src/tools/fontconv.py')
+
+	def build_font(target, source, env):
+		pattern = source[1].read()
+		requested = subprocess.check_output(['fc-pattern', '-f', '%{family}', pattern], text=True)
+		resolved = subprocess.check_output(['fc-match', '-f', '%{file}\n%{family}\n%{size}', pattern], text=True)
+		file, families, size = resolved.split('\n')
+		if requested not in families.split(','):
+			print(f'{Fore.RED}{Style.BRIGHT}Font not found{Style.RESET_ALL} {pattern} (fc-match returned {file})')
+			return 1
+		if size == '':
+			print(f'{Fore.RED}{Style.BRIGHT}Font size missing{Style.RESET_ALL} {pattern}')
+			return 1
+
+		pixels = float(size) * int(conf["SERVICE_FB_PAINTER_FONTS_DPI"]) / 72
+		print(f'{Fore.BLUE}{Style.BRIGHT}Converting font{Style.RESET_ALL} {file} ({size} pt, {pixels:g} px) to {target[0]}')
+		return subprocess.call([
+			sys.executable, source[0].path,
+			'-s', conf["SERVICE_FB_PAINTER_FONTS_CODEPOINTS"],
+			'-p', str(pixels),
+			'-b', conf["SERVICE_FB_PAINTER_FONTS_BPP"],
+			'-H', conf["SERVICE_FB_PAINTER_FONTS_HINTING"],
+			'-n', target[0].name.removesuffix('.h'),
+			file, target[0].path,
+		])
+
+	headers = []
+	for font in fonts:
+		headers += env.Command(
+			File('assets/fonts/%s.h' % font['name']),
+			[
+				fontconv,
+				env.Value(font['pattern']),
+				env.Value(conf["SERVICE_FB_PAINTER_FONTS_DPI"]),
+				env.Value(conf["SERVICE_FB_PAINTER_FONTS_BPP"]),
+				env.Value(conf["SERVICE_FB_PAINTER_FONTS_HINTING"]),
+				env.Value(conf["SERVICE_FB_PAINTER_FONTS_CODEPOINTS"]),
+			],
+			build_font,
+		)
+	env.Alias("fonts", headers)
+
+	# Generate the font face table: fonts.c includes every font header (they contain the font data definitions)
+	# and bundles the style variants of each face, fonts.h declares the faces for painter clients.
+	faces = {}
+	for font in fonts:
+		faces.setdefault(font['face'], {})[font['style']] = font['name']
+
+	def build_face_table(target, source, env):
+		with open(target[0].path, 'w') as c:
+			c.write('#include "fb-painter.h"\n')
+			for font in fonts:
+				c.write('#include "%s.h"\n' % font['name'])
+			for face, styles in faces.items():
+				c.write('\nconst struct fb_painter_font_face fb_painter_face_%s = {\n' % face)
+				for style, name in styles.items():
+					c.write('\t.%s = {%s, %s_BOUNDINGBOX_WIDTH, %s_BOUNDINGBOX_HEIGHT, %s_ASCENT, %s_CAP_HEIGHT},\n' %
+					        (style, name, *[name.upper()] * 4))
+				c.write('};\n')
+
+		with open(target[1].path, 'w') as h:
+			h.write('#pragma once\n\n#include "fb-painter.h"\n\n')
+			for face in faces:
+				h.write('extern const struct fb_painter_font_face fb_painter_face_%s;\n' % face)
+
+	env.Command(
+		[File("assets/fonts/fonts.c"), File("assets/fonts/fonts.h")],
+		env.Value(conf["SERVICE_FB_PAINTER_FONTS"]),
+		build_face_table,
+	)
+	objs.append(env.Object(File("assets/fonts/fonts.c")))

@@ -19,6 +19,29 @@ typedef enum {
 	FB_PAINTER_RET_NOMEM,
 } fb_painter_ret_t;
 
+/* A single mcu-renderer font together with its bounding box size (the largest glyph cell), which sizes the
+ * text rendering buffer, and its vertical metrics: the ascent (distance from the top of the text line to the
+ * baseline) and the cap height (height of capital letters and digits above the baseline). A NULL data pointer
+ * marks a missing style variant. */
+struct fb_painter_font {
+	const uint8_t *data;
+	uint8_t bbox_w;
+	uint8_t bbox_h;
+	uint8_t ascent;
+	uint8_t cap_height;
+};
+
+/* A font face bundles the style variants of a font, a missing style falls back to the normal one. Additional faces
+ * are generated from the configured fonts into assets/fonts/fonts.h, pass &fb_painter_face_<name> to set_font. */
+struct fb_painter_font_face {
+	struct fb_painter_font normal;
+	struct fb_painter_font bold;
+	struct fb_painter_font italic;
+};
+
+/* Built-in default face (Nokia 3310 small font, 8 px line height), used when set_font is given NULL. */
+extern const struct fb_painter_font_face fb_painter_face_nokia_small;
+
 typedef struct fb_painter {
 	Painter painter;                 /* painter interface exposed to clients, use &self->painter */
 
@@ -39,9 +62,8 @@ typedef struct fb_painter {
 	painter_color_t brush_color;
 	bool brush_set;
 
-	/* Current text font: an opaque face handle (NULL selects the built-in default face) plus the
-	 * style applied on top of it. */
-	painter_font_t font;
+	/* Current text font: a face (NULL selects the default face) plus the style applied on top of it. */
+	const struct fb_painter_font_face *font;
 	painter_font_style_t font_style;
 
 	/* Current point of path drawing, set by move_to and advanced by line_to. */

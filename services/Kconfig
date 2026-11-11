@@ -509,7 +509,46 @@ menu "User interface services"
 
 	config SERVICE_FB_PAINTER
 		bool "2D painter on top of a framebuffer device"
+		select LIB_MCU_RENDERER
 		default n
+
+	menu "fb-painter font assets"
+		depends on SERVICE_FB_PAINTER
+
+		config SERVICE_FB_PAINTER_FONTS
+			string "Fonts to convert"
+			default "Maple Mono-48;Maple Mono-48:bold;Maple Mono-32;Maple Mono-32:bold;Maple Mono-24;Maple Mono-24:bold;Maple Mono-16;Maple Mono-16:bold;Maple Mono-12;Maple Mono-12:bold;Maple Mono-10;Maple Mono-10:bold"
+			help
+			  Semicolon-separated list of fontconfig patterns ("family-size:style") of host installed
+			  fonts. Each pattern is resolved with fc-match and converted by the mcu-renderer fontconv
+			  tool into services/fb-painter/assets/fonts/ during the build (or explicitly with the
+			  "fonts" target). The size is in points.
+
+		config SERVICE_FB_PAINTER_FONTS_DPI
+			int "Font rendering resolution (DPI)"
+			default 72
+			help
+			  Resolution used to convert font point sizes to pixels. With 72 DPI one point is one
+			  pixel.
+
+		config SERVICE_FB_PAINTER_FONTS_BPP
+			int "Font bits per pixel"
+			range 1 8
+			default 2
+
+		config SERVICE_FB_PAINTER_FONTS_HINTING
+			string "Font hinting mode"
+			default "mono"
+			help
+			  FreeType hinting mode used to rasterize the fonts: "none", "light", "normal" (FreeType
+			  default), "mono" (strongest hinting, glyphs are snapped to the pixel grid as for
+			  monochrome output but still rendered antialiased) or "auto" (force the FreeType
+			  autohinter instead of the font's own hinting instructions).
+
+		config SERVICE_FB_PAINTER_FONTS_CODEPOINTS
+			string "Unicode codepoints to convert"
+			default "0x20-0x7e"
+	endmenu
 
 	config SERVICE_GUI_WM_FS
 		bool "Full-screen GUI window manager"
