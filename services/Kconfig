@@ -290,6 +290,10 @@ menu "Filesystem and memory management services"
 		default y
 		select LIB_SPIFFS
 
+	config SERVICE_BLOCK_FAT32
+		bool "FAT32 filesystem on a block device"
+		default n
+
 	config SERVICE_WORN_LOG_BLOCK
 		bool "WORN (write-once, read-never) log on a block device storage"
 		default n
