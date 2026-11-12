@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * SD/MMC driver using the SPI interface
  *
- * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2021-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <main.h>
 #include <interface_spidev.h>
 #include <interfaces/block.h>
 
@@ -80,7 +81,8 @@ typedef struct {
 	uint8_t cid[16];
 	uint8_t csd[16];
 	struct spi_sd_product_info *product_info;
-	size_t size_blocks;
+	uint32_t size_blocks;
+	SemaphoreHandle_t lock;
 
 	/* Block device interface instance */
 	Block block;
@@ -93,9 +95,3 @@ spi_sd_ret_t spi_sd_free(SpiSd *self);
 spi_sd_ret_t spi_sd_go_idle(SpiSd *self);
 spi_sd_ret_t spi_sd_read_data(SpiSd *self, uint32_t block, uint8_t buf[512], size_t len, uint32_t timeout);
 spi_sd_ret_t spi_sd_write_data(SpiSd *self, uint32_t block, const uint8_t buf[512], size_t len, uint32_t timeout);
-
-
-block_ret_t spi_sd_get_block_size(SpiSd *self, size_t *block_size);
-block_ret_t spi_sd_get_size(SpiSd *self, size_t *block_size);
-block_ret_t spi_sd_read(SpiSd *self, size_t block, uint8_t *buf);
-block_ret_t spi_sd_write(SpiSd *self, size_t block, const uint8_t *buf);

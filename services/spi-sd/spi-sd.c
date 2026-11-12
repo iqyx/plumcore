@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * SD/MMC driver using the SPI interface
  *
- * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2021-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -24,7 +24,7 @@
 #define DEBUG 1
 
 
-static block_vmt_t block_vmt;
+static const struct block_vmt block_vmt;
 
 static spi_sd_ret_t spi_sd_wait_idle(SpiSd *self, uint32_t timeout_ms) {
 	uint8_t dummy = 0xff;
@@ -88,6 +88,12 @@ static spi_sd_ret_t spi_sd_send_raw_cmd_arg(SpiSd *self, sdmmc_cmd_t cmd, uint32
 	}
 	interface_spidev_send(self->spidev, txbuf, 6);
 
+	/* CMD12 is followed by a stuff byte which must be skipped. */
+	if (cmd == SDMMC_CMD12) {
+		uint8_t dummy = 0xff;
+		interface_spidev_send(self->spidev, &dummy, sizeof(dummy));
+	}
+
 	/* Wait for the reseponse. */
 	uint8_t status = 0;
 	for (uint32_t i = 0; i < timeout_cycles; i++) {
@@ -103,6 +109,25 @@ static spi_sd_ret_t spi_sd_send_raw_cmd_arg(SpiSd *self, sdmmc_cmd_t cmd, uint32
 		u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("status = 0x%02x"), status);
 	}
 	return status_to_ret(status);
+}
+
+
+static spi_sd_ret_t spi_sd_receive_data_block(SpiSd *self, uint8_t *buf, size_t len, uint32_t timeout) {
+	uint8_t dummy[2] = {0xff, 0xff};
+	uint8_t token = 0;
+	for (uint32_t i = 0; i < timeout; i++) {
+		interface_spidev_exchange(self->spidev, dummy, &token, sizeof(token));
+		if (token != 0xff) {
+			if (token != 0xfe) {
+				return SPI_SD_RET_FAILED;
+			}
+			interface_spidev_receive(self->spidev, buf, len);
+			uint16_t crc = 0;
+			interface_spidev_exchange(self->spidev, dummy, (uint8_t *)&crc, sizeof(crc));
+			return SPI_SD_RET_OK;
+		}
+	}
+	return SPI_SD_RET_TIMEOUT;
 }
 
 
@@ -140,22 +165,27 @@ static spi_sd_ret_t spi_sd_send_cmd(SpiSd *self, sdmmc_cmd_t cmd, uint32_t arg, 
 	}
 
 	if (cmd == SDMMC_CMD_READ_SINGLE_BLOCK || cmd == SDMMC_CMD_SEND_CID || cmd == SDMMC_CMD_SEND_CSD) {
-		uint8_t dummy[2] = {0xff, 0xff};
-		uint8_t token = 0;
-		for (uint32_t i = 0; i < timeout; i++) {
-			interface_spidev_exchange(self->spidev, dummy, &token, sizeof(token));
-			if (token != 0xff) {
-				if (token != 0xfe) {
-					ret = SPI_SD_RET_FAILED;
-					goto ret;
-				}
-				interface_spidev_receive(self->spidev, response, resp_len);
-				uint16_t crc = 0;
-				interface_spidev_exchange(self->spidev, dummy, (uint8_t *)&crc, sizeof(crc));
-				goto ret;
+		ret = spi_sd_receive_data_block(self, response, resp_len, timeout);
+		goto ret;
+	}
+
+	if (cmd == SDMMC_CMD18) {
+		size_t blocks = resp_len / 512;
+		for (size_t i = 0; i < blocks; i++) {
+			ret = spi_sd_receive_data_block(self, response + i * 512, 512, timeout);
+			if (ret != SPI_SD_RET_OK) {
+				break;
 			}
 		}
-		ret = SPI_SD_RET_TIMEOUT;
+
+		/* Stop the transmission even if the read failed and wait for the card to release busy. */
+		spi_sd_ret_t stop_ret = spi_sd_send_raw_cmd_arg(self, SDMMC_CMD12, 0, timeout);
+		if (ret == SPI_SD_RET_OK && stop_ret != SPI_SD_RET_OK) {
+			ret = stop_ret;
+		}
+		if (spi_sd_wait_idle(self, timeout) != SPI_SD_RET_OK && ret == SPI_SD_RET_OK) {
+			ret = SPI_SD_RET_TIMEOUT;
+		}
 		goto ret;
 	}
 
@@ -228,7 +258,11 @@ spi_sd_ret_t spi_sd_go_idle(SpiSd *self) {
 
 
 spi_sd_ret_t spi_sd_read_data(SpiSd *self, uint32_t block, uint8_t buf[512], size_t len, uint32_t timeout) {
-	return spi_sd_send_cmd(self, SDMMC_CMD_READ_SINGLE_BLOCK, block, buf, len, timeout);
+	if (len == 512) {
+		return spi_sd_send_cmd(self, SDMMC_CMD_READ_SINGLE_BLOCK, block, buf, len, timeout);
+	} else {
+		return spi_sd_send_cmd(self, SDMMC_CMD18, block, buf, len, timeout);
+	}
 }
 
 
@@ -387,8 +421,13 @@ spi_sd_ret_t spi_sd_init(SpiSd *self, struct interface_spidev *spidev) {
 		);
 	}
 
+	self->lock = xSemaphoreCreateMutex();
+	if (self->lock == NULL) {
+		return SPI_SD_RET_FAILED;
+	}
+
 	/* Block device interface implementation */
-	block_init(&self->block, &block_vmt);
+	self->block.vmt = &block_vmt;
 	self->block.parent = self;
 
 	return SPI_SD_RET_OK;
@@ -396,7 +435,7 @@ spi_sd_ret_t spi_sd_init(SpiSd *self, struct interface_spidev *spidev) {
 
 
 spi_sd_ret_t spi_sd_free(SpiSd *self) {
-	block_free(&self->block);
+	vSemaphoreDelete(self->lock);
 	return SPI_SD_RET_OK;
 }
 
@@ -404,43 +443,81 @@ spi_sd_ret_t spi_sd_free(SpiSd *self) {
   Block device interface implementation
 *********************************************************************************/
 
-/** @todo lock the SD card on access! */
+static block_ret_t sd_ret_to_block_ret(spi_sd_ret_t ret) {
+	switch (ret) {
+		case SPI_SD_RET_OK:
+			return BLOCK_RET_OK;
+		case SPI_SD_RET_TIMEOUT:
+			return BLOCK_RET_TIMEOUT;
+		case SPI_SD_RET_NO_CARD:
+			return BLOCK_RET_NO_MEDIA;
+		default:
+			return BLOCK_RET_FAILED;
+	}
+}
 
-static block_vmt_t block_vmt = {
-	.get_block_size = spi_sd_get_block_size,
-	.set_block_size = NULL,
-	.get_size = spi_sd_get_size,
+
+static block_ret_t spi_sd_get_geometry(Block *self, size_t *block_size, uint32_t *block_count) {
+	SpiSd *sd = (SpiSd *)self->parent;
+
+	*block_size = 512;
+	*block_count = sd->size_blocks;
+	return BLOCK_RET_OK;
+}
+
+
+static block_ret_t spi_sd_read(Block *self, uint32_t lba, void *buf, size_t count) {
+	SpiSd *sd = (SpiSd *)self->parent;
+
+	if (buf == NULL || count == 0 || lba >= sd->size_blocks || count > sd->size_blocks - lba) {
+		return BLOCK_RET_BAD_ARG;
+	}
+
+	xSemaphoreTake(sd->lock, portMAX_DELAY);
+	spi_sd_ret_t ret = spi_sd_read_data(sd, lba, buf, count * 512, 1000);
+	xSemaphoreGive(sd->lock);
+
+	return sd_ret_to_block_ret(ret);
+}
+
+
+static block_ret_t spi_sd_write(Block *self, uint32_t lba, const void *buf, size_t count) {
+	SpiSd *sd = (SpiSd *)self->parent;
+
+	if (buf == NULL || count == 0 || lba >= sd->size_blocks || count > sd->size_blocks - lba) {
+		return BLOCK_RET_BAD_ARG;
+	}
+
+	/* CSD TMP_WRITE_PROTECT or PERM_WRITE_PROTECT */
+	if (sd->csd[14] & 0x30) {
+		return BLOCK_RET_READ_ONLY;
+	}
+
+	xSemaphoreTake(sd->lock, portMAX_DELAY);
+	spi_sd_ret_t ret = spi_sd_write_data(sd, lba, buf, count * 512, 10000);
+	xSemaphoreGive(sd->lock);
+
+	return sd_ret_to_block_ret(ret);
+}
+
+
+static block_ret_t spi_sd_flush(Block *self) {
+	SpiSd *sd = (SpiSd *)self->parent;
+
+	/* There is no write cache in the driver. Wait for the card to finish programming the last write. */
+	xSemaphoreTake(sd->lock, portMAX_DELAY);
+	interface_spidev_select(sd->spidev);
+	spi_sd_ret_t ret = spi_sd_wait_idle(sd, 10000);
+	interface_spidev_deselect(sd->spidev);
+	xSemaphoreGive(sd->lock);
+
+	return sd_ret_to_block_ret(ret);
+}
+
+
+static const struct block_vmt block_vmt = {
+	.get_geometry = spi_sd_get_geometry,
 	.read = spi_sd_read,
 	.write = spi_sd_write,
-	.flush = NULL,
+	.flush = spi_sd_flush,
 };
-
-
-block_ret_t spi_sd_get_block_size(SpiSd *self, size_t *block_size) {
-	*block_size = 512;
-	return BLOCK_RET_OK;
-}
-
-
-block_ret_t spi_sd_get_size(SpiSd *self, size_t *block_size) {
-	*block_size = self->size_blocks;
-	return BLOCK_RET_OK;
-}
-
-
-block_ret_t spi_sd_read(SpiSd *self, size_t block, uint8_t *buf) {
-	if (spi_sd_read_data(self, block, buf, 512, 1000) == SPI_SD_RET_OK) {
-		return BLOCK_RET_OK;
-	}
-	return BLOCK_RET_FAILED;
-}
-
-
-block_ret_t spi_sd_write(SpiSd *self, size_t block, const uint8_t *buf) {
-	if (spi_sd_write_data(self, block, buf, 512, 10000) == SPI_SD_RET_OK) {
-		return BLOCK_RET_OK;
-	}
-	return BLOCK_RET_FAILED;
-}
-
-

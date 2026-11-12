@@ -1,41 +1,92 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Block memory device interface descriptor
  *
- * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2021-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
 #pragma once
 
 #include <stdint.h>
-
-#include "interface.h"
+#include <stddef.h>
 
 typedef enum {
 	BLOCK_RET_OK = 0,
 	BLOCK_RET_FAILED,
-	BLOCK_RET_NULL,
-	BLOCK_RET_OUT_OF_RANGE,
+	BLOCK_RET_BAD_ARG,
+	BLOCK_RET_TIMEOUT,
+	BLOCK_RET_NO_MEDIA,
+	BLOCK_RET_READ_ONLY,
+	BLOCK_RET_DEVICE_CHANGED,
 } block_ret_t;
 
+typedef struct block Block;
 
-typedef struct {
-	block_ret_t (*get_block_size)(void *parent, size_t *block_size);
-	block_ret_t (*set_block_size)(void *parent, size_t block_size);
-	block_ret_t (*get_size)(void *parent, size_t *size);
-	block_ret_t (*read)(void *parent, size_t block, uint8_t *buf);
-	block_ret_t (*write)(void *parent, size_t block, const uint8_t *buf);
-	block_ret_t (*flush)(void *parent);
-} block_vmt_t;
+/**
+ * @brief Block device interface
+ *
+ * The device is an array of fixed-size blocks (sectors) addressed by a logical block address (LBA) starting
+ * at 0. All methods are blocking and mandatory. Implementations are responsible for locking, the interface may be
+ * used from multiple tasks concurrently.
+ *
+ * Removable media: every time the media appears or disappears, all methods except @p get_geometry return
+ * BLOCK_RET_DEVICE_CHANGED until @p get_geometry is called. The user is expected to re-read the geometry and
+ * invalidate anything it knows about the previous media.
+ */
+struct block_vmt {
+	/**
+	 * @brief Get the device geometry
+	 *
+	 * @param self Block interface instance
+	 * @param block_size Size of a single block in bytes. It is fixed for the device.
+	 * @param block_count Total number of blocks of the device
+	 * @return BLOCK_RET_NO_MEDIA if the media is not present, BLOCK_RET_FAILED on error or BLOCK_RET_OK otherwise.
+	 *         Acknowledges a pending media change.
+	 */
+	block_ret_t (*get_geometry)(Block *self, size_t *block_size, uint32_t *block_count);
 
-typedef struct {
-	block_vmt_t *vmt;
+	/**
+	 * @brief Read consecutive blocks
+	 *
+	 * @param self Block interface instance
+	 * @param lba Address of the first block to read
+	 * @param buf Buffer where the data will be saved, at least @p count * block size bytes long
+	 * @param count Number of blocks to read
+	 * @return BLOCK_RET_BAD_ARG if @p count is 0 or the range is out of the device, BLOCK_RET_TIMEOUT if the device
+	 *         is not responding, BLOCK_RET_NO_MEDIA if the media is not present, BLOCK_RET_DEVICE_CHANGED if the
+	 *         media change was not acknowledged yet, BLOCK_RET_FAILED on error or BLOCK_RET_OK otherwise.
+	 */
+	block_ret_t (*read)(Block *self, uint32_t lba, void *buf, size_t count);
+
+	/**
+	 * @brief Write consecutive blocks
+	 *
+	 * The data may be cached by the device. Use @p flush to make sure it is committed to the media.
+	 *
+	 * @param self Block interface instance
+	 * @param lba Address of the first block to write
+	 * @param buf Buffer containing the data to write, at least @p count * block size bytes long
+	 * @param count Number of blocks to write
+	 * @return BLOCK_RET_BAD_ARG if @p count is 0 or the range is out of the device, BLOCK_RET_READ_ONLY if the media
+	 *         is write protected, BLOCK_RET_TIMEOUT if the device is not responding, BLOCK_RET_NO_MEDIA if the media
+	 *         is not present, BLOCK_RET_DEVICE_CHANGED if the media change was not acknowledged yet,
+	 *         BLOCK_RET_FAILED on error or BLOCK_RET_OK otherwise.
+	 */
+	block_ret_t (*write)(Block *self, uint32_t lba, const void *buf, size_t count);
+
+	/**
+	 * @brief Commit all written data to the media
+	 *
+	 * @param self Block interface instance
+	 * @return BLOCK_RET_TIMEOUT if the device is not responding, BLOCK_RET_NO_MEDIA if the media is not present,
+	 *         BLOCK_RET_DEVICE_CHANGED if the media change was not acknowledged yet, BLOCK_RET_FAILED on error or
+	 *         BLOCK_RET_OK otherwise (including the case when there is nothing to commit).
+	 */
+	block_ret_t (*flush)(Block *self);
+};
+
+typedef struct block {
+	const struct block_vmt *vmt;
 	void *parent;
 } Block;
-
-
-block_ret_t block_init(Block *self, block_vmt_t *vmt);
-block_ret_t block_free(Block *self);
-
-

@@ -1,9 +1,9 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * WORN log (write-once, read-never) implementation using
  * a block device backend storage.
  *
- * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2021-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -28,7 +28,7 @@ typedef enum {
 typedef struct {
 	Block *storage;
 	size_t block_size;
-	size_t size;
+	uint32_t size;
 
 	uint8_t access_ke[WORN_KEY_LEN];
 	uint8_t access_km[WORN_KEY_LEN];

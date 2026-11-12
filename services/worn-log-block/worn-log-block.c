@@ -1,9 +1,9 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * WORN log (write-once, read-never) implementation using
  * a block device backend storage.
  *
- * Copyright (c) 2021, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2021-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -168,7 +168,7 @@ worn_log_block_ret_t worn_log_block_find_next(WornLogBlock *self, size_t *block)
 		uint8_t *data = NULL;
 		size_t data_len = 0;
 
-		if (self->storage->vmt->read(self->storage->parent, check_block, buf) != BLOCK_RET_OK) {
+		if (self->storage->vmt->read(self->storage, check_block, buf, 1) != BLOCK_RET_OK) {
 			return WORN_LOG_BLOCK_RET_FAILED;
 		}
 		if (block_decrypt(self, buf, &data, &data_len) == WORN_LOG_BLOCK_RET_OK) {
@@ -195,7 +195,10 @@ worn_log_block_ret_t worn_log_block_append(WornLogBlock *self) {
 	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("append to %u"), current_block);
 	uint8_t buf[512] = {0};
 	block_encrypt(self, buf, (uint8_t *)0x08000000);
-	self->storage->vmt->write(self->storage->parent, current_block, buf);
+	if (self->storage->vmt->write(self->storage, current_block, buf, 1) != BLOCK_RET_OK) {
+		return WORN_LOG_BLOCK_RET_FAILED;
+	}
+	return WORN_LOG_BLOCK_RET_OK;
 }
 
 
@@ -205,13 +208,11 @@ worn_log_block_ret_t worn_log_block_init(WornLogBlock *self, Block *storage) {
 
 	/* Assuming the underlying storage is up. Check the block size
 	 * and the storage size in blocks. */
-	size_t st_block_size = 0;
-	size_t st_size = 0;
-	self->storage->vmt->get_block_size(self->storage->parent, &st_block_size);
-	self->storage->vmt->get_size(self->storage->parent, &st_size);
-	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("block size %u, card size %u blocks, %u MB"), st_block_size, st_size, st_size / 1024 * st_block_size / 1024);
-	self->block_size = st_block_size;
-	self->size = st_size;
+	if (self->storage->vmt->get_geometry(self->storage, &self->block_size, &self->size) != BLOCK_RET_OK) {
+		return WORN_LOG_BLOCK_RET_FAILED;
+	}
+	u_log(system_log, LOG_TYPE_DEBUG, U_LOG_MODULE_PREFIX("block size %u, card size %lu blocks, %lu MB"),
+		self->block_size, self->size, self->size / 1024 * self->block_size / 1024);
 
 	/* No other checks are made during the initialization. */
 	self->access_ke[0] = 1;
