@@ -691,24 +691,13 @@ static lp586x_ret_t top_led_setup(GpioLed *led, size_t ch_base) {
 	LED_SEQ_END \
 } \
 
-/* A short "breathing" effect in white. There is no hardware fade, so the ramp up and down is approximated by a
- * handful of discrete SET steps held for a few tens of milliseconds each, followed by a longer dark pause that
- * marks the gap between breaths. */
-#define LED_SEQ_WHITE_BREATHE LED_SEQ { \
-	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x20) | LED_SEQ_TIME_MS(64), \
-	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x50) | LED_SEQ_TIME_MS(64), \
-	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x90) | LED_SEQ_TIME_MS(64), \
-	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0xc0) | LED_SEQ_TIME_MS(64), \
-	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0xff) | LED_SEQ_TIME_MS(96), \
-	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0xc0) | LED_SEQ_TIME_MS(64), \
-	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x90) | LED_SEQ_TIME_MS(64), \
-	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x50) | LED_SEQ_TIME_MS(64), \
-	LED_SEQ_SET | LED_SEQ_BRIGHTNESS(0x20) | LED_SEQ_TIME_MS(64), \
-	/* ~4 s dark pause between breaths. A single step tops out at 1008 ms (6-bit field), so it is split. */ \
+/* A short white blink every 4 s. A single step tops out at 1008 ms (6-bit field), so the dark pause is split. */
+#define LED_SEQ_WHITE_SLOW_BLINK LED_SEQ { \
+	LED_SEQ_SET | LED_SEQ_ON | LED_SEQ_TIME_MS(192), \
 	LED_SEQ_SET | LED_SEQ_OFF | LED_SEQ_TIME_MS(1008), \
 	LED_SEQ_WAIT | LED_SEQ_TIME_MS(1008), \
 	LED_SEQ_WAIT | LED_SEQ_TIME_MS(1008), \
-	LED_SEQ_WAIT | LED_SEQ_TIME_MS(976), \
+	LED_SEQ_WAIT | LED_SEQ_TIME_MS(784), \
 	LED_SEQ_END \
 } \
 
@@ -1313,9 +1302,9 @@ static pm_generic_ret_t pm_d2_to_d3(void *ctx) {
 	/* Disable the top LEd controller to save power. */
 	top_led_en_gpio->vmt->set(top_led_en_gpio, false);
 
-	/* Breathe the sys LED to signal the low-power sleep state. Its vmt is only set once the LP5812 came up. */
+	/* Slowly blink the sys LED to signal the low-power sleep state. Its vmt is only set once the LP5812 came up. */
 	if (led_sys.led.vmt != NULL) {
-		led_sys.led.vmt->sequence(&led_sys.led, LED_SEQ_WHITE_BREATHE);
+		led_sys.led.vmt->sequence(&led_sys.led, LED_SEQ_WHITE_SLOW_BLINK);
 	}
 
 #if !defined(CONFIG_APP_BL)
