@@ -153,13 +153,13 @@ static void cli_print_base85(ServiceCli *self, const uint8_t *buf, size_t len) {
 */
 
 
-static void size_to_str(size_t size, char *s, size_t len) {
+static void size_to_str(uint64_t size, char *s, size_t len) {
 	if (size <= 10 * 1024) {
-		snprintf(s, len - 1, "%u B", size);
+		snprintf(s, len - 1, "%lu B", (unsigned long)size);
 	} else if (size <= 10 * 1024 * 1024) {
-		snprintf(s, len - 1, "%u KB", size / 1024);
+		snprintf(s, len - 1, "%lu KB", (unsigned long)(size / 1024));
 	} else {
-		snprintf(s, len - 1, "%u MB", size / 1024 / 1024);
+		snprintf(s, len - 1, "%lu MB", (unsigned long)(size / 1024 / 1024));
 	}
 
 }

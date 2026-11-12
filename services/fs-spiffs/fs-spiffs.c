@@ -179,8 +179,12 @@ static fs_ret_t fs_spiffs_fs_fflush(Fs *self, File *f) {
 
 static fs_ret_t fs_spiffs_fs_info(Fs *self, struct fs_info *info) {
 	FS_IMPL_HEADER
-	SPIFFS_info(&fs_spiffs->spiffs, (uint32_t *)&info->size_total, (uint32_t *)&info->size_used);
+	uint32_t total = 0;
+	uint32_t used = 0;
+	SPIFFS_info(&fs_spiffs->spiffs, &total, &used);
 	FS_CHECK_ERRNO
+	info->size_total = total;
+	info->size_used = used;
 	return FS_RET_OK;
 }
 

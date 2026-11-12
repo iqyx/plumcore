@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: BSD-2-Clause
+/* SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Generic filesystem interface
  *
- * Copyright (c) 2018-2021, Marek Koza (qyx@krtko.org)
+ * Copyright (c) 2018-2026, Marek Koza (qyx@krtko.org)
  * All rights reserved.
  */
 
@@ -24,6 +24,8 @@ typedef enum fs_ret {
 	FS_RET_OK = 0,
 	FS_RET_FAILED,
 	FS_RET_NULL,
+	/* Read at the end of the file, no data was read. */
+	FS_RET_EOF,
 } fs_ret_t;
 
 typedef enum fs_seek {
@@ -48,9 +50,10 @@ typedef struct fs_stat {
 	size_t size;
 } fs_stat_t;
 
+/* Filesystem sizes in bytes. 64 bit wide to support media larger than 4 GiB. */
 typedef struct fs_info {
-	size_t size_total;
-	size_t size_used;
+	uint64_t size_total;
+	uint64_t size_used;
 } fs_info_t;
 
 typedef struct fs_dir_entry {
@@ -79,6 +82,8 @@ struct fs_vmt {
 	fs_ret_t (*opendir)(Fs *self, Dir *d, const char *path);
 	fs_ret_t (*closedir)(Fs *self, Dir *d);
 	fs_ret_t (*readdir)(Fs *self, Dir *d, DirEntry *e);
+	/* Create a directory. NULL if the filesystem has no directories. */
+	fs_ret_t (*mkdir)(Fs *self, const char *path);
 };
 
 typedef struct fs {
