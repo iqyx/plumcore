@@ -53,6 +53,10 @@ menu "Low-level platform drivers"
 			bool "STM32 OCTOSPI NOR flash memory driver (QSPI mode)"
 			default n
 
+		config SERVICE_STM32_SDMMC
+			bool "STM32 SDMMC SD card driver"
+			default n
+
 		config SERVICE_LP581X_LED
 			bool "Texas Instruments LP5810/LP5812 LED driver"
 			default n
