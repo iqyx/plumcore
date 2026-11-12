@@ -55,6 +55,8 @@
 #include <services/shtc3/shtc3.h>
 #include <services/flash-cbor-mib/flash-cbor-mib.h>
 #include <services/stm32-rtc/rtc.h>
+#include <services/stm32-sdmmc/stm32-sdmmc.h>
+#include <services/block-fat32/block-fat32.h>
 #include <interfaces/clock.h>
 #include <interfaces/applet.h>
 #include <applets/hello-world/hello-world.h>
@@ -1017,6 +1019,77 @@ static void port_setup_vbus_lp(void) {
 
 
 /**********************************************************************************************************************
+ * microSD card on SDMMC1
+ **********************************************************************************************************************/
+
+Stm32Sdmmc sdmmc1;
+BlockFat32 sd_fs;
+
+Gpio *sd_pwr_en_gpio = &(gpiod.pin[13]);
+Gpio *sdmmc1_d0 = &(gpioc.pin[8]);
+Gpio *sdmmc1_d1 = &(gpioc.pin[9]);
+Gpio *sdmmc1_d2 = &(gpioc.pin[10]);
+Gpio *sdmmc1_d3 = &(gpioc.pin[11]);
+Gpio *sdmmc1_ck = &(gpioc.pin[12]);
+Gpio *sdmmc1_cmd = &(gpiod.pin[2]);
+
+/* D0-D3 on PC8-PC11, CK on PC12, CMD on PD2, all AF12. The data and command lines have external pull-ups fed by
+ * the switched card supply, so no internal pull is used. When disabled, the pins are switched to analog so they do
+ * not back-power the unpowered card. */
+static void port_set_sdmmc_pins(bool enable) {
+	Gpio *pins[] = {sdmmc1_d0, sdmmc1_d1, sdmmc1_d2, sdmmc1_d3, sdmmc1_cmd, sdmmc1_ck};
+	for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+		if (enable) {
+			pins[i]->vmt->set_mode(pins[i], MODE_ALTERNATE);
+			pins[i]->vmt->set_pinmux(pins[i], 12);
+			pins[i]->vmt->set_ospeed(pins[i], OSPEED_VERYHIGH);
+			pins[i]->vmt->set_pull(pins[i], PULL_NONE);
+		} else {
+			pins[i]->vmt->set_mode(pins[i], MODE_ANALOG);
+		}
+	}
+}
+
+static void port_setup_sdmmc(void) {
+	/* SD card power enable on PD13 drives the gate of a P-MOSFET high-side switch pulled up to +3V3, so it is
+	 * active low. Drive it low to power the card. The power manager turns it off again in D3 (and a wake reboots,
+	 * so this runs fresh on every boot). */
+	sd_pwr_en_gpio->vmt->set_mode(sd_pwr_en_gpio, MODE_OUTPUT);
+	sd_pwr_en_gpio->vmt->set(sd_pwr_en_gpio, false);
+
+	port_set_sdmmc_pins(true);
+
+	/* Clock the SDMMC kernel from the 48 MHz HSI48 (ICLK) so the bus timing does not depend on the SYSCLK
+	 * scaling done by the power manager. Both are stopped again in D3. */
+	RCC->CR |= RCC_CR_HSI48ON;
+	while ((RCC->CR & RCC_CR_HSI48RDY) == 0) {
+		;
+	}
+	RCC->CCIPR1 &= ~RCC_CCIPR1_ICLKSEL;
+	RCC->CCIPR2 &= ~RCC_CCIPR2_SDMMCSEL;
+	RCC->AHB2ENR1 |= RCC_AHB2ENR1_SDMMC1EN;
+
+	stm32_sdmmc_init(&sdmmc1, &(const struct stm32_sdmmc_conf){
+		.mmio_base = SDMMC1,
+		.kernel_freq = 48000000,
+		.bus_freq = 24000000,
+		.bus_width = STM32_SDMMC_BUS_WIDTH_4,
+		.poll_interval_ms = 1000,
+	});
+	stm32_sdmmc_start(&sdmmc1);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_BLOCK, (Interface *)&sdmmc1.block, "sd");
+
+	/* FAT32 filesystem on the SD card, mounted on the first access. Files are timestamped from the RTC. */
+	if (block_fat32_init(&sd_fs, &(const struct block_fat32_conf){
+		.block = &sdmmc1.block,
+		.clock = &rtc.clock,
+	}) == BLOCK_FAT32_RET_OK) {
+		iservicelocator_add(locator, ISERVICELOCATOR_TYPE_FS, (Interface *)&sd_fs.fs, "sd");
+	}
+}
+
+
+/**********************************************************************************************************************
  * BQ27441-G1 battery fuel gauge on the power management I2C bus
  **********************************************************************************************************************/
 
@@ -1315,6 +1388,14 @@ static pm_generic_ret_t pm_d2_to_d3(void *ctx) {
 	 * VBUS_LP boost regulator (active-high enable). */
 	nbus2_shdn_gpio->vmt->set(nbus2_shdn_gpio, true);
 	vbus_lp_en_gpio->vmt->set(vbus_lp_en_gpio, false);
+
+	/* Stop the SD card driver before gating the SDMMC and HSI48 clocks, then power the card down
+	 * (active-low power enable). */
+	stm32_sdmmc_stop(&sdmmc1);
+	RCC->AHB2ENR1 &= ~RCC_AHB2ENR1_SDMMC1EN;
+	RCC->CR &= ~RCC_CR_HSI48ON;
+	port_set_sdmmc_pins(false);
+	sd_pwr_en_gpio->vmt->set(sd_pwr_en_gpio, true);
 #endif
 
 	/* Enter the low-power slow clock: SYSCLK back to the 4 MHz MSIS, PLL1 and HSE stopped. HSI16 keeps
@@ -1431,6 +1512,7 @@ int32_t port_init(void) {
 	port_setup_ble();
 	port_setup_charger();
 	port_setup_vbus_lp();
+	port_setup_sdmmc();
 	port_setup_fuel_gauge();
 	port_setup_accel();
 	port_setup_thermo();
