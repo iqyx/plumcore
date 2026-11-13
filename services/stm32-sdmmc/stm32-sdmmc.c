@@ -710,9 +710,25 @@ static block_ret_t stm32_sdmmc_flush(Block *self) {
 }
 
 
+/* The presence flag is read without taking the lock, the identification holding it can take up to a second. The
+ * status is unknown while the driver is stopped or stopping, a stop does not mean the card was removed. */
+static block_ret_t stm32_sdmmc_get_status(Block *self, struct block_status *status) {
+	Stm32Sdmmc *sd = (Stm32Sdmmc *)self->parent;
+
+	if (!sd->can_run) {
+		return BLOCK_RET_FAILED;
+	}
+	status->present = sd->present;
+	status->block_size = SDMMC_BLOCK_SIZE;
+	status->block_count = sd->present ? sd->block_count : 0;
+	return BLOCK_RET_OK;
+}
+
+
 static const struct block_vmt block_vmt = {
 	.get_geometry = stm32_sdmmc_get_geometry,
 	.read = stm32_sdmmc_read,
 	.write = stm32_sdmmc_write,
 	.flush = stm32_sdmmc_flush,
+	.get_status = stm32_sdmmc_get_status,
 };

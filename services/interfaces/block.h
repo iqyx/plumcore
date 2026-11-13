@@ -9,6 +9,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef enum {
@@ -22,6 +23,14 @@ typedef enum {
 } block_ret_t;
 
 typedef struct block Block;
+
+struct block_status {
+	/** The media is present and ready to be accessed. */
+	bool present;
+	/** Size of a block in bytes and the number of blocks of the present media. */
+	size_t block_size;
+	uint32_t block_count;
+};
 
 /**
  * @brief Block device interface
@@ -84,6 +93,19 @@ struct block_vmt {
 	 *         BLOCK_RET_OK otherwise (including the case when there is nothing to commit).
 	 */
 	block_ret_t (*flush)(Block *self);
+
+	/**
+	 * @brief Get the media status
+	 *
+	 * Non-blocking. A pending media change is not acknowledged, the method is meant for status displays which
+	 * must not interfere with the user of the device. NULL if the device has no removable media.
+	 *
+	 * @param self Block interface instance
+	 * @param status Current media status
+	 * @return BLOCK_RET_FAILED if the status is not known (eg. the device driver is stopped) or BLOCK_RET_OK
+	 *         otherwise.
+	 */
+	block_ret_t (*get_status)(Block *self, struct block_status *status);
 };
 
 typedef struct block {
