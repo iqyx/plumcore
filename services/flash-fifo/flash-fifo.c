@@ -532,6 +532,9 @@ static fs_ret_t fs_info(Fs *self, struct fs_info *info) {
 	info->size_total = ff->blocks * (ff->block_size - ff->page_size);
 	/** @todo better computation */
 	info->size_used = (ff->head - ff->tail) * (ff->block_size - ff->page_size);
+	if (info->label != NULL && info->label_size > 0) {
+		info->label[0] = '\0';
+	}
 
 	return FS_RET_OK;
 }

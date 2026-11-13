@@ -185,6 +185,9 @@ static fs_ret_t fs_spiffs_fs_info(Fs *self, struct fs_info *info) {
 	FS_CHECK_ERRNO
 	info->size_total = total;
 	info->size_used = used;
+	if (info->label != NULL && info->label_size > 0) {
+		info->label[0] = '\0';
+	}
 	return FS_RET_OK;
 }
 

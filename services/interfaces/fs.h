@@ -50,10 +50,13 @@ typedef struct fs_stat {
 	size_t size;
 } fs_stat_t;
 
-/* Filesystem sizes in bytes. 64 bit wide to support media larger than 4 GiB. */
+/* Filesystem sizes in bytes, 64 bit wide to support media larger than 4 GiB. The volume label is copied to a buffer
+ * provided by the caller (may be NULL), it is set to an empty string if the filesystem has no label. */
 typedef struct fs_info {
 	uint64_t size_total;
 	uint64_t size_used;
+	char *label;
+	size_t label_size;
 } fs_info_t;
 
 typedef struct fs_dir_entry {

@@ -2078,6 +2078,49 @@ static block_fat32_ret_t fat_mkdir(BlockFat32 *self, const char *path) {
 }
 
 
+/* Copy the volume label stored in the root directory. Characters outside of ASCII are replaced with '_' as their
+ * codepage is unknown, trailing spaces are removed. An empty string is returned if the volume has no label. */
+static block_fat32_ret_t fat_volume_label(BlockFat32 *self, char *buf, size_t size) {
+	if (buf == NULL || size == 0) {
+		return BLOCK_FAT32_RET_OK;
+	}
+	buf[0] = '\0';
+	struct fat_dir_pos pos;
+	fat_dir_pos_init(&pos, self->root_cluster);
+	while (true) {
+		uint8_t *e = NULL;
+		block_fat32_ret_t ret = fat_dir_entry(self, &pos, &e);
+		if (ret != BLOCK_FAT32_RET_OK) {
+			return ret;
+		}
+		if (e[DE_NAME] == DE_END) {
+			return BLOCK_FAT32_RET_OK;
+		}
+		if (e[DE_NAME] != DE_FREE && (e[DE_ATTR] & ATTR_LFN_MASK) != ATTR_LFN &&
+		    (e[DE_ATTR] & (ATTR_VOLUME_ID | ATTR_DIRECTORY)) == ATTR_VOLUME_ID) {
+			size_t len = DE_NAME_LEN;
+			while (len > 0 && e[DE_NAME + len - 1] == ' ') {
+				len--;
+			}
+			size_t n = 0;
+			for (; n < len && n + 1 < size; n++) {
+				uint8_t c = e[DE_NAME + n];
+				buf[n] = (c >= 0x20 && c < 0x80) ? (char)c : '_';
+			}
+			buf[n] = '\0';
+			return BLOCK_FAT32_RET_OK;
+		}
+		ret = fat_dir_pos_next(self, &pos, false);
+		if (ret == BLOCK_FAT32_RET_EOF || ret == BLOCK_FAT32_RET_FULL) {
+			return BLOCK_FAT32_RET_OK;
+		}
+		if (ret != BLOCK_FAT32_RET_OK) {
+			return ret;
+		}
+	}
+}
+
+
 /* Free clusters are counted by scanning the whole FAT once after mount, the FSInfo free count is not trusted.
  * Allocations and frees keep the count up to date afterwards. */
 static block_fat32_ret_t fat_info(BlockFat32 *self, struct fs_info *info) {
@@ -2101,7 +2144,7 @@ static block_fat32_ret_t fat_info(BlockFat32 *self, struct fs_info *info) {
 	uint32_t shift = self->cluster_shift + SECTOR_SHIFT;
 	info->size_total = (uint64_t)self->cluster_count << shift;
 	info->size_used = (uint64_t)(self->cluster_count - self->free_count) << shift;
-	return BLOCK_FAT32_RET_OK;
+	return fat_volume_label(self, info->label, info->label_size);
 }
 
 
