@@ -30,6 +30,8 @@ enum notify_window_icon {
 	NOTIFY_WINDOW_ICON_INFO = 0,
 	NOTIFY_WINDOW_ICON_WARNING,
 	NOTIFY_WINDOW_ICON_ERROR,
+	NOTIFY_WINDOW_ICON_SD,
+	NOTIFY_WINDOW_ICON_NO_SD,
 };
 
 /* An action button: pressing @p key selects the action, @p label is shown on the button. */

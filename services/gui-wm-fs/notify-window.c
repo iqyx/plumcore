@@ -40,7 +40,6 @@
 #include "assets/assets.h"
 
 #define NOTIFY_WINDOW_MARGIN 6
-#define NOTIFY_WINDOW_ICON_SIZE 24
 #define NOTIFY_WINDOW_GAP 4
 #define NOTIFY_WINDOW_LINE_H 10
 #define NOTIFY_WINDOW_BUTTON_H 14
@@ -103,19 +102,30 @@ static void notify_window_render(FbPainter *fbp, uint16_t w, uint16_t h, enum no
 	painter->vmt->text_size(painter, "", NULL, &text_h);
 	fb_painter_wrap_text(fbp, message, w - 2 * NOTIFY_WINDOW_MARGIN, NOTIFY_WINDOW_LINES * text_h, &lines);
 
+	const struct painter_raw_image *image = &notify_info_data;
+	switch (icon) {
+		case NOTIFY_WINDOW_ICON_WARNING:
+			image = &notify_warning_data;
+			break;
+		case NOTIFY_WINDOW_ICON_ERROR:
+			image = &notify_error_data;
+			break;
+		case NOTIFY_WINDOW_ICON_SD:
+			image = &notify_sd_data;
+			break;
+		case NOTIFY_WINDOW_ICON_NO_SD:
+			image = &notify_no_sd_data;
+			break;
+		default:
+			break;
+	}
+
 	/* The icon and the message are centered vertically in the area above the buttons. */
 	int16_t area_h = h - NOTIFY_WINDOW_MARGIN - NOTIFY_WINDOW_BUTTON_H;
-	int16_t block_h = NOTIFY_WINDOW_ICON_SIZE + NOTIFY_WINDOW_GAP + lines * NOTIFY_WINDOW_LINE_H;
+	int16_t block_h = (int16_t)image->h + NOTIFY_WINDOW_GAP + lines * NOTIFY_WINDOW_LINE_H;
 	int16_t y = (area_h - block_h) / 2;
-
-	const struct painter_raw_image *image = &notify_info_data;
-	if (icon == NOTIFY_WINDOW_ICON_WARNING) {
-		image = &notify_warning_data;
-	} else if (icon == NOTIFY_WINDOW_ICON_ERROR) {
-		image = &notify_error_data;
-	}
 	painter->vmt->image(painter, (w - (int16_t)image->w) / 2, y, image, PAINTER_MODE_INVERTED);
-	y += NOTIFY_WINDOW_ICON_SIZE + NOTIFY_WINDOW_GAP;
+	y += (int16_t)image->h + NOTIFY_WINDOW_GAP;
 
 	/* Each line centered horizontally. */
 	char *line = message;
