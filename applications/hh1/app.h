@@ -18,6 +18,8 @@
 #include <interfaces/sensor.h>
 #include <interfaces/clock.h>
 #include <interfaces/waveform-source.h>
+#include <interfaces/block.h>
+#include <interfaces/fs.h>
 #include <interfaces/painter.h>
 #include <interfaces/event.h>
 #include <interfaces/beeper.h>
@@ -86,6 +88,10 @@ typedef struct {
 	/* LIS2HH12 accelerometer advertised by the port. */
 	WaveformSource *accel;
 
+	/* SD card block device advertised by the port, shown in the GUI status bar, and the filesystem on it. */
+	Block *sd;
+	Fs *sd_fs;
+
 	/* Battery status LED advertised by the port and the blink sequence currently pushed to it, kept so the
 	 * blink is only restarted when the current band actually changes. */
 	Led *led_bat;
@@ -135,6 +141,9 @@ typedef struct {
 
 	/* Task periodically showing the low battery notification (see bat-low.c). */
 	TaskHandle_t bat_low_task;
+
+	/* Task mounting the SD card filesystem on card insertion and notifying the card status changes (see sd.c). */
+	TaskHandle_t sd_task;
 
 	/* LCD framebuffer advertised by the port, driven through the compositor below. */
 	Fb *lcd;
@@ -207,6 +216,18 @@ app_ret_t app_ble_init(App *self);
  */
 app_ret_t app_bat_low_init(App *self);
 #endif
+
+/**
+ * @brief Start the SD card auto-mount.
+ *
+ * Starts a thread polling the SD card status. Whenever a card is inserted (or present at startup), its filesystem
+ * is mounted. The mount result and the removal are notified. Implemented in sd.c.
+ *
+ * @param self Instance of the application
+ * @return APP_RET_FAILED if the SD card or its filesystem is not available or the thread cannot be started,
+ *         APP_RET_OK otherwise.
+ */
+app_ret_t app_sd_init(App *self);
 
 #if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 /**

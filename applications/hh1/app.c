@@ -210,6 +210,7 @@ static app_ret_t app_setup_ui(App *self) {
 		.source_current = self->charger_ibus,
 		.clock = self->rtc,
 		.accel = self->accel,
+		.media = self->sd,
 		.off_state = PM_STATE_D3,
 		.on_state = PM_STATE_D0,
 		.onoff_event = EV_KEY_ONOFF,
@@ -440,6 +441,16 @@ app_ret_t app_init(App *self) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("accelerometer not found"));
 	}
 
+	/* Discover the SD card advertised by the port. */
+	self->sd = NULL;
+	if (iservicelocator_query_name_type(locator, "sd", ISERVICELOCATOR_TYPE_BLOCK, (Interface **)&self->sd) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("SD card not found"));
+	}
+	self->sd_fs = NULL;
+	if (iservicelocator_query_name_type(locator, "sd", ISERVICELOCATOR_TYPE_FS, (Interface **)&self->sd_fs) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("SD card filesystem not found"));
+	}
+
 	/* Discover the battery status LED advertised by the port, blinked to reflect the battery current. */
 	self->led_bat = NULL;
 	if (iservicelocator_query_name_type(locator, "led_bat", ISERVICELOCATOR_TYPE_LED, (Interface **)&self->led_bat) != ISERVICELOCATOR_RET_OK) {
@@ -506,6 +517,9 @@ app_ret_t app_init(App *self) {
 	#if defined(CONFIG_APP_HH1_BAT_LOW_NOTIFY_ENABLE)
 		app_bat_low_init(self);
 	#endif
+
+	/* Mount the SD card filesystem whenever a card is inserted. */
+	app_sd_init(self);
 
 	/* The auto-start applet is configurable, launch it only once the stored configuration is applied. */
 	if (self->lcd != NULL) {
