@@ -18,6 +18,7 @@
 #include <interfaces/ble.h>
 #include <interfaces/clock.h>
 #include <interfaces/conf.h>
+#include <interfaces/block.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
 
@@ -43,6 +44,9 @@ struct status_bar_conf {
 
 	/** UTC wall clock shown in the top left corner as local time, "--:--" is shown if NULL or it cannot be read. */
 	Clock *clock;
+
+	/** Removable media, its icon is shown while it is present (optional, may be NULL). */
+	Block *media;
 };
 
 typedef struct {

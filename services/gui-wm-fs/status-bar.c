@@ -217,6 +217,13 @@ static void status_bar_render(StatusBar *self) {
 		painter->vmt->image(painter, (current_x -= 12), 0, &bt_data, PAINTER_MODE_INVERTED);
 	}
 
+	/* SD card icon, shown while the removable media is present. */
+	struct block_status media_status = {0};
+	if (self->conf.media != NULL && self->conf.media->vmt->get_status != NULL &&
+	    self->conf.media->vmt->get_status(self->conf.media, &media_status) == BLOCK_RET_OK && media_status.present) {
+		painter->vmt->image(painter, (current_x -= 12), 0, &sd_data, PAINTER_MODE_INVERTED);
+	}
+
 	painter->vmt->end(painter);
 }
 

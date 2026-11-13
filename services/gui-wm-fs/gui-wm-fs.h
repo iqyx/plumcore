@@ -25,6 +25,7 @@
 #include <interfaces/clock.h>
 #include <interfaces/pm.h>
 #include <interfaces/waveform-source.h>
+#include <interfaces/block.h>
 #include <interfaces/conf.h>
 #include <configlib.h>
 #include <services/fb-compositor/fb-compositor.h>
@@ -81,6 +82,10 @@ struct gui_wm_fs_conf {
 
 	/** Accelerometer read continuously by the accelerometer task (optional, may be NULL). */
 	WaveformSource *accel;
+
+	/** Removable media (eg. a SD card), its icon is shown in the status bar while it is present (optional, may be
+	 * NULL). */
+	Block *media;
 };
 
 typedef struct {
