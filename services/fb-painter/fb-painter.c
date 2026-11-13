@@ -916,6 +916,13 @@ fb_painter_ret_t fb_painter_wrap_text(FbPainter *self, char *text, uint16_t w, u
 	while (*line != '\0' && line_count < max_lines) {
 		last_line = line;
 
+		/* An empty line between two explicit line breaks. */
+		if (*line == '\n') {
+			line_count++;
+			line++;
+			continue;
+		}
+
 		/* Append whole words to the line for as long as they fit the requested width. */
 		char *end = line;
 		char *word_end = line;
@@ -924,7 +931,7 @@ fb_painter_ret_t fb_painter_wrap_text(FbPainter *self, char *text, uint16_t w, u
 			while (*next == ' ') {
 				next++;
 			}
-			while (*next != '\0' && *next != ' ') {
+			while (*next != '\0' && *next != ' ' && *next != '\n') {
 				next++;
 			}
 			if (next == word_end || !wrap_fits(self, line, next, w)) {
@@ -938,7 +945,7 @@ fb_painter_ret_t fb_painter_wrap_text(FbPainter *self, char *text, uint16_t w, u
 		if (end == line) {
 			/* Not even the first word of the line fits. Crop it, sacrificing a single character
 			 * to make room for the line break, and continue with the rest on the next line. */
-			while (*word_end != '\0' && *word_end != ' ') {
+			while (*word_end != '\0' && *word_end != ' ' && *word_end != '\n') {
 				word_end++;
 			}
 			char *cut = word_end - 1;
@@ -957,7 +964,8 @@ fb_painter_ret_t fb_painter_wrap_text(FbPainter *self, char *text, uint16_t w, u
 			line = end;
 			break;
 		}
-		wrap_break_line(end, word_end);
+		/* An explicit line break in the text is kept, the next line starts right after it. */
+		wrap_break_line(end, (*word_end == '\n') ? word_end + 1 : word_end);
 		line = end + 1;
 	}
 
