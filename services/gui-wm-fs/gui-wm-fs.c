@@ -290,6 +290,12 @@ gui_wm_fs_ret_t gui_wm_fs_init(GuiWmFs *self, const struct gui_wm_fs_conf *conf)
 	self->event.parent = self;
 	self->event.vmt = &gui_wm_fs_event_vmt;
 
+	self->notify_lock = xSemaphoreCreateMutex();
+	if (self->notify_lock == NULL) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create the notification lock"));
+		return GUI_WM_FS_RET_FAILED;
+	}
+
 	/* The compositor takes over the output framebuffer; the GUI draws into its windows only. It is
 	 * given our own event source (which pumps conf.event and handles global keys) so it can route the
 	 * remaining events to the top-level window. */
@@ -419,6 +425,11 @@ gui_wm_fs_ret_t gui_wm_fs_free(GuiWmFs *self) {
 		self->compositor_up = false;
 	}
 
+	if (self->notify_lock != NULL) {
+		vSemaphoreDelete(self->notify_lock);
+		self->notify_lock = NULL;
+	}
+
 	return GUI_WM_FS_RET_OK;
 }
 
@@ -432,12 +443,16 @@ gui_wm_fs_ret_t gui_wm_fs_notify(GuiWmFs *self, enum notify_window_icon icon, co
 		return GUI_WM_FS_RET_FAILED;
 	}
 
+	/* Wait for a notification being shown to finish, each one is shown for its whole timeout. */
+	xSemaphoreTake(self->notify_lock, portMAX_DELAY);
+
 	/* A notification counts as activity, bring the system back to full power so it is visible. Leaving the off
 	 * state would reboot the device, the notification is skipped instead, returning the default index. */
 	if (self->conf.pm != NULL) {
 		enum pm_state state = PM_STATE_NONE;
 		self->conf.pm->vmt->pm_get_state(self->conf.pm, &state);
 		if (state == self->conf.off_state) {
+			xSemaphoreGive(self->notify_lock);
 			*index = 0;
 			return GUI_WM_FS_RET_OK;
 		}
@@ -451,9 +466,8 @@ gui_wm_fs_ret_t gui_wm_fs_notify(GuiWmFs *self, enum notify_window_icon icon, co
 		.w = (uint16_t)self->compositor.out_w,
 		.h = (uint16_t)(self->compositor.out_h - GUI_WM_FS_TOPBAR_H),
 	};
-	if (notify_window_run(&self->compositor, &geometry, icon, message, actions, count, timeout_ms,
-	                      index) != NOTIFY_WINDOW_RET_OK) {
-		return GUI_WM_FS_RET_FAILED;
-	}
-	return GUI_WM_FS_RET_OK;
+	notify_window_ret_t ret = notify_window_run(&self->compositor, &geometry, icon, message, actions, count,
+	                                            timeout_ms, index);
+	xSemaphoreGive(self->notify_lock);
+	return (ret == NOTIFY_WINDOW_RET_OK) ? GUI_WM_FS_RET_OK : GUI_WM_FS_RET_FAILED;
 }

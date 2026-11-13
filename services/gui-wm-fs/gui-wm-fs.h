@@ -14,6 +14,7 @@
 #include "config.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "semphr.h"
 
 #include <interfaces/fb.h>
 #include <interfaces/event.h>
@@ -114,6 +115,9 @@ typedef struct {
 	TaskHandle_t accel_task;
 	volatile bool accel_can_run;
 	volatile bool accel_running;
+
+	/* Notifications are shown one at a time, a later one would cover an earlier one until both time out. */
+	SemaphoreHandle_t notify_lock;
 
 	/* D2 lock held while the device lies with its display facing down and accel.awake_upside_down is set. Acquired
 	 * by the accelerometer task, released by it or by the onoff key. */
