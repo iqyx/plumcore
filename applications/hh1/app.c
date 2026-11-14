@@ -205,6 +205,9 @@ static app_ret_t app_setup_ui(App *self) {
 		.pm = self->pm,
 		.bat_soc = self->bat_soc,
 		.bat_current = self->bat_current,
+		.bat_voltage = self->bat_voltage,
+		.bat_remaining = self->bat_remaining,
+		.bat_full = self->bat_full,
 		.source1_voltage = self->charger_vac1,
 		.source2_voltage = self->charger_vac2,
 		.source_current = self->charger_ibus,
@@ -423,6 +426,7 @@ app_ret_t app_init(App *self) {
 	iservicelocator_query_name_type(locator, "bat_soc", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_soc);
 	iservicelocator_query_name_type(locator, "bat_soh", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_soh);
 	iservicelocator_query_name_type(locator, "bat_remaining", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_remaining);
+	iservicelocator_query_name_type(locator, "bat_full", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->bat_full);
 
 	/* Discover the charger power source voltages advertised by the BQ25798 driver. */
 	iservicelocator_query_name_type(locator, "charger_vac1", ISERVICELOCATOR_TYPE_SENSOR, (Interface **)&self->charger_vac1);

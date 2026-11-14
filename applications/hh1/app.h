@@ -76,6 +76,7 @@ typedef struct {
 	Sensor *bat_soc;
 	Sensor *bat_soh;
 	Sensor *bat_remaining;
+	Sensor *bat_full;
 
 	/* Voltages of the two charger power sources advertised by the BQ25798 driver. */
 	Sensor *charger_vac1;
