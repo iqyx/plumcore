@@ -43,6 +43,10 @@ struct charge_window_conf {
 
 	Sensor *bat_soc;
 	Sensor *bat_current;
+	/** Battery voltage, remaining and full charge capacity shown below the battery. */
+	Sensor *bat_voltage;
+	Sensor *bat_remaining;
+	Sensor *bat_full;
 
 	/** Voltages of the two charger power sources. The window is shown while any of them is connected. */
 	Sensor *source1_voltage;

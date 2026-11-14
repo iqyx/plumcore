@@ -11,9 +11,10 @@
  *
  * A small self-contained component of the gui-wm-fs service. It creates a window on the compositor and brings
  * it to front whenever a charger power source gets connected or disconnected. The window shows a process diagram
- * of the power flow: the two power source ports with their voltages and currents feed the DC/DC charger, which
- * charges or is discharged from the battery, the flow is labelled with the battery current. The window is dismissed
- * by ESC or after CHARGE_WINDOW_SHOW_MS, it is shown again on the next connection change.
+ * of the power flow: the two power source ports with their voltages and currents feed the device, which charges or
+ * is discharged from the battery. The battery shows its remaining and full charge capacity and voltage, the flow
+ * to/from the battery is labelled with the battery current. The window is dismissed by ESC or after
+ * CHARGE_WINDOW_SHOW_MS, it is shown again on the next connection change.
  */
 
 #include <stdint.h>
@@ -38,7 +39,6 @@
 #include "assets/assets.h"
 
 #define CHARGE_WINDOW_MARGIN 8
-#define CHARGE_WINDOW_ARROW_SIZE 4
 
 
 /* Read a sensor value, false if the sensor is missing or cannot be read. */
@@ -55,14 +55,16 @@ static bool charge_window_connected(ChargeWindow *self) {
 }
 
 
-/* Draw "value unit" centered horizontally at @p cx, the value with two decimal places or "--" if not valid. */
-static void charge_window_label(Painter *painter, int16_t cx, int16_t y, bool valid, float value, const char *unit) {
-	char label[16];
+/* Draw "prefix value unit" centered horizontally at @p cx, the value with two decimal places or "--" if not valid. */
+static void charge_window_label(Painter *painter, int16_t cx, int16_t y, const char *prefix, bool valid, float value,
+                                const char *unit) {
+	char label[20];
 	if (valid) {
 		int32_t v = (int32_t)(value * 100.0f);
-		snprintf(label, sizeof(label), "%s%ld.%02ld %s", (v < 0) ? "-" : "", labs(v) / 100, labs(v) % 100, unit);
+		snprintf(label, sizeof(label), "%s%s%ld.%02ld %s", prefix, (v < 0) ? "-" : "", labs(v) / 100, labs(v) % 100,
+		         unit);
 	} else {
-		snprintf(label, sizeof(label), "-- %s", unit);
+		snprintf(label, sizeof(label), "%s-- %s", prefix, unit);
 	}
 	uint16_t w = 0;
 	painter->vmt->text_size(painter, label, &w, NULL);
@@ -70,24 +72,15 @@ static void charge_window_label(Painter *painter, int16_t cx, int16_t y, bool va
 }
 
 
-/* Draw a filled arrowhead with its tip at (x, y), pointing right for @p dir 1 and left for -1. */
-static void charge_window_arrowhead(Painter *painter, int16_t x, int16_t y, int16_t dir) {
-	painter->vmt->set_pen(painter, 0xffffffff, 1);
-	for (int16_t i = 0; i <= CHARGE_WINDOW_ARROW_SIZE; i++) {
-		painter->vmt->line(painter, x - dir * i, y - i, x - dir * i, y + i);
-	}
-}
-
-
-/* Draw a power source: its port icon with the top edge at @p top, the voltage and current below it and a flow
- * line routed to the DC/DC converter input at (@p dcdc_x, @p entry_y). The line is drawn thick with an arrowhead
- * if the source is connected. The input current is measured for the selected source only, it is read if
- * @p selected is set, the current is zero otherwise. Returns whether the source is connected. */
+/* Draw a power source: its port icon with the top edge at @p top and the voltage below it. If the source is
+ * connected, an arrow pointing to the device picture is drawn at @p arrow_x level with the icon, with the input
+ * current below it on the same line as the voltage. The voltage of a disconnected source is shown as zero. The
+ * input current is measured for the selected source only, it is read if @p selected is set, the current is zero
+ * otherwise. Returns whether the source is connected. */
 static bool charge_window_source(ChargeWindow *self, const struct painter_raw_image *icon, int16_t top,
-                                 Sensor *voltage, bool selected, int16_t dcdc_x, int16_t entry_y) {
+                                 Sensor *voltage, bool selected, int16_t arrow_x) {
 	Painter *painter = &self->painter.painter;
 	int16_t cx = CHARGE_WINDOW_MARGIN + icon->w / 2;
-	int16_t cy = top + icon->h / 2;
 
 	painter->vmt->image(painter, CHARGE_WINDOW_MARGIN, top, icon, PAINTER_MODE_INVERTED);
 
@@ -102,27 +95,20 @@ static bool charge_window_source(ChargeWindow *self, const struct painter_raw_im
 
 	painter->vmt->set_pen(painter, 0xffffffff, 1);
 	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, NULL);
-	charge_window_label(painter, cx, top + icon->h + 3, v_valid, v, "V");
-	charge_window_label(painter, cx, top + icon->h + 13, i_valid, i, "A");
+	charge_window_label(painter, cx, top + icon->h + 3, "", v_valid, connected ? v : 0.0f, "V");
 
-	/* Route the flow line right from the icon, then vertically along the input bus and right again into the
-	 * converter. */
-	int16_t bus_x = dcdc_x - 16;
-	painter->vmt->set_pen(painter, 0xffffffff, connected ? 2 : 1);
-	painter->vmt->move_to(painter, CHARGE_WINDOW_MARGIN + icon->w + 4, cy);
-	painter->vmt->line_to(painter, bus_x, cy);
-	painter->vmt->line_to(painter, bus_x, entry_y);
-	painter->vmt->line_to(painter, dcdc_x - 2, entry_y);
 	if (connected) {
-		charge_window_arrowhead(painter, dcdc_x - 2, entry_y, 1);
+		painter->vmt->image(painter, arrow_x, top + (icon->h - arrow2_right_data.h) / 2, &arrow2_right_data,
+		                    PAINTER_MODE_INVERTED);
+		charge_window_label(painter, arrow_x + arrow2_right_data.w / 2, top + icon->h + 3, "", i_valid, i, "A");
 	}
 
 	return connected;
 }
 
 
-/* Paint a process diagram: the two power source ports on the left feed the DC/DC charger in the middle, which
- * is connected to the battery on the right. */
+/* Paint a process diagram: the two power source ports on the left feed the device in the middle, which charges or
+ * is discharged from the battery on the right. */
 static void charge_window_render(ChargeWindow *self) {
 	Painter *painter = &self->painter.painter;
 	int16_t w = self->conf.geometry.w;
@@ -135,26 +121,36 @@ static void charge_window_render(ChargeWindow *self) {
 	painter->vmt->set_brush(painter, 0xff000000);
 	painter->vmt->rect(painter, 0, 0, w, h);
 
-	/* DC/DC charger in the center. */
-	int16_t dcdc_x = (w - (int16_t)dcdc_data.w) / 2;
-	int16_t dcdc_y = (h - (int16_t)dcdc_data.h) / 2;
-	painter->vmt->image(painter, dcdc_x, dcdc_y, &dcdc_data, PAINTER_MODE_INVERTED);
+	/* Device picture in the center. */
+	int16_t dev_x = (w - (int16_t)nwdaq_main_hh1_data.w) / 2;
+	int16_t dev_y = (h - (int16_t)nwdaq_main_hh1_data.h) / 2;
+	painter->vmt->image(painter, dev_x, dev_y, &nwdaq_main_hh1_data, PAINTER_MODE_INVERTED);
 
-	/* Power source ports stacked on the left, each centered in its half of the window together with the voltage
-	 * and current lines below the icon. The charger prefers source 1, the input current belongs to source 2 only
-	 * if source 1 is not connected. */
+	/* Power source ports stacked on the left, each centered in its half of the window together with the text line
+	 * below the icon. The arrows are centered between the icons and the device. The charger prefers source 1, the
+	 * input current belongs to source 2 only if source 1 is not connected. */
 	int16_t half = h / 2;
-	int16_t block_h = port_usb_c_data.h + 23;
+	int16_t block_h = port_usb_c_data.h + 13;
+	int16_t src_r = CHARGE_WINDOW_MARGIN + port_usb_c_data.w;
+	int16_t src_arrow_x = (src_r + dev_x - (int16_t)arrow2_right_data.w) / 2;
 	bool usb_connected = charge_window_source(self, &port_usb_c_data, (half - block_h) / 2, self->conf.source1_voltage,
-	                                          true, dcdc_x, dcdc_y + dcdc_data.h / 3);
+	                                          true, src_arrow_x);
 	charge_window_source(self, &port_circular_data, half + (half - block_h) / 2, self->conf.source2_voltage,
-	                     !usb_connected, dcdc_x, dcdc_y + dcdc_data.h * 2 / 3);
+	                     !usb_connected, src_arrow_x);
 
-	/* Battery on the right, filled from the bottom according to the state of charge. The fill area is the inside
-	 * of the battery_big outline with a 1 pixel gap. */
-	int16_t bat_x = w - CHARGE_WINDOW_MARGIN - battery_big_data.w;
-	int16_t bat_y = (h - (int16_t)battery_big_data.h) / 2;
+	/* Battery on the right with three text lines below it, the whole block centered vertically. The battery is
+	 * moved left from the margin to leave room for the text centered below it. */
+	painter->vmt->set_pen(painter, 0xffffffff, 1);
+	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, NULL);
+	uint16_t text_w = 0;
+	painter->vmt->text_size(painter, "/ 0.00 Ah", &text_w, NULL);
+	int16_t bat_cx = w - CHARGE_WINDOW_MARGIN - text_w / 2;
+	int16_t bat_x = bat_cx - battery_big_data.w / 2;
+	int16_t bat_y = (h - (int16_t)battery_big_data.h - 33) / 2;
 	painter->vmt->image(painter, bat_x, bat_y, &battery_big_data, PAINTER_MODE_INVERTED);
+
+	/* Fill the battery from the bottom according to the state of charge. The fill area is the inside of the
+	 * battery_big outline with a 1 pixel gap. */
 	float bat_soc = 0.0f;
 	if (charge_window_read(self->conf.bat_soc, &bat_soc)) {
 		if (bat_soc < 0.0f) {
@@ -171,23 +167,29 @@ static void charge_window_render(ChargeWindow *self) {
 		}
 	}
 
-	/* Flow line between the charger and the battery labelled with the battery current. The arrow points to the
-	 * battery while charging (positive current) and to the charger while discharging. */
-	int16_t x1 = dcdc_x + dcdc_data.w + 1;
-	int16_t x2 = bat_x - 2;
-	int16_t y = h / 2;
+	/* Remaining capacity, full charge capacity and the battery voltage below the battery. */
+	float value = 0.0f;
+	int16_t text_y = bat_y + battery_big_data.h + 3;
+	painter->vmt->set_pen(painter, 0xffffffff, 1);
+	charge_window_label(painter, bat_cx, text_y, "", charge_window_read(self->conf.bat_remaining, &value), value, "Ah");
+	charge_window_label(painter, bat_cx, text_y + 10, "/ ", charge_window_read(self->conf.bat_full, &value), value,
+	                    "Ah");
+	charge_window_label(painter, bat_cx, text_y + 20, "", charge_window_read(self->conf.bat_voltage, &value), value,
+	                    "V");
+
+	/* Arrow between the device and the battery at the battery center, labelled below with the battery current. It
+	 * points to the battery while charging (positive current) and to the device while discharging. */
+	int16_t arrow_x = (dev_x + nwdaq_main_hh1_data.w + bat_x - (int16_t)arrow2_right_data.w) / 2;
+	int16_t arrow_y = bat_y + (battery_big_data.h - arrow2_right_data.h) / 2;
 	float bat_current = 0.0f;
 	bool bat_current_valid = charge_window_read(self->conf.bat_current, &bat_current);
-	painter->vmt->set_pen(painter, 0xffffffff, 2);
-	painter->vmt->line(painter, x1, y, x2, y);
 	if (bat_current_valid && bat_current > 0.0f) {
-		charge_window_arrowhead(painter, x2, y, 1);
+		painter->vmt->image(painter, arrow_x, arrow_y, &arrow2_right_data, PAINTER_MODE_INVERTED);
 	} else if (bat_current_valid && bat_current < 0.0f) {
-		charge_window_arrowhead(painter, x1, y, -1);
+		painter->vmt->image(painter, arrow_x, arrow_y, &arrow2_left_data, PAINTER_MODE_INVERTED);
 	}
-	painter->vmt->set_pen(painter, 0xffffffff, 1);
-	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, NULL);
-	charge_window_label(painter, (x1 + x2) / 2, y - 14, bat_current_valid, bat_current, "A");
+	charge_window_label(painter, arrow_x + arrow2_right_data.w / 2, arrow_y + arrow2_right_data.h + 3, "",
+	                    bat_current_valid, bat_current, "A");
 
 	painter->vmt->end(painter);
 }

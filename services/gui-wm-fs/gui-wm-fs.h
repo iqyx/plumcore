@@ -69,6 +69,10 @@ struct gui_wm_fs_conf {
 
 	Sensor *bat_soc;
 	Sensor *bat_current;
+	/** Battery voltage, remaining and full charge capacity shown in the charging window (optional, may be NULL). */
+	Sensor *bat_voltage;
+	Sensor *bat_remaining;
+	Sensor *bat_full;
 
 	/** Voltages of the two charger power sources, the charging window is shown while any of them is connected
 	 * (optional, may be NULL). */
