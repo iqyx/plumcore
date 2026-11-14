@@ -134,7 +134,7 @@ static void app_ble_notify_init(App *self) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create the notification queue"));
 		return;
 	}
-	xTaskCreate(app_ble_notify_task, "ble-notify", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &self->ble_notify_task);
+	xTaskCreate(app_ble_notify_task, "ble-notify", configMINIMAL_STACK_SIZE + 384, (void *)self, 1, &self->ble_notify_task);
 	if (self->ble_notify_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create the notification task"));
 		vQueueDelete(self->ble_notify_queue);

@@ -58,7 +58,7 @@ app_ret_t app_bat_low_init(App *self) {
 		return APP_RET_FAILED;
 	}
 
-	xTaskCreate(app_bat_low_task, "bat-low", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &self->bat_low_task);
+	xTaskCreate(app_bat_low_task, "bat-low", configMINIMAL_STACK_SIZE + 384, (void *)self, 1, &self->bat_low_task);
 	if (self->bat_low_task == NULL) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create task"));
 		return APP_RET_FAILED;
