@@ -1123,6 +1123,9 @@ static void port_setup_fuel_gauge(void) {
 	bq27441_get_remaining_capacity(&fuel_gauge, &sensor);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)sensor, "bat_remaining");
 
+	bq27441_get_full_capacity(&fuel_gauge, &sensor);
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)sensor, "bat_full");
+
 	bq27441_get_battery_temperature(&fuel_gauge, &sensor);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_SENSOR, (Interface *)sensor, "gauge_temp");
 }
