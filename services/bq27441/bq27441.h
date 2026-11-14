@@ -44,6 +44,7 @@ typedef struct {
 	Sensor state_of_charge;
 	Sensor state_of_health;
 	Sensor remaining_capacity;
+	Sensor full_capacity;
 } Bq27441;
 
 
@@ -77,6 +78,9 @@ bq27441_ret_t bq27441_get_state_of_health(Bq27441 *self, Sensor **sensor);
 /* Return the remaining capacity Sensor interface (milliamp-hours) through @p sensor. */
 bq27441_ret_t bq27441_get_remaining_capacity(Bq27441 *self, Sensor **sensor);
 
+/* Return the full charge capacity Sensor interface (amp-hours) through @p sensor. */
+bq27441_ret_t bq27441_get_full_capacity(Bq27441 *self, Sensor **sensor);
+
 /* Read the latest battery temperature in tenths of a kelvin. */
 bq27441_ret_t bq27441_read_temperature_dk(Bq27441 *self, uint16_t *dk);
 
@@ -94,3 +98,6 @@ bq27441_ret_t bq27441_read_soh_percent(Bq27441 *self, uint8_t *percent);
 
 /* Read the latest remaining capacity in milliamp-hours. */
 bq27441_ret_t bq27441_read_remaining_capacity_mah(Bq27441 *self, uint16_t *mah);
+
+/* Read the latest full charge capacity in milliamp-hours. */
+bq27441_ret_t bq27441_read_full_capacity_mah(Bq27441 *self, uint16_t *mah);

@@ -43,6 +43,9 @@
 /* Remaining capacity (smoothed), 1 mAh per LSB. */
 #define BQ27441_CMD_REMAINING_CAPACITY      0x0c
 
+/* Full charge capacity (smoothed), 1 mAh per LSB. */
+#define BQ27441_CMD_FULL_CHARGE_CAPACITY    0x0e
+
 /* Average current, 2's complement, 1 mA per LSB. Negative while discharging. */
 #define BQ27441_CMD_AVERAGE_CURRENT         0x10
 
@@ -350,6 +353,11 @@ bq27441_ret_t bq27441_read_remaining_capacity_mah(Bq27441 *self, uint16_t *mah) 
 }
 
 
+bq27441_ret_t bq27441_read_full_capacity_mah(Bq27441 *self, uint16_t *mah) {
+	return bq27441_read_u16(self, BQ27441_CMD_FULL_CHARGE_CAPACITY, mah);
+}
+
+
 /***************************************************************************************************
  * Sensor interfaces. All values are reported in SI base units (V, A, Ah, dimensionless ratio).
  ***************************************************************************************************/
@@ -478,6 +486,27 @@ static const struct sensor_info remaining_capacity_info = {
 };
 
 
+static sensor_ret_t full_capacity_value_f(Sensor *self, float *value) {
+	uint16_t mah = 0;
+	if (bq27441_read_full_capacity_mah((Bq27441 *)self->parent, &mah) != BQ27441_RET_OK) {
+		return SENSOR_RET_FAILED;
+	}
+	/* Report the full charge capacity in amp-hours. */
+	*value = (float)mah / 1000.0f;
+	return SENSOR_RET_OK;
+}
+
+
+static const struct sensor_vmt full_capacity_vmt = {
+	.value_f = full_capacity_value_f,
+};
+
+static const struct sensor_info full_capacity_info = {
+	.description = "full charge capacity",
+	.unit = "Ah",
+};
+
+
 /***************************************************************************************************
  * Service implementation
  ***************************************************************************************************/
@@ -534,6 +563,10 @@ bq27441_ret_t bq27441_init(Bq27441 *self, I2cBus *i2c, uint8_t addr) {
 	self->remaining_capacity.vmt = &remaining_capacity_vmt;
 	self->remaining_capacity.info = &remaining_capacity_info;
 	self->remaining_capacity.parent = self;
+
+	self->full_capacity.vmt = &full_capacity_vmt;
+	self->full_capacity.info = &full_capacity_info;
+	self->full_capacity.parent = self;
 
 	return BQ27441_RET_OK;
 }
@@ -600,6 +633,16 @@ bq27441_ret_t bq27441_get_remaining_capacity(Bq27441 *self, Sensor **sensor) {
 		return BQ27441_RET_FAILED;
 	}
 	*sensor = &self->remaining_capacity;
+
+	return BQ27441_RET_OK;
+}
+
+
+bq27441_ret_t bq27441_get_full_capacity(Bq27441 *self, Sensor **sensor) {
+	if (sensor == NULL) {
+		return BQ27441_RET_FAILED;
+	}
+	*sensor = &self->full_capacity;
 
 	return BQ27441_RET_OK;
 }
