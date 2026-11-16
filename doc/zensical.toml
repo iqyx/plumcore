@@ -94,6 +94,7 @@ nav = [
     ] },
     { "Interfaces" = [
         "interfaces/index.md",
+        "interfaces/concepts.md",
         "interfaces/power.md",
         "interfaces/remote-interface.md",
     ] },
