@@ -464,6 +464,27 @@ mq_compensation_ret_t mq_compensation_reset_channel(MqCompensation *self, uint32
 }
 
 
+mq_compensation_ret_t mq_compensation_set_output_topic(MqCompensation *self, uint32_t channel, const char *topic) {
+	if (u_assert(self != NULL) ||
+	    u_assert(topic != NULL)) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	struct mq_compensation_channel *ch = mq_compensation_find_channel(self, channel);
+	if (ch == NULL) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+	if (strlen(topic) >= sizeof(ch->conf.output_topic)) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("topic '%s' too long"), topic);
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+
+	strcpy(ch->conf.output_topic, topic);
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("channel '%s' publishes to '%s'"), ch->conf.name, topic);
+	return MQ_COMPENSATION_RET_OK;
+}
+
+
 mq_compensation_ret_t mq_compensation_get_conf(MqCompensation *self, Conf **conf) {
 	if (u_assert(self != NULL) ||
 	    u_assert(conf != NULL)) {

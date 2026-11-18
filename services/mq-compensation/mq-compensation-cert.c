@@ -554,6 +554,58 @@ mq_compensation_ret_t mq_compensation_cert_get_id(struct mq_compensation_cert *s
 }
 
 
+mq_compensation_ret_t mq_compensation_cert_get_sn(struct mq_compensation_cert *self, const char *tgt, char *sn, size_t size) {
+	CborValue tgts;
+	if (cert_enter_top(self, "tgt", &tgts) != MQ_COMPENSATION_RET_OK) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+	while (!cbor_value_at_end(&tgts)) {
+		bool match = true;
+		CborValue e;
+		if (tgt != NULL) {
+			if (cert_value_equals(&tgts, tgt, &match) != MQ_COMPENSATION_RET_OK) {
+				return MQ_COMPENSATION_RET_FAILED;
+			}
+		} else if (cbor_value_advance(&tgts) != CborNoError) {
+			return MQ_COMPENSATION_RET_FAILED;
+		}
+		if (!cbor_value_is_map(&tgts) ||
+		    cbor_value_enter_container(&tgts, &e) != CborNoError) {
+			return MQ_COMPENSATION_RET_FAILED;
+		}
+
+		/* The keys come in any order, the serial number is copied before knowing whether the target matches. */
+		bool has_sn = false;
+		while (!cbor_value_at_end(&e)) {
+			char key[MQ_COMPENSATION_CERT_STR_LEN];
+			if (cert_copy_text(&e, key, sizeof(key)) != MQ_COMPENSATION_RET_OK) {
+				return MQ_COMPENSATION_RET_FAILED;
+			}
+			if (match && !strcmp(key, "sn")) {
+				if (cert_copy_text(&e, sn, size) != MQ_COMPENSATION_RET_OK) {
+					return MQ_COMPENSATION_RET_FAILED;
+				}
+				has_sn = true;
+				continue;
+			}
+			/* With no target, only a top-level target matches. */
+			match = match && !(tgt == NULL && !strcmp(key, "p"));
+			if (cbor_value_advance(&e) != CborNoError) {
+				return MQ_COMPENSATION_RET_FAILED;
+			}
+		}
+		if (cbor_value_leave_container(&tgts, &e) != CborNoError) {
+			return MQ_COMPENSATION_RET_FAILED;
+		}
+
+		if (match) {
+			return has_sn ? MQ_COMPENSATION_RET_OK : MQ_COMPENSATION_RET_FAILED;
+		}
+	}
+	return MQ_COMPENSATION_RET_FAILED;
+}
+
+
 mq_compensation_ret_t mq_compensation_cert_find_cfg(struct mq_compensation_cert *self, const struct mq_compensation_cert_kv *kv, char *id, size_t size) {
 	size_t kv_count = 0;
 	while (kv[kv_count].key != NULL) {

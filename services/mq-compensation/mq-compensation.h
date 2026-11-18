@@ -280,6 +280,20 @@ mq_compensation_ret_t mq_compensation_reset_channel(MqCompensation *self, uint32
 
 
 /**
+ * @brief Set the output topic of a channel
+ *
+ * The compensated values of the channel @p channel are published on @p topic from now on, eg. to identify the
+ * calibrated sensor in the topic.
+ *
+ * @param channel Index of the channel in the order the channels were added with mq_compensation_add_channel().
+ *
+ * @return MQ_COMPENSATION_RET_FAILED if there is no such channel or @p topic does not fit, MQ_COMPENSATION_RET_OK
+ *         otherwise.
+ */
+mq_compensation_ret_t mq_compensation_set_output_topic(MqCompensation *self, uint32_t channel, const char *topic);
+
+
+/**
  * @brief Get the configuration tree root of the service
  *
  * The returned node can be attached to a parent configuration tree or handed to a service

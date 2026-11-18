@@ -74,6 +74,22 @@ mq_compensation_ret_t mq_compensation_cert_get_id(struct mq_compensation_cert *s
 
 
 /**
+ * @brief Get the serial number of a target
+ *
+ * The serial number is the "sn" of the target.
+ *
+ * @param tgt Identifier of the target, NULL to take the first top-level target (a target with no parent), eg. of a
+ *            certificate of a single sensor.
+ * @param sn Returns the serial number. A longer one than MQ_COMPENSATION_CERT_STR_LEN - 1 cannot be read.
+ * @param size Size of the @p sn buffer.
+ *
+ * @return MQ_COMPENSATION_RET_FAILED if the target or its serial number is absent or does not fit,
+ *         MQ_COMPENSATION_RET_OK otherwise.
+ */
+mq_compensation_ret_t mq_compensation_cert_get_sn(struct mq_compensation_cert *self, const char *tgt, char *sn, size_t size);
+
+
+/**
  * @brief Find the first configuration of the certificate matching all key-value pairs
  *
  * A configuration (an entry of the top-level "cfg" map) matches if it has all the pairs in @p kv, in any order. Its
