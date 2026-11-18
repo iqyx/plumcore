@@ -129,9 +129,9 @@ applet_ret_t live_data_conf_init(Applet *self) {
 		});
 		configlib_set_description(node, "Sensor or topic shown in the section",
 			"Topic filter (with the + and # wildcards) of the sensor or MQ topic drawn in this detail tab section, "
-			"eg. math/force0/# matching both math/force0 and math/force0/<sn>. The first matching name in the list "
-			"is shown with its value, replacing the selected sensor the section would show otherwise. Until a "
-			"matching topic is received the section shows dashes. Empty shows the selection.");
+			"eg. math/force0/# matching both math/force0 and math/force0/<sn>. The most recently updated matching "
+			"name in the list is shown with its value, replacing the selected sensor the section would show "
+			"otherwise. Until a matching topic is received the section shows dashes. Empty shows the selection.");
 		prev = node;
 	}
 
