@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #include <main.h>
 
@@ -42,6 +43,19 @@ static void app_sensor_calibration_skip(App *self, const char *name, uint32_t ch
 }
 
 
+/* Publish the force channel @p ch on math/force<ch>/<sn> identifying the calibrated sensor by its serial number @p sn,
+ * or on math/force<ch> if @p sn is NULL. */
+static void app_sensor_calibration_set_topic(App *self, uint32_t ch, const char *sn) {
+	char topic[MQ_COMPENSATION_MAX_TOPIC_LEN];
+	if (sn != NULL) {
+		snprintf(topic, sizeof(topic), "math/force%u/%s", (unsigned int)ch, sn);
+	} else {
+		snprintf(topic, sizeof(topic), "math/force%u", (unsigned int)ch);
+	}
+	mq_compensation_set_output_topic(&self->force, ch, topic);
+}
+
+
 /* Open the TEDS partition @p name and load its certificate into the force channel @p ch if the certificate
  * identifier differs from the one seen last. The identifier is kept even if loading fails, the certificate is not
  * loaded again until the identifier changes or a read failure (eg. the sensor was detached) forgets it. */
@@ -66,6 +80,7 @@ static void app_sensor_calibration_check(App *self, const char *name, uint32_t c
 		 * sensor. The same certificate is loaded again when it reappears. */
 		if (self->teds_cert_id[ch][0] != '\0') {
 			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("%s: no certificate, channel reset"), name);
+			app_sensor_calibration_set_topic(self, ch, NULL);
 		}
 		mq_compensation_reset_channel(&self->force, ch);
 		self->teds_cert_id[ch][0] = '\0';
@@ -78,10 +93,17 @@ static void app_sensor_calibration_check(App *self, const char *name, uint32_t c
 	if (strcmp(id, self->teds_cert_id[ch])) {
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("%s: new certificate '%s'"), name, id);
 		strcpy(self->teds_cert_id[ch], id);
+		char sn[MQ_COMPENSATION_CERT_STR_LEN];
 		if (mq_compensation_load_certificate_channel(&self->force, &self->ff14_flash.flash, NULL, ch) != MQ_COMPENSATION_RET_OK) {
 			/* Do not keep the calibration of a previous sensor. */
 			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("%s: certificate '%s' cannot be loaded, channel reset"), name, id);
 			mq_compensation_reset_channel(&self->force, ch);
+			app_sensor_calibration_set_topic(self, ch, NULL);
+		} else if (mq_compensation_cert_get_sn(&cert, NULL, sn, sizeof(sn)) != MQ_COMPENSATION_RET_OK) {
+			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("%s: certificate '%s' has no sensor serial number"), name, id);
+			app_sensor_calibration_set_topic(self, ch, NULL);
+		} else {
+			app_sensor_calibration_set_topic(self, ch, sn);
 		}
 	}
 

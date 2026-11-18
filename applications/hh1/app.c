@@ -368,8 +368,9 @@ static app_ret_t app_setup_backplane(App *self) {
 
 
 /* Convert the measurement card's channels 0-3 (republished as ff14/out/ch<n>) into force channels 0-3
- * published as force/<n>. The channels start with identity coefficients, the calibration is set through
- * the "compensation" configuration tree advertised below (saved and loaded with the rest of the configuration). */
+ * published as math/force<n>. The channels start with identity coefficients, the calibration is set through
+ * the "compensation" configuration tree advertised below (saved and loaded with the rest of the configuration).
+ * A channel calibrated by a sensor certificate publishes on math/force<n>/<sn> instead (see sensor-calibration.c). */
 static app_ret_t app_setup_force(App *self) {
 	if (mq_compensation_init(&self->force, self->mq) != MQ_COMPENSATION_RET_OK) {
 		return APP_RET_FAILED;
