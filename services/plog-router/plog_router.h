@@ -86,3 +86,6 @@ plog_router_ret_t plog_router_init(PlogRouter *self);
 plog_router_ret_t plog_router_free(PlogRouter *self);
 plog_router_ret_t plog_router_set_clock(PlogRouter *self, Clock *rtc);
 
+/* MQTT style topic matching of @p topic against @p filter with the + and # wildcards. */
+bool plog_router_match_topic(const char *filter, const char *topic);
+

@@ -38,7 +38,7 @@
  * sport/tennis/+, sport/tennis/player2 -> true
  * sport/tennis/+, sport/tennis/player1/ranking -> false
  */
-static bool plog_router_match_topic(const char *filter, const char *topic) {
+bool plog_router_match_topic(const char *filter, const char *topic) {
 	if (*filter == '#') {
 		return true;
 	}
