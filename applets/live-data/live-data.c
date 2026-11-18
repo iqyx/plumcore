@@ -21,6 +21,7 @@
 #include <interfaces/sensor.h>
 #include <interfaces/servicelocator.h>
 #include <services/fb-painter/fb-painter.h>
+#include <services/plog-router/plog_router.h>
 
 /* The applet requires the fb-painter service (see its Kconfig depends), so its assets are always available. */
 #include <services/fb-painter/assets/assets.h>
@@ -479,8 +480,8 @@ static void live_data_update_leds(LiveDataApplet *self) {
  * content area is split into a number of sections set by the layout/detail/sections conf value, or by the
  * selection count when it is auto: the whole area for one, two stacked rows for two, and a 2x2 grid for three
  * or four. Sensors beyond the section count are ignored, spare sections are left empty. A non-empty
- * layout/detail/sectionN conf value shows the named sensor or topic in section N instead of the selection, as
- * dashes until a value of that name is known. The caller must have an active painter frame. */
+ * layout/detail/sectionN conf value shows the first sensor or topic matching it as a topic filter in section N
+ * instead of the selection, as dashes until a matching value is known. The caller must have an active painter frame. */
 static void live_data_draw_detail(LiveDataApplet *self) {
 	Painter *painter = &self->painter.painter;
 
@@ -512,15 +513,16 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 	}
 
 	for (size_t k = 0; k < sections; k++) {
-		/* The section override wins over the selection. An override not matching any known name is drawn from
-		 * a placeholder carrying just the name, so the section shows it with dashes. */
+		/* The section override wins over the selection. It is a topic filter, the first matching sensor or topic
+		 * is shown with its own name, eg. math/force0/# shows math/force0/2026.abcd. An override not matching any
+		 * known name is drawn from a placeholder carrying just the filter, so the section shows it with dashes. */
 		const char *override = live_data_conf.settings.layout.detail.section[k];
 		struct live_data_sensor placeholder = {.name = override};
 		struct live_data_sensor *s = NULL;
 		if (override[0] != '\0') {
 			s = &placeholder;
 			for (size_t i = 0; i < self->sensor_count; i++) {
-				if (!strcmp(self->sensors[i].name, override)) {
+				if (plog_router_match_topic(override, self->sensors[i].name)) {
 					s = &self->sensors[i];
 					break;
 				}

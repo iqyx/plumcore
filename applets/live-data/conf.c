@@ -15,7 +15,7 @@
  *
  *     /applet/live-data/default-tab                    tab shown when the applet is started (list, detail or graph)
  *     /applet/live-data/layout/detail/sections         number of detail tab sections (auto, 1, 2, 3 or 4)
- *     /applet/live-data/layout/detail/section0         sensor or topic shown in the section instead of the selection
+ *     /applet/live-data/layout/detail/section0         topic filter of the sensor or topic shown instead of the selection
  *     ...
  *     /applet/live-data/layout/detail/section3
  *     /applet/live-data/layout/detail/int-digits       integer digits the value is padded to (0 = no padding)
@@ -128,9 +128,10 @@ applet_ret_t live_data_conf_init(Applet *self) {
 			.str.max_len = LIVE_DATA_MAX_TOPIC_LEN - 1,
 		});
 		configlib_set_description(node, "Sensor or topic shown in the section",
-			"Name of the sensor or MQ topic drawn in this detail tab section, exactly as it is shown in the list, "
-			"replacing the selected sensor the section would show otherwise. Until a topic of that name is "
-			"received the section shows dashes. Empty shows the selection.");
+			"Topic filter (with the + and # wildcards) of the sensor or MQ topic drawn in this detail tab section, "
+			"eg. math/force0/# matching both math/force0 and math/force0/<sn>. The first matching name in the list "
+			"is shown with its value, replacing the selected sensor the section would show otherwise. Until a "
+			"matching topic is received the section shows dashes. Empty shows the selection.");
 		prev = node;
 	}
 
