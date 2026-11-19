@@ -48,6 +48,16 @@
 
 	/* Number of TEDS partitions (teds0 to teds3) of the measurement card, each calibrating one force channel. */
 	#define APP_SENSOR_CALIBRATION_CHANNELS 4
+
+	/* A target of the certificate loaded from a TEDS partition, exposed as "target <id> sn" (see
+	 * sensor-calibration.c). Allocated when the certificate is loaded, freed when it changes or disappears. */
+	struct app_teds_target {
+		ConfiglibValue conf;
+		ConfiglibValue sn_conf;
+		char id[MQ_COMPENSATION_CERT_STR_LEN];
+		char sn[MQ_COMPENSATION_CERT_STR_LEN];
+		struct app_teds_target *next;
+	};
 #endif
 
 typedef enum {
@@ -187,6 +197,20 @@ typedef struct {
 		/* Reason the certificate of each TEDS partition was last skipped for, NULL if it was not. Kept to log
 		 * each reason once only. */
 		const char *teds_skip[APP_SENSOR_CALIBRATION_CHANNELS];
+
+		/* Configuration tree advertised as "device teds". It holds a subtree "<n>" for each TEDS partition with a
+		 * certificate, exposing the identifier of the certificate as "id" and the serial number of each
+		 * certificate target as "target <id> sn". The subtree is removed when the certificate disappears. */
+		struct {
+			ConfiglibValue root;
+			struct {
+				char name[4];
+				ConfiglibValue conf;
+				ConfiglibValue id;
+				ConfiglibValue target;
+				struct app_teds_target *targets;
+			} dev[APP_SENSOR_CALIBRATION_CHANNELS];
+		} teds_conf;
 	#endif
 } App;
 
