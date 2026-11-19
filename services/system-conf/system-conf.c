@@ -8,6 +8,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <main.h>
@@ -124,6 +126,154 @@ static void system_conf_add_string(ConfiglibValue *node, const char *name, char 
 }
 
 
+/* Find the status of the task with the given task number in the @p status array of @p count entries. */
+static TaskStatus_t *system_conf_process_status(TaskStatus_t *status, UBaseType_t count, UBaseType_t number) {
+	for (UBaseType_t i = 0; i < count; i++) {
+		if (status[i].xTaskNumber == number) {
+			return &status[i];
+		}
+	}
+	return NULL;
+}
+
+
+static bool system_conf_process_name_used(SystemConf *self, const char *name) {
+	for (struct system_conf_process *p = self->processes; p != NULL; p = p->next) {
+		if (p->number != 0 && strcmp(p->name, name) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+/* Remove a process subtree from the "processes" children list. The next pointer of the removed node is
+ * kept intact so a tree walker currently positioned on it can continue. */
+static void system_conf_process_unlink(SystemConf *self, struct system_conf_process *p) {
+	if (self->processes_conf.child == &p->process_conf) {
+		self->processes_conf.child = p->process_conf.next;
+		return;
+	}
+	for (ConfiglibValue *v = self->processes_conf.child; v != NULL; v = v->next) {
+		if (v->next == &p->process_conf) {
+			v->next = p->process_conf.next;
+			return;
+		}
+	}
+}
+
+
+/* Create a process subtree for a newly discovered task, reusing an unused entry if there is one. */
+static void system_conf_process_add(SystemConf *self, TaskStatus_t *status) {
+	struct system_conf_process *p = self->processes;
+	while (p != NULL && p->number != 0) {
+		p = p->next;
+	}
+	if (p == NULL) {
+		p = malloc(sizeof(struct system_conf_process));
+		if (p == NULL) {
+			return;
+		}
+		p->next = self->processes;
+		p->number = 0;
+		self->processes = p;
+	}
+
+	/* Make the name unique while the entry is still unused, so it doesn't clash with itself. */
+	strlcpy(p->name, status->pcTaskName, sizeof(p->name));
+	for (uint32_t n = 1; system_conf_process_name_used(self, p->name); n++) {
+		snprintf(p->name, sizeof(p->name), "%s-%lu", status->pcTaskName, (unsigned long)n);
+	}
+
+	p->number = status->xTaskNumber;
+	p->run_time_prev = 0;
+	p->addr = (uint32_t)(uintptr_t)status->xHandle;
+	p->stack_total = (uint32_t)((uintptr_t)status->pxEndOfStack - (uintptr_t)status->pxStackBase) + sizeof(StackType_t);
+	p->stack_used = 0;
+	p->time_used = 0.0f;
+
+	configlib_init_map(&p->process_conf, p->name, NULL, CONF_SUBTREE);
+	configlib_init_map_append(&p->addr_conf, "addr", &p->addr, CONF_U32, &p->process_conf, CONF_DIR_CHILD);
+	p->addr_conf.flags = CONF_READ | CONF_STATUS;
+	configlib_init_map_append(&p->stack_total_conf, "stack-total", &p->stack_total, CONF_U32, &p->process_conf,
+		CONF_DIR_CHILD);
+	p->stack_total_conf.flags = CONF_READ | CONF_STATUS;
+	configlib_init_map_append(&p->stack_used_conf, "stack-used", &p->stack_used, CONF_U32, &p->process_conf,
+		CONF_DIR_CHILD);
+	p->stack_used_conf.flags = CONF_READ | CONF_STATUS;
+	configlib_init_map_append(&p->time_used_conf, "time-used", &p->time_used, CONF_F, &p->process_conf,
+		CONF_DIR_CHILD);
+	p->time_used_conf.flags = CONF_READ | CONF_STATUS;
+	configlib_append(&p->process_conf, &self->processes_conf, CONF_DIR_CHILD);
+}
+
+
+/* Synchronize the "processes" subtree with the current FreeRTOS task list. The total CPU time of the
+ * refresh interval is the sum of the task run time deltas, not the run time counter itself, as the
+ * counter may be a short timer wrapping many times between refreshes. */
+static void system_conf_process_refresh(SystemConf *self) {
+	UBaseType_t count = uxTaskGetNumberOfTasks();
+	TaskStatus_t *status = malloc(count * sizeof(TaskStatus_t));
+	if (status == NULL) {
+		return;
+	}
+	/* Returns 0 if a task was created in the meantime and the array is too small, skip this round. */
+	count = uxTaskGetSystemState(status, count, NULL);
+
+	/* Drop the entries of deleted tasks, a NULL handle marks the tasks already having an entry. */
+	for (struct system_conf_process *p = self->processes; p != NULL; p = p->next) {
+		if (p->number == 0) {
+			continue;
+		}
+		TaskStatus_t *s = system_conf_process_status(status, count, p->number);
+		if (s == NULL) {
+			system_conf_process_unlink(self, p);
+			p->number = 0;
+		} else {
+			s->xHandle = NULL;
+		}
+	}
+
+	for (UBaseType_t i = 0; i < count; i++) {
+		if (status[i].xHandle != NULL) {
+			system_conf_process_add(self, &status[i]);
+		}
+	}
+
+	configRUN_TIME_COUNTER_TYPE total = 0;
+	for (struct system_conf_process *p = self->processes; p != NULL; p = p->next) {
+		TaskStatus_t *s = system_conf_process_status(status, count, p->number);
+		if (p->number != 0 && s != NULL) {
+			total += s->ulRunTimeCounter - p->run_time_prev;
+		}
+	}
+
+	for (struct system_conf_process *p = self->processes; p != NULL; p = p->next) {
+		TaskStatus_t *s = system_conf_process_status(status, count, p->number);
+		if (p->number == 0 || s == NULL) {
+			continue;
+		}
+		p->stack_used = p->stack_total - (uint32_t)s->usStackHighWaterMark * sizeof(StackType_t);
+		if (total > 0) {
+			p->time_used = (float)(s->ulRunTimeCounter - p->run_time_prev) / (float)total;
+		}
+		p->run_time_prev = s->ulRunTimeCounter;
+	}
+
+	free(status);
+}
+
+
+static void system_conf_process_task(void *p) {
+	SystemConf *self = (SystemConf *)p;
+
+	while (true) {
+		system_conf_process_refresh(self);
+		vTaskDelay(pdMS_TO_TICKS(SYSTEM_CONF_PROCESS_INTERVAL_MS));
+	}
+}
+
+
 system_conf_ret_t system_conf_init(SystemConf *self) {
 	if (u_assert(self != NULL)) {
 		return SYSTEM_CONF_RET_FAILED;
@@ -184,6 +334,14 @@ system_conf_ret_t system_conf_init(SystemConf *self) {
 	system_conf_make_computed(&self->mem_used_conf, &system_conf_mem_used_vmt, system_conf_mem_used_read, NULL);
 #endif
 
+	/* "processes" subtree, filled and kept in sync with the task list by the process-status task. */
+	configlib_init_map_append(&self->processes_conf, "processes", NULL, CONF_SUBTREE, &self->root_conf, CONF_DIR_CHILD);
+	self->processes_conf.flags = CONF_READ | CONF_STATUS;
+	if (xTaskCreate(system_conf_process_task, "process-status", SYSTEM_CONF_PROCESS_STACK_SIZE, (void *)self, 1,
+	                &self->process_task) != pdPASS) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot create the process-status task"));
+	}
+
 	/* "timezone" subtree, UTC without daylight saving time until configured. */
 	configlib_init_map_append(&self->timezone_conf, "timezone", NULL, CONF_SUBTREE, &self->root_conf, CONF_DIR_CHILD);
 	configlib_init_map_append(&self->tz_offset_conf, "offset", &self->tz_offset, CONF_S16, &self->timezone_conf,
@@ -222,6 +380,15 @@ system_conf_ret_t system_conf_init(SystemConf *self) {
 system_conf_ret_t system_conf_free(SystemConf *self) {
 	if (u_assert(self != NULL)) {
 		return SYSTEM_CONF_RET_FAILED;
+	}
+
+	if (self->process_task != NULL) {
+		vTaskDelete(self->process_task);
+	}
+	while (self->processes != NULL) {
+		struct system_conf_process *p = self->processes;
+		self->processes = p->next;
+		free(p);
 	}
 
 	return SYSTEM_CONF_RET_OK;

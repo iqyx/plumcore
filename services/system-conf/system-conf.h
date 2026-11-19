@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include <main.h>
 #include <interfaces/conf.h>
 #include <configlib.h>
 
@@ -19,6 +20,8 @@
  * each leaf is backed by a buffer with the lifetime of the service instance. */
 #define SYSTEM_CONF_STR_LEN 48
 #define SYSTEM_CONF_HOSTNAME_LEN 32
+#define SYSTEM_CONF_PROCESS_INTERVAL_MS 5000
+#define SYSTEM_CONF_PROCESS_STACK_SIZE (configMINIMAL_STACK_SIZE + 256)
 
 typedef enum {
 	SYSTEM_CONF_RET_OK = 0,
@@ -33,6 +36,34 @@ enum system_conf_dst {
 	SYSTEM_CONF_DST_EU,
 	/* US: +1 h from the second Sunday of March 02:00 to the first Sunday of November 02:00 local time. */
 	SYSTEM_CONF_DST_US,
+};
+
+/* One "processes" entry describing a single FreeRTOS task. Entries are allocated on demand by the
+ * process-status task and never freed: an entry of a deleted task is unlinked from the tree and reused
+ * for the next new task, so a concurrent tree walker never ends up in freed memory. */
+struct system_conf_process {
+	/* List of all allocated entries, including the unused ones. */
+	struct system_conf_process *next;
+
+	/* FreeRTOS task number (unique for each created task), 0 if the entry is unused. */
+	UBaseType_t number;
+
+	/* Task run time counter seen during the previous refresh. */
+	configRUN_TIME_COUNTER_TYPE run_time_prev;
+
+	/* Task name with an optional "-<n>" suffix making it unique. */
+	char name[configMAX_TASK_NAME_LEN + 4];
+
+	uint32_t addr;
+	uint32_t stack_total;
+	uint32_t stack_used;
+	float time_used;
+
+	ConfiglibValue process_conf;
+	ConfiglibValue addr_conf;
+	ConfiglibValue stack_total_conf;
+	ConfiglibValue stack_used_conf;
+	ConfiglibValue time_used_conf;
 };
 
 
@@ -73,6 +104,12 @@ typedef struct system_conf {
 	uint32_t mem_static;
 	uint32_t mem_heap;
 	uint32_t mem_used;
+
+	/* "processes" subtree with one subtree per FreeRTOS task, refreshed periodically by the
+	 * process-status task. */
+	ConfiglibValue processes_conf;
+	struct system_conf_process *processes;
+	TaskHandle_t process_task;
 
 	/* "timezone" subtree used to display the UTC system time as local time. The time itself is always kept in
 	 * UTC. "offset" is the standard time offset in minutes east of UTC, "dst" an enum system_conf_dst rule. */

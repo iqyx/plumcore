@@ -20,6 +20,12 @@ system
 │   ├── static       (u32)    statically allocated RAM (data+bss+noinit), bytes
 │   ├── heap         (u32)    configured heap size, bytes
 │   └── used         (u32)    currently used heap, bytes
+├── processes
+│   └── <task name>  one subtree per FreeRTOS task, "-<n>" appended on a name clash
+│       ├── addr         (u32)   task TCB address
+│       ├── stack-total  (u32)   task stack size, bytes
+│       ├── stack-used   (u32)   peak stack usage (from the high water mark), bytes
+│       └── time-used    (float) share of the CPU time during the last refresh interval, 0 to 1
 └── reset            (bool)   reads false; write true to reset the device
 ```
 
@@ -42,6 +48,13 @@ The `memory` counters are all in bytes:
 `total`, `static` and `heap` are constants resolved in `init()`; `used` is computed on read. The heap
 here is the newlib/`sbrk` allocator (`heap_useNewlib`), which grows from `_ebss` up to
 `_ebss + configTOTAL_HEAP_SIZE`.
+
+The `processes` subtree is maintained by the `process-status` task which refreshes it every
+`SYSTEM_CONF_PROCESS_INTERVAL_MS` (5 s) using `uxTaskGetSystemState()`. Entries are allocated on demand when a new
+task appears. When a task is deleted, its entry is unlinked from the tree and kept for reuse by the next new task, it
+is never freed. All leaves are flagged `CONF_STATUS`. `time-used` is computed over the last refresh interval as the
+task run time delta divided by the sum of the deltas of all tasks (the run time counter itself may be a short wrapping
+timer). Requires `configUSE_TRACE_FACILITY` and `configRECORD_STACK_HIGH_ADDRESS` (set in `system/FreeRTOSConfig.h`).
 
 ## Usage
 

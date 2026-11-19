@@ -14,6 +14,8 @@
 #define configUSE_APPLICATION_TASK_TAG	0
 #define configUSE_COUNTING_SEMAPHORES	1
 #define configGENERATE_RUN_TIME_STATS	1
+#define configUSE_TRACE_FACILITY		1
+#define configRECORD_STACK_HIGH_ADDRESS	1
 #define configUSE_CO_ROUTINES 		0
 #define configMAX_CO_ROUTINE_PRIORITIES ( 2 )
 #define configUSE_TIMERS				1
