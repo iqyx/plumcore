@@ -90,6 +90,22 @@ mq_compensation_ret_t mq_compensation_cert_get_sn(struct mq_compensation_cert *s
 
 
 /**
+ * @brief Get the identifier of a target
+ *
+ * The targets are taken in the order of the top-level "tgt" map. The certificate is traversed from its beginning on
+ * each call.
+ *
+ * @param i Index of the target.
+ * @param id Returns the identifier. A longer one than MQ_COMPENSATION_CERT_STR_LEN - 1 cannot be read.
+ * @param size Size of the @p id buffer.
+ *
+ * @return MQ_COMPENSATION_RET_FAILED if there is no such target or its identifier does not fit,
+ *         MQ_COMPENSATION_RET_OK otherwise.
+ */
+mq_compensation_ret_t mq_compensation_cert_get_target_id(struct mq_compensation_cert *self, uint32_t i, char *id, size_t size);
+
+
+/**
  * @brief Find the first configuration of the certificate matching all key-value pairs
  *
  * A configuration (an entry of the top-level "cfg" map) matches if it has all the pairs in @p kv, in any order. Its

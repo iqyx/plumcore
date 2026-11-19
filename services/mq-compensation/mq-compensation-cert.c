@@ -606,6 +606,27 @@ mq_compensation_ret_t mq_compensation_cert_get_sn(struct mq_compensation_cert *s
 }
 
 
+mq_compensation_ret_t mq_compensation_cert_get_target_id(struct mq_compensation_cert *self, uint32_t i, char *id, size_t size) {
+	CborValue tgts;
+	if (cert_enter_top(self, "tgt", &tgts) != MQ_COMPENSATION_RET_OK) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+	/* Skip the identifier and the map of each preceding target. */
+	for (uint32_t j = 0; j < i; j++) {
+		if (cbor_value_at_end(&tgts) ||
+		    cbor_value_advance(&tgts) != CborNoError ||
+		    cbor_value_advance(&tgts) != CborNoError) {
+			return MQ_COMPENSATION_RET_FAILED;
+		}
+	}
+	if (cbor_value_at_end(&tgts) ||
+	    cert_copy_text(&tgts, id, size) != MQ_COMPENSATION_RET_OK) {
+		return MQ_COMPENSATION_RET_FAILED;
+	}
+	return MQ_COMPENSATION_RET_OK;
+}
+
+
 mq_compensation_ret_t mq_compensation_cert_find_cfg(struct mq_compensation_cert *self, const struct mq_compensation_cert_kv *kv, char *id, size_t size) {
 	size_t kv_count = 0;
 	while (kv[kv_count].key != NULL) {
