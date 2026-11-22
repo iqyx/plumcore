@@ -18,7 +18,7 @@ dependencies = [
     "tqdm>=4.66",
     "colorama>=0.4.6",
     "cbor2>=5.4",
-    # simplepyble backs pynbus2's BLE (dgble) transport, used by tools/proto-nbus-flash.py.
+    # simplepyble backs pynbus2's BLE (dgble, rible) transports.
     "simplepyble>=0.7",
     # Documentation is built with zensical (see doc/zensical.toml); it replaces
     # the previous Sphinx toolchain. markdown-gfm-admonition provides the
@@ -29,6 +29,8 @@ dependencies = [
     "weasyprint>=60",
     "freetype-py>=2.4",
     "bdflib>=2.0",
+    # Plotting in the host-side helper scripts, e.g. tools/battery-stats.py.
+    "matplotlib>=3.10.9",
 ]
 
 # Managed with PDM. This repository is an application, not a distributable
@@ -40,4 +42,9 @@ distribution = false
 [dependency-groups]
 dev = [
     "spdx-tools>=0.8.5",
+]
+# The nbus2 client library and its pynbus2-* command line tools (pynbus2-mq, pynbus2-conf, pynbus2-flash),
+# installed editable from the source tree into the project virtualenv.
+tools = [
+    "-e file:///${PROJECT_ROOT}/tools/pynbus2#egg=pynbus2[cli,ble]",
 ]
