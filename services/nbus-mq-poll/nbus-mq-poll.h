@@ -21,12 +21,13 @@
 #include <types/ndarray.h>
 
 
-/* Maximum size of a single batch of serialised messages (in bytes). */
-#define NBUS_MQ_POLL_MSG_BUFFER_SIZE 128
+/* Maximum size of a single batch of serialised messages (in bytes). A reply carrying a single batch together with
+ * its envelope fits a single BLE notification (243 bytes of a 247 byte ATT MTU after the ATT and fragment headers). */
+#define NBUS_MQ_POLL_MSG_BUFFER_SIZE 200
 /* Number of batches kept in the ring. A sealed batch is retained here until the client acknowledges
  * it, so this doubles as the retransmission/retention window. When the window is exhausted the oldest
  * unacknowledged batch is evicted and its loss becomes visible to the client as a sequence gap. */
-#define NBUS_MQ_POLL_MSG_BUFFERS 4
+#define NBUS_MQ_POLL_MSG_BUFFERS 8
 #define NBUS_MQ_POLL_MAX_TOPIC_LEN 32
 /* Scratch buffer for a single received poll-request datagram. */
 #define NBUS_MQ_POLL_NBUS_BUF_LEN 256
