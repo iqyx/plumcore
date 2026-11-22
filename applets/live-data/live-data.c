@@ -354,11 +354,12 @@ static void live_data_draw_detail_cell(LiveDataApplet *self, struct live_data_se
 	Painter *painter = &self->painter.painter;
 
 	/* The current value formatted as configured in layout/detail, shown as three dashes until the first
-	 * successful read and as value-ol-text when outside the value-min to value-max range. */
+	 * successful read, as ul-text below ul-min and as ol-text above ol-max. */
 	char value[24];
-	if (s->valid && (s->value < live_data_conf.settings.layout.detail.value_min ||
-	                 s->value > live_data_conf.settings.layout.detail.value_max)) {
-		strcpy(value, live_data_conf.settings.layout.detail.value_ol_text);
+	if (s->valid && s->value < live_data_conf.settings.layout.detail.ul_min) {
+		strcpy(value, live_data_conf.settings.layout.detail.ul_text);
+	} else if (s->valid && s->value > live_data_conf.settings.layout.detail.ol_max) {
+		strcpy(value, live_data_conf.settings.layout.detail.ol_text);
 	} else if (s->valid) {
 		live_data_format_value(value, sizeof(value), s->value, live_data_conf.settings.layout.detail.int_digits,
 			live_data_conf.settings.layout.detail.frac_digits, live_data_conf.settings.layout.detail.leading_zeros,

@@ -30,8 +30,8 @@ enum live_data_tab {
 /* Maximum length of the window title and the top caption, including the terminator. */
 #define LIVE_DATA_MAX_CAPTION_LEN 32
 
-/* Maximum length of the text shown instead of an out-of-range value, including the terminator. */
-#define LIVE_DATA_MAX_OL_TEXT_LEN 16
+/* Maximum length of the text shown instead of an underload or overload value, including the terminator. */
+#define LIVE_DATA_MAX_RANGE_TEXT_LEN 16
 
 /* Maximum length of the detail section caption (a sed substitution), including the terminator. */
 #define LIVE_DATA_MAX_SECTION_CAPTION_LEN 64
@@ -56,9 +56,10 @@ struct live_data_conf {
 		ConfiglibValue layout_detail_frac_digits;
 		ConfiglibValue layout_detail_leading_zeros;
 		ConfiglibValue layout_detail_trailing_zeros;
-		ConfiglibValue layout_detail_value_min;
-		ConfiglibValue layout_detail_value_max;
-		ConfiglibValue layout_detail_value_ol_text;
+		ConfiglibValue layout_detail_ul_min;
+		ConfiglibValue layout_detail_ul_text;
+		ConfiglibValue layout_detail_ol_max;
+		ConfiglibValue layout_detail_ol_text;
 		ConfiglibValue leds;
 		ConfiglibValue leds_enable;
 	} tree;
@@ -85,10 +86,12 @@ struct live_data_conf {
 				uint8_t frac_digits;
 				bool leading_zeros;
 				bool trailing_zeros;
-				/* Valid value range, a value outside is shown as value_ol_text (overload) instead. */
-				float value_min;
-				float value_max;
-				char value_ol_text[LIVE_DATA_MAX_OL_TEXT_LEN];
+				/* Valid value range, a value below ul_min is shown as ul_text (underload) and a value above
+				 * ol_max as ol_text (overload) instead. */
+				float ul_min;
+				char ul_text[LIVE_DATA_MAX_RANGE_TEXT_LEN];
+				float ol_max;
+				char ol_text[LIVE_DATA_MAX_RANGE_TEXT_LEN];
 			} detail;
 		} layout;
 		struct {
