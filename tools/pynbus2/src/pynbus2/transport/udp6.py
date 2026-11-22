@@ -7,7 +7,7 @@
 
 """nbus2 transport over a UDP/IPv6 bridge.
 
-This mirrors how ``tools/proto-conf.py`` and ``tools/proto-nbus-flash.py`` reach a device: a host
+This mirrors how ``pynbus2-conf`` and ``pynbus2-flash`` reach a device: a host
 side bridge exposes the nbus2 network on a link-local-style IPv6 prefix where the lower 32 bits of an
 address are the service ID and the UDP port is ``base_port + ep``. The bridge (and the device) handle
 the nbus2 wire framing, medium access and packet protection, so nothing here touches crypto - each

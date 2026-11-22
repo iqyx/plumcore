@@ -1,16 +1,16 @@
-# proto-conf.py
+# pynbus2-conf
 
 Command-line tool to **walk, read and write** the configuration tree of a plumCore device over
 nbus2. It talks to the device's `conf` interface (the same tree services expose via
 `*_get_conf()`), so any service that publishes a configuration subtree — for example
-[`mq-compensation`](../services/mq-compensation/README.md) — can be inspected and configured with
+[`mq-compensation`](../../../services/mq-compensation/README.md) — can be inspected and configured with
 it.
 
 ## Connecting to a device
 
 The tool does not speak to hardware directly: it goes through the
-[`pynbus2`](pynbus2/) library, which is bundled in `tools/pynbus2/` and imported straight from the
-source tree (no installation needed). **The device must therefore be reachable by one of the
+[`pynbus2`](../README.md) library it is part of. In plumCore it is installed into the project virtualenv
+(`pdm install -G tools` in the repository root puts `pynbus2-conf` on the virtualenv `PATH`). **The device must therefore be reachable by one of the
 connection methods that `pynbus2` supports**, selected by the scheme of the connection URI you pass
 as the first argument.
 
@@ -21,7 +21,7 @@ The generic URI shape is:
 ```
 
 The path may carry a **default destination** as `/<sid>` or `/<sid>/<ep>` (service ID and
-endpoint). proto-conf requires a destination in the URI — without one it exits with an error,
+endpoint). pynbus2-conf requires a destination in the URI — without one it exits with an error,
 because it has nowhere to send the requests.
 
 ### Supported transports
@@ -58,20 +58,23 @@ added by registering a transport in `pynbus2`.
 ## Usage
 
 ```
-proto-conf.py <uri> [--walk [PATH]] [--read PATH] [--write PATH VALUE] [--verbose]
+pynbus2-conf <uri> [--list] [--walk [PATH]] [--read PATH] [--write PATH VALUE] [--load] [--save] [--verbose]
 ```
 
 | Option              | Purpose                                                                  |
 |---------------------|--------------------------------------------------------------------------|
 | `uri`               | nbus2 connection URI carrying the destination (see above)               |
+| `-L`, `--list`      | list the interfaces exported by the device (`rible://` only)             |
 | `-w`, `--walk [PATH]` | walk and pretty-print the tree at `PATH` (slash separated; default root) |
 | `-r`, `--read PATH` | read a single node and print its raw value (script-friendly)            |
 | `-W`, `--write PATH VALUE` | write `VALUE` to the node at `PATH`                               |
+| `-l`, `--load`      | run the configuration load job on the device and wait for it to end     |
+| `-s`, `--save`      | run the configuration save job on the device and wait for it to end     |
 | `-v`, `--verbose`   | log every nbus2 request/response to stderr                              |
 
 Paths are slash separated and address nodes inside the configuration tree, e.g.
 `compensation/press/c1`. The actions may be combined in one invocation; they run in the order
-walk → read → write.
+walk → read → write → load → save.
 
 ## Walking the tree
 
@@ -79,8 +82,8 @@ walk → read → write.
 shows its name, type and — for value nodes — its current value:
 
 ```
-proto-conf.py udp6:///00010002/3 --walk
-proto-conf.py udp6:///00010002/3 --walk compensation/press
+pynbus2-conf udp6:///00010002/3 --walk
+pynbus2-conf udp6:///00010002/3 --walk compensation/press
 ```
 
 ```
@@ -104,7 +107,7 @@ last returned node to gather every child; this is transparent to the user.
 Byte-string (`bstr`) values are printed as hex. The tool exits non-zero if the node cannot be read.
 
 ```
-proto-conf.py udp6:///00010002/3 --read compensation/press/c1
+pynbus2-conf udp6:///00010002/3 --read compensation/press/c1
 ```
 
 ## Writing a value
@@ -123,8 +126,8 @@ the node type:
 | `bstr`                        | hex string, e.g. `deadbeef`                                      |
 
 ```
-proto-conf.py udp6:///00010002/3 --write compensation/press/c1 1.0023
-proto-conf.py udp6:///00010002/3 --write compensation/press/tc1 -0.00042
+pynbus2-conf udp6:///00010002/3 --write compensation/press/c1 1.0023
+pynbus2-conf udp6:///00010002/3 --write compensation/press/tc1 -0.00042
 ```
 
 On success it prints `ok`; on a parse error or a rejected write it prints the reason to stderr and
@@ -139,6 +142,6 @@ the quickest way to see whether the device is reachable and which node a request
 
 - [`mq-comp-make-coeffs.py`](mq-comp-make-coeffs.md) — computes compensation coefficients that you
   then write into the tree with this tool.
-- [`mq-compensation` service](../services/mq-compensation/README.md) — the configuration layout of
+- [`mq-compensation` service](../../../services/mq-compensation/README.md) — the configuration layout of
   one such tree.
-- `proto-conf-gui.py` — a graphical front end over the same configuration tree.
+- `tools/proto-conf-gui.py` — a graphical front end over the same configuration tree.

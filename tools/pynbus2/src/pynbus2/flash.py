@@ -198,10 +198,10 @@ class FlashClient:
 			if progress is not None:
 				progress(addr + length)
 
-	def write(self, name, size, erase_size, page_size, data, progress=None, abort=None, stage=None):
-		"""Write ``data`` to the start of the partition ``name``, erasing the whole partition first and
-		reading the data back to verify it at the end. ``size``, ``erase_size`` and ``page_size`` are the
-		partition geometry from :meth:`info`. The data is padded with 0xff to whole pages.
+	def write(self, name, size, erase_size, page_size, data, progress=None, abort=None, stage=None, verify=True):
+		"""Write ``data`` to the start of the partition ``name``, erasing the whole partition first and, if
+		``verify``, reading the data back to verify it at the end. ``size``, ``erase_size`` and ``page_size``
+		are the partition geometry from :meth:`info`. The data is padded with 0xff to whole pages.
 
 		``stage`` is called as ``stage(what, total)`` when erasing (``'erase'``, the partition size),
 		writing and verifying (``'write'`` and ``'verify'``, the padded data size) starts, ``progress`` with
@@ -234,6 +234,8 @@ class FlashClient:
 				if progress is not None:
 					progress(addr + len(chunk))
 
+			if not verify:
+				return
 			if stage is not None:
 				stage('verify', len(data))
 			for addr in range(0, len(data), self.TRANSFER_BLOCK):

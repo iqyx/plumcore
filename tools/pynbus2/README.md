@@ -29,12 +29,38 @@ optional dependencies, installed with an extra (`pip install pynbus2[<extra>]`, 
 | `proxy`  | the `pynbus2-ssh-proxy` service     | cbor2              |
 | `mq`     | the `pynbus2.mq` message queue client | cbor2            |
 | `flash`  | the `pynbus2.flash` flash partition client | cbor2       |
+| `conf`   | the `pynbus2.conf` configuration tree client | cbor2     |
+| `cli`    | the `pynbus2-mq`, `pynbus2-conf` and `pynbus2-flash` tools | cbor2, colorama, tqdm |
 | `all`    | all of the above                    |                    |
 
 Another project can depend on the built sdist directly, e.g. with pdm:
 
 ```sh
 pdm add "pynbus2[serial,swd] @ file:///path/to/plumcore/tools/pynbus2/dist/pynbus2-0.2.0.tar.gz"
+```
+
+In plumCore the library is installed editable into the project virtualenv together with its tools, from the
+repository root:
+
+```sh
+pdm install -G tools
+```
+
+## Command line tools
+
+The `cli` extra installs a tool for each of the service protocol clients. Each takes a connection URI carrying
+the destination interface (see below) and `--help` lists its options.
+
+| tool            | service              | purpose                                                    |
+|-----------------|----------------------|------------------------------------------------------------|
+| `pynbus2-mq`    | `nbus-mq-poll`       | poll the device message queue and print the values         |
+| `pynbus2-conf`  | `proto-conf`         | walk, read and write the configuration tree ([doc](doc/pynbus2-conf.md)) |
+| `pynbus2-flash` | `nbus-flash`         | list, download, erase, upload and verify flash partitions   |
+
+```sh
+pynbus2-mq rible://nwdaq-hh1/mq -t "sensor/#"
+pynbus2-conf rible://nwdaq-hh1/conf --walk
+pynbus2-flash rible://nwdaq-hh1/flash --list
 ```
 
 ## Usage
@@ -224,7 +250,7 @@ with pynbus2.connect('rible://nwdaq-hh1') as nbus:
         print(repr(name), desc['p'], desc.get('pv'), desc['mtu'], desc['ms'])
 ```
 
-`tools/proto-conf.py rible://nwdaq-hh1 --list` prints the same list.
+`pynbus2-conf rible://nwdaq-hh1 --list` prints the same list.
 
 The service UUIDs are the first 15 bytes of `sha256("RemoteInterfaceBle")` followed by an attribute
 selector: `…e700` service, `…e701` control, `…e702` data.
@@ -252,11 +278,11 @@ swd://<probe-unique-id>[/<path>/<to>/<interface>][?target=...&pack=...&frequency
 | `pack`       | path to the CMSIS pack providing the target and its flash algorithm | none |
 | `frequency`  | SWD clock frequency in Hz | pyocd default |
 
-`tools/proto-nbus-flash.py` works over it unchanged, e.g. to recover a target with a broken
+`pynbus2-flash` works over it unchanged, e.g. to recover a target with a broken
 bootloader:
 
 ```sh
-tools/proto-nbus-flash.py 'swd://066DFF555187534867173540?target=stm32g491ccux&pack=Keil.STM32G4xx_DFP.2.0.0.pack' --list
+pynbus2-flash 'swd://066DFF555187534867173540?target=stm32g491ccux&pack=Keil.STM32G4xx_DFP.2.0.0.pack' --list
 ```
 
 The target is reset and halted when its flash is first erased or programmed (the flash algorithm runs

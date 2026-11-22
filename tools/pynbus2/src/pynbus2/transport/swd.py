@@ -17,7 +17,7 @@ Today the only interface is ``flash``: the target's raw flash exported through t
 protocol (see :mod:`pynbus2.services.flash`). Each pyocd flash region is exported as one volume, named
 ``flash0``, ``flash1``, ... in address order, with addresses relative to the region start. Regions which
 are only an alias of another region (e.g. the secure alias of the flash on TrustZone devices) are
-skipped. ``tools/proto-nbus-flash.py`` works over
+skipped. ``pynbus2-flash`` works over
 it unchanged and can be used to recover a target with a broken bootloader.
 
 URI form::

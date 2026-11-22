@@ -23,11 +23,16 @@ swd = ["pyocd>=0.36", "cbor2>=5"]
 proxy = ["cbor2>=5"]
 mq = ["cbor2>=5"]
 flash = ["cbor2>=5"]
+conf = ["cbor2>=5"]
 ssh = ["cbor2>=5", "paramiko>=3.4"]
-all = ["pynbus2[serial,ble,swd,proxy,ssh,mq,flash]"]
+cli = ["cbor2>=5", "colorama>=0.4.6", "tqdm>=4.66"]
+all = ["pynbus2[serial,ble,swd,proxy,ssh,mq,flash,conf,cli]"]
 
 [project.scripts]
 pynbus2-ssh-proxy = "pynbus2.ssh_proxy:main"
+pynbus2-mq = "pynbus2.cli.mq:main"
+pynbus2-conf = "pynbus2.cli.conf:main"
+pynbus2-flash = "pynbus2.cli.flash:main"
 
 [project.urls]
 Homepage = "https://krtko.org"

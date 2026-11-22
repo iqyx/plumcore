@@ -9,7 +9,7 @@
 
 Transports that do not reach a running firmware (e.g. ``swd``, which drives the target through a debug
 probe) can still expose the target's flash through the standard flash protocol, so the same clients
-(``tools/proto-nbus-flash.py``, pydaui) work over them unchanged. :class:`FlashService` turns one
+(``pynbus2-flash``, pydaui) work over them unchanged. :class:`FlashService` turns one
 request datagram into one reply datagram, the transport carries them.
 
 Requests and replies are CBOR maps, the command is carried in ``"c"``::
