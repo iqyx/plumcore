@@ -106,6 +106,7 @@ if conf["OUTPUT_FILE_APP_PREFIX"] == "y":
 	env["PORTFILE"] += "-" + conf["APP_NAME"]
 	if conf.get("APP_ALT"):
 		env["PORTFILE"] += "-" + conf["APP_ALT"]
+env["PORTBASE"] = env["PORTFILE"]
 if conf["OUTPUT_FILE_VERSION_SUFFIX"] == "y":
 	env["PORTFILE"] += "-" + env["VERSION"]
 

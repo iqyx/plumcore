@@ -1,5 +1,6 @@
 import subprocess
 import os
+from glob import glob
 from tempfile import mkstemp
 
 Import("env")
@@ -73,16 +74,16 @@ if conf["ELF_IMAGE_XIP"] == "y":
 ###################################################################
 
 program_source = None
+program_suffix = None
 if conf["FW_IMAGE_ELF"] == "y":
 	program_source = image_bin
+	program_suffix = ".bin"
 if conf["ELF_IMAGE_XIP"] == "y":
 	program_source = image_xip
+	program_suffix = ".elf.xip"
 
 
-oocd = env.Command(
-	source = program_source,
-	target = "oocd",
-	action = """
+oocd_action = """
 	$OOCD \
 	-s /usr/share/openocd/scripts/ \
 	-f interface/%s.cfg \
@@ -93,9 +94,35 @@ oocd = env.Command(
 	-c "reset" \
 	-c "shutdown"
 	""" % (env["OOCD_INTERFACE"], env["OOCD_TARGET"], conf["ELF_IMAGE_LOAD_ADDRESS"])
+
+oocd = env.Command(
+	source = program_source,
+	target = "oocd",
+	action = oocd_action,
 )
 
 env.Alias("program", oocd);
+
+
+# Flash the most recent already built image of the configured port/application found in bin/ without building
+# anything. Only names continuing with a version after the port/application prefix are considered.
+def program_latest(target, source, env):
+	images = glob(env["PORTBASE"] + "-[0-9]*" + program_suffix)
+	if not images:
+		print("No %s-*%s image found" % (env["PORTBASE"], program_suffix))
+		return 1
+	latest = max(images, key=os.path.getmtime)
+	print("Programming %s" % latest)
+	return env.Execute(env.subst(oocd_action, source=[File(latest)]))
+
+oocd_latest = env.Command(
+	source = [],
+	target = "oocd-latest",
+	action = program_latest,
+)
+AlwaysBuild(oocd_latest)
+
+env.Alias("program-latest", oocd_latest);
 
 
 ###################################################################
