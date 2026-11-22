@@ -18,7 +18,7 @@
 #define BQ25798_I2C_ADDR 0x6b
 
 /* Battery charge voltage regulation limit enforced by the driver. Individual 1S Li-ion cell. */
-#define BQ25798_CHARGE_VOLTAGE_LIMIT_MV 4100
+#define BQ25798_CHARGE_VOLTAGE_LIMIT_MV 4200
 
 typedef enum {
 	BQ25798_RET_OK = 0,
