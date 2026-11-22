@@ -36,6 +36,7 @@
 #include <services/nbus-flash/nbus-flash.h>
 #include <services/nbus-mq-poll/nbus-mq-poll.h>
 #include <services/conf-cbor/conf-cbor.h>
+#include <services/mq-sensor-source/mq-sensor-source.h>
 #if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 	#include <interfaces/mq.h>
 	#include <services/nbus2/nbus2.h>
@@ -59,6 +60,9 @@
 		struct app_teds_target *next;
 	};
 #endif
+
+/* Number of entries of the sensors published by mq-sensor-source, including the terminating one. */
+#define APP_SENSOR_SOURCE_SENSORS 10
 
 typedef enum {
 	APP_RET_OK = 0,
@@ -92,6 +96,11 @@ typedef struct {
 	Sensor *charger_vac1;
 	Sensor *charger_vac2;
 	Sensor *charger_ibus;
+
+	/* The battery and charger sensors above periodically published as sensor/<name>. The sensor list is referenced
+	 * by the service configuration, it is kept here for the lifetime of the service. */
+	struct mq_sensor_source_sensor sensor_source_sensors[APP_SENSOR_SOURCE_SENSORS];
+	MqSensorSource sensor_source;
 
 	/* RTC wall clock advertised by the port, shown in the GUI status bar. */
 	Clock *rtc;

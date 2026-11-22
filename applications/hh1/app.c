@@ -275,6 +275,43 @@ static app_ret_t app_load_conf(App *self) {
 }
 
 
+/* Publish the battery and charger sensors as sensor/<name> into the local message queue every second, so a BLE
+ * client polling the message queue can read them. A sensor not found is skipped. */
+static app_ret_t app_setup_sensor_source(App *self) {
+	Mq *mq = NULL;
+	if (iservicelocator_query_type_id(locator, ISERVICELOCATOR_TYPE_MQ, 0, (Interface **)&mq) != ISERVICELOCATOR_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("no message queue, sensors not published"));
+		return APP_RET_FAILED;
+	}
+
+	/* The unused entries are zeroed, terminating the list. */
+	memcpy(self->sensor_source_sensors, (const struct mq_sensor_source_sensor[APP_SENSOR_SOURCE_SENSORS]) {
+		{self->bat_voltage, "sensor/bat_voltage"},
+		{self->bat_current, "sensor/bat_current"},
+		{self->bat_soc, "sensor/bat_soc"},
+		{self->bat_soh, "sensor/bat_soh"},
+		{self->bat_remaining, "sensor/bat_remaining"},
+		{self->bat_full, "sensor/bat_full"},
+		{self->charger_vac1, "sensor/charger_vac1"},
+		{self->charger_vac2, "sensor/charger_vac2"},
+		{self->charger_ibus, "sensor/charger_ibus"},
+	}, sizeof(self->sensor_source_sensors));
+
+	mq_sensor_source_init(&self->sensor_source, &(const struct mq_sensor_source_conf) {
+		.mq = mq,
+		.clock = self->rtc,
+		.sensors = self->sensor_source_sensors,
+		.period_ms = 1000,
+	});
+	if (mq_sensor_source_start(&self->sensor_source) != MQ_SENSOR_SOURCE_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the sensor source"));
+		return APP_RET_FAILED;
+	}
+
+	return APP_RET_OK;
+}
+
+
 #if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 /* Bring up nbus2 on the backplane stream and start pulling measured values from the measurement
  * card's nbus-mq-poll service into the local message queue. */
@@ -493,6 +530,8 @@ app_ret_t app_init(App *self) {
 
 	/* Bring up the configuration storage. Its jobs are run by the configuration load below and by proto-conf. */
 	app_setup_conf(self);
+
+	app_setup_sensor_source(self);
 
 	#if defined(CONFIG_APP_HH1_PROFILE_FF14_FORCE)
 		/* Pull the measurement card's values in over the backplane. */
