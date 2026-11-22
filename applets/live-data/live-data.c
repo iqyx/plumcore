@@ -154,9 +154,41 @@ static void live_data_draw_tabs(LiveDataApplet *self) {
 }
 
 
-/* Height of the content area above the tab bar, in pixels. */
+/* Top of the content area, below the caption bar when the top-caption conf value is set. */
+static uint16_t live_data_content_y(LiveDataApplet *self) {
+	(void)self;
+	return (live_data_conf.settings.top_caption[0] != '\0') ? CONFIG_APPLET_LIVE_DATA_TOP_BAR_H : 0;
+}
+
+
+/* Height of the content area between the caption bar and the tab bar, in pixels. */
 static uint16_t live_data_content_h(LiveDataApplet *self) {
-	return (uint16_t)(self->h - LIVE_DATA_TAB_BAR_H);
+	return (uint16_t)(self->h - LIVE_DATA_TAB_BAR_H - live_data_content_y(self));
+}
+
+
+/* Draw the caption bar along the top CONFIG_APPLET_LIVE_DATA_TOP_BAR_H pixels of the window when the top-caption
+ * conf value is set: the caption in black Maple Mono 16 bold on a white background, vertically centred and cropped
+ * to the window width. The caller must have an active painter frame. */
+static void live_data_draw_top_bar(LiveDataApplet *self) {
+	if (live_data_content_y(self) == 0) {
+		return;
+	}
+	Painter *painter = &self->painter.painter;
+
+	painter->vmt->set_pen(painter, 0xffffffff, 0);
+	painter->vmt->set_brush(painter, 0xffffffff);
+	painter->vmt->rect(painter, 0, 0, self->w, CONFIG_APPLET_LIVE_DATA_TOP_BAR_H);
+
+	char caption[LIVE_DATA_MAX_CAPTION_LEN];
+	strcpy(caption, live_data_conf.settings.top_caption);
+	painter->vmt->set_font(painter, PAINTER_FONT_BOLD, &fb_painter_face_maple_mono_16);
+	fb_painter_crop_text(&self->painter, caption, (uint16_t)(self->w - 4));
+	uint16_t tw = 0;
+	uint16_t th = 0;
+	painter->vmt->text_size(painter, caption, &tw, &th);
+	painter->vmt->set_pen(painter, 0xff000000, 1);
+	painter->vmt->text(painter, 2, (int16_t)((CONFIG_APPLET_LIVE_DATA_TOP_BAR_H - th) / 2), caption);
 }
 
 
@@ -173,12 +205,13 @@ static size_t live_data_visible_rows(LiveDataApplet *self) {
 static void live_data_draw_scrollbar(LiveDataApplet *self) {
 	Painter *painter = &self->painter.painter;
 	int16_t bar_x = (int16_t)(self->w - LIVE_DATA_SCROLLBAR_W);
+	int16_t bar_y = (int16_t)live_data_content_y(self);
 	uint16_t bar_h = live_data_content_h(self);
 
 	/* Track: black fill, white 1px border. */
 	painter->vmt->set_pen(painter, 0xffffffff, 1);
 	painter->vmt->set_brush(painter, 0xff000000);
-	painter->vmt->rect(painter, bar_x, 0, LIVE_DATA_SCROLLBAR_W, bar_h);
+	painter->vmt->rect(painter, bar_x, bar_y, LIVE_DATA_SCROLLBAR_W, bar_h);
 
 	/* Total list height (all rows) versus the content height visible at once. */
 	int32_t content_h = (int32_t)self->sensor_count * LIVE_DATA_ROW_H;
@@ -187,10 +220,10 @@ static void live_data_draw_scrollbar(LiveDataApplet *self) {
 
 	/* Scroller sized and positioned proportionally within the track's 1px inset. */
 	int32_t thumb_h = inner_h;
-	int32_t thumb_y = 1;
+	int32_t thumb_y = bar_y + 1;
 	if (content_h > bar_h) {
 		thumb_h = inner_h * bar_h / content_h;
-		thumb_y = 1 + (inner_h - thumb_h) * y_scroll / (content_h - bar_h);
+		thumb_y = bar_y + 1 + (inner_h - thumb_h) * y_scroll / (content_h - bar_h);
 	}
 
 	painter->vmt->set_pen(painter, 0xffffffff, 0);
@@ -253,7 +286,7 @@ static void live_data_draw_list(LiveDataApplet *self) {
 			break;
 		}
 		struct live_data_sensor *s = &self->sensors[i];
-		int16_t y = (int16_t)(row * LIVE_DATA_ROW_H);
+		int16_t y = (int16_t)(live_data_content_y(self) + row * LIVE_DATA_ROW_H);
 		bool selected = (i == self->selected);
 
 		/* Invert the selected row: a white rectangle spanning the list width, with black text on top. */
@@ -499,6 +532,7 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 	/* One column for one or two sections, two for three or four; one row for a single section, two otherwise. */
 	uint16_t cols = (sections >= 3) ? 2 : 1;
 	uint16_t rows = (sections >= 2) ? 2 : 1;
+	uint16_t area_y = live_data_content_y(self);
 	uint16_t area_h = live_data_content_h(self);
 	uint16_t cell_w = (uint16_t)(self->w / cols);
 	uint16_t cell_h = (uint16_t)(area_h / rows);
@@ -507,10 +541,10 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 	painter->vmt->set_pen(painter, 0xffffffff, 0);
 	painter->vmt->set_brush(painter, 0xffffffff);
 	if (cols > 1) {
-		painter->vmt->rect(painter, (int16_t)cell_w, 0, 1, area_h);
+		painter->vmt->rect(painter, (int16_t)cell_w, (int16_t)area_y, 1, area_h);
 	}
 	if (rows > 1) {
-		painter->vmt->rect(painter, 0, (int16_t)cell_h, self->w, 1);
+		painter->vmt->rect(painter, 0, (int16_t)(area_y + cell_h), self->w, 1);
 	}
 
 	for (size_t k = 0; k < sections; k++) {
@@ -539,28 +573,30 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 		uint16_t col = (uint16_t)(k % cols);
 		uint16_t row = (uint16_t)(k / cols);
 		int16_t cx = (int16_t)(col * cell_w);
-		int16_t cy = (int16_t)(row * cell_h);
+		int16_t cy = (int16_t)(area_y + row * cell_h);
 		/* The last column/row takes the remaining space so rounding never leaves a gap on the edge. */
 		uint16_t cw = (col == cols - 1) ? (uint16_t)(self->w - cx) : cell_w;
-		uint16_t ch = (row == rows - 1) ? (uint16_t)(area_h - cy) : cell_h;
+		uint16_t ch = (row == rows - 1) ? (uint16_t)(area_h - row * cell_h) : cell_h;
 		live_data_draw_detail_cell(self, s, cx, cy, cw, ch, sections > 1);
 	}
 }
 
 
-/* Set the window title to "Live data - <highlighted sensor name>", reflecting the current selection. When
- * the detail tab is split into several sections no single name applies, so the title is just "Live data".
- * Does nothing when the applet has no window (no compositor) or no sensors. */
+/* Set the window title to "<title> - <highlighted sensor name>", reflecting the current selection. The title
+ * comes from the window-title conf value. When the detail tab is split into several sections no single name
+ * applies, so just the configured title is shown, the same as with no sensors. Does nothing when the applet has no
+ * window (no compositor). */
 static void live_data_update_title(LiveDataApplet *self) {
-	if (self->window == NULL || self->sensor_count == 0) {
+	if (self->window == NULL) {
 		return;
 	}
 	char title[48];
-	if (self->tab == LIVE_DATA_TAB_DETAIL && live_data_detail_sections(self) > 1) {
-		snprintf(title, sizeof(title), "Live data");
+	if (self->sensor_count == 0 || (self->tab == LIVE_DATA_TAB_DETAIL && live_data_detail_sections(self) > 1)) {
+		snprintf(title, sizeof(title), "%s", live_data_conf.settings.window_title);
 	} else {
 		const char *name = self->sensors[self->selected].name;
-		snprintf(title, sizeof(title), "Live data - %s", (name != NULL) ? name : "");
+		snprintf(title, sizeof(title), "%s - %s", live_data_conf.settings.window_title,
+			(name != NULL) ? name : "");
 	}
 	self->window->vmt->set_title(self->window, title);
 }
@@ -573,10 +609,12 @@ static void live_data_redraw(LiveDataApplet *self) {
 
 	painter->vmt->begin(painter);
 
-	/* Clear the content area above the tab bar to a black background. */
+	/* Clear everything above the tab bar to a black background, including a caption bar just hidden. */
 	painter->vmt->set_pen(painter, 0xff000000, 1);
 	painter->vmt->set_brush(painter, 0xff000000);
-	painter->vmt->rect(painter, 0, 0, self->w, live_data_content_h(self));
+	painter->vmt->rect(painter, 0, 0, self->w, (uint16_t)(self->h - LIVE_DATA_TAB_BAR_H));
+
+	live_data_draw_top_bar(self);
 
 	switch (self->tab) {
 		case LIVE_DATA_TAB_LIST:
@@ -660,11 +698,9 @@ static void live_data_poll_task(void *p) {
 		if (live_data_conf.settings.default_tab != self->default_tab) {
 			self->default_tab = live_data_conf.settings.default_tab;
 			self->tab = (enum live_data_tab)self->default_tab;
-			live_data_redraw(self);
-		} else if (self->tab == LIVE_DATA_TAB_LIST || self->tab == LIVE_DATA_TAB_DETAIL) {
-			/* Repaint the tabs that show live values so the refreshed readings appear. */
-			live_data_redraw(self);
 		}
+		/* Repaint so the refreshed readings appear and the window-title and top-caption changes are followed. */
+		live_data_redraw(self);
 		vTaskDelay(pdMS_TO_TICKS(LIVE_DATA_POLL_INTERVAL_MS));
 	}
 	self->poll_running = false;

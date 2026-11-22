@@ -1,3 +1,8 @@
 config APPLET_LIVE_DATA
 	bool "Live data applet"
 	depends on SERVICE_FB_PAINTER
+
+config APPLET_LIVE_DATA_TOP_BAR_H
+	int "Height of the top caption bar in pixels"
+	depends on APPLET_LIVE_DATA
+	default 20

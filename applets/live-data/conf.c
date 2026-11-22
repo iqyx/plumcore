@@ -13,6 +13,8 @@
  * the applet's static configuration (live_data.conf). Advertised as "applet live-data", it is mounted at
  * /applet/live-data:
  *
+ *     /applet/live-data/window-title                   title of the applet window
+ *     /applet/live-data/top-caption                    text of the caption bar at the top, empty = no bar
  *     /applet/live-data/default-tab                    tab shown when the applet is started (list, detail or graph)
  *     /applet/live-data/layout/detail/sections         number of detail tab sections (auto, 1, 2, 3 or 4)
  *     /applet/live-data/layout/detail/section0         topic filter of the sensor or topic shown instead of the selection
@@ -66,6 +68,8 @@ applet_ret_t live_data_conf_init(Applet *self) {
 	(void)self;
 
 	/* Defaults, overridden once the stored configuration is loaded. */
+	strcpy(live_data_conf.settings.window_title, "Live data");
+	live_data_conf.settings.top_caption[0] = '\0';
 	live_data_conf.settings.default_tab = LIVE_DATA_TAB_LIST;
 	live_data_conf.settings.layout.detail.sections = 0;
 	for (size_t i = 0; i < 4; i++) {
@@ -79,8 +83,35 @@ applet_ret_t live_data_conf_init(Applet *self) {
 
 	configlib_init_map(&live_data_conf.tree.live_data, "live-data", NULL, CONF_SUBTREE);
 
+	configlib_init(&live_data_conf.tree.window_title, "window-title");
+	configlib_map_string(&live_data_conf.tree.window_title, live_data_conf.settings.window_title,
+		sizeof(live_data_conf.settings.window_title));
+	configlib_append(&live_data_conf.tree.window_title, &live_data_conf.tree.live_data, CONF_DIR_CHILD);
+	live_data_conf.tree.window_title.flags = CONF_READ | CONF_WRITE;
+	configlib_set_default(&live_data_conf.tree.window_title,
+		(union conf_val){.str = {.buf = (char *)"Live data", .len = 9}});
+	configlib_set_constraint(&live_data_conf.tree.window_title, (union conf_constraint){
+		.str.max_len = LIVE_DATA_MAX_CAPTION_LEN - 1,
+	});
+	configlib_set_description(&live_data_conf.tree.window_title, "Title of the applet window",
+		"Text shown in the title bar of the applet window, followed by the name of the highlighted sensor. "
+		"Changing it while the applet is running updates the title immediately.");
+
+	configlib_init(&live_data_conf.tree.top_caption, "top-caption");
+	configlib_map_string(&live_data_conf.tree.top_caption, live_data_conf.settings.top_caption,
+		sizeof(live_data_conf.settings.top_caption));
+	configlib_append(&live_data_conf.tree.top_caption, &live_data_conf.tree.window_title, CONF_DIR_NEXT);
+	live_data_conf.tree.top_caption.flags = CONF_READ | CONF_WRITE;
+	configlib_set_default(&live_data_conf.tree.top_caption, (union conf_val){.str = {.buf = (char *)"", .len = 0}});
+	configlib_set_constraint(&live_data_conf.tree.top_caption, (union conf_constraint){
+		.str.max_len = LIVE_DATA_MAX_CAPTION_LEN - 1,
+	});
+	configlib_set_description(&live_data_conf.tree.top_caption, "Caption bar at the top of the window",
+		"Text drawn in a bar along the top of the applet window, above the tab content which is shrunk to make "
+		"room for it. Empty hides the bar and the content takes the whole window.");
+
 	configlib_init_map_append(&live_data_conf.tree.default_tab, "default-tab", &live_data_conf.settings.default_tab,
-		CONF_ENUM, &live_data_conf.tree.live_data, CONF_DIR_CHILD);
+		CONF_ENUM, &live_data_conf.tree.top_caption, CONF_DIR_NEXT);
 	live_data_conf.tree.default_tab.flags = CONF_READ | CONF_WRITE;
 	configlib_set_default(&live_data_conf.tree.default_tab, (union conf_val){.u32 = LIVE_DATA_TAB_LIST});
 	configlib_set_constraint(&live_data_conf.tree.default_tab, (union conf_constraint){

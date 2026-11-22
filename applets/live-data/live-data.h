@@ -27,11 +27,16 @@ enum live_data_tab {
 /* Maximum length of an MQ topic string kept as a live value's name, including the terminator. */
 #define LIVE_DATA_MAX_TOPIC_LEN 48
 
+/* Maximum length of the window title and the top caption, including the terminator. */
+#define LIVE_DATA_MAX_CAPTION_LEN 32
+
 /* Applet static configuration, its root exposed as live_data.conf. Built in conf.c, the nodes map the values in
  * settings. It outlives the applet instances, so the values persist between runs. */
 struct live_data_conf {
 	struct {
 		ConfiglibValue live_data;
+		ConfiglibValue window_title;
+		ConfiglibValue top_caption;
 		ConfiglibValue default_tab;
 		ConfiglibValue layout;
 		ConfiglibValue layout_detail;
@@ -46,6 +51,10 @@ struct live_data_conf {
 	} tree;
 
 	struct {
+		/* Title of the applet window, the highlighted sensor name is appended to it. */
+		char window_title[LIVE_DATA_MAX_CAPTION_LEN];
+		/* Text of the caption bar at the top of the window, empty = no bar. */
+		char top_caption[LIVE_DATA_MAX_CAPTION_LEN];
 		uint32_t default_tab;
 		struct {
 			struct {
