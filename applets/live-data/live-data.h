@@ -30,6 +30,9 @@ enum live_data_tab {
 /* Maximum length of the window title and the top caption, including the terminator. */
 #define LIVE_DATA_MAX_CAPTION_LEN 32
 
+/* Maximum length of the text shown instead of an out-of-range value, including the terminator. */
+#define LIVE_DATA_MAX_OL_TEXT_LEN 16
+
 /* Applet static configuration, its root exposed as live_data.conf. Built in conf.c, the nodes map the values in
  * settings. It outlives the applet instances, so the values persist between runs. */
 struct live_data_conf {
@@ -46,6 +49,9 @@ struct live_data_conf {
 		ConfiglibValue layout_detail_frac_digits;
 		ConfiglibValue layout_detail_leading_zeros;
 		ConfiglibValue layout_detail_trailing_zeros;
+		ConfiglibValue layout_detail_value_min;
+		ConfiglibValue layout_detail_value_max;
+		ConfiglibValue layout_detail_value_ol_text;
 		ConfiglibValue leds;
 		ConfiglibValue leds_enable;
 	} tree;
@@ -68,6 +74,10 @@ struct live_data_conf {
 				uint8_t frac_digits;
 				bool leading_zeros;
 				bool trailing_zeros;
+				/* Valid value range, a value outside is shown as value_ol_text (overload) instead. */
+				float value_min;
+				float value_max;
+				char value_ol_text[LIVE_DATA_MAX_OL_TEXT_LEN];
 			} detail;
 		} layout;
 		struct {

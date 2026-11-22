@@ -24,12 +24,16 @@
  *     /applet/live-data/layout/detail/frac-digits      fractional digits of the value
  *     /applet/live-data/layout/detail/leading-zeros    pad the integer part with zeros instead of blanks
  *     /applet/live-data/layout/detail/trailing-zeros   keep trailing zeros of the fractional part
+ *     /applet/live-data/layout/detail/value-min        lowest valid value, below it value-ol-text is shown
+ *     /applet/live-data/layout/detail/value-max        highest valid value, above it value-ol-text is shown
+ *     /applet/live-data/layout/detail/value-ol-text    text shown instead of an out-of-range value
  *     /applet/live-data/leds/enable                    show the test pattern on the top LEDs
  */
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <math.h>
 
 #include "config.h"
 #include <interfaces/conf.h>
@@ -79,6 +83,9 @@ applet_ret_t live_data_conf_init(Applet *self) {
 	live_data_conf.settings.layout.detail.frac_digits = 3;
 	live_data_conf.settings.layout.detail.leading_zeros = false;
 	live_data_conf.settings.layout.detail.trailing_zeros = false;
+	live_data_conf.settings.layout.detail.value_min = -INFINITY;
+	live_data_conf.settings.layout.detail.value_max = INFINITY;
+	strcpy(live_data_conf.settings.layout.detail.value_ol_text, "OL");
 	live_data_conf.settings.leds.enable = false;
 
 	configlib_init_map(&live_data_conf.tree.live_data, "live-data", NULL, CONF_SUBTREE);
@@ -208,6 +215,41 @@ applet_ret_t live_data_conf_init(Applet *self) {
 		"When set, the detail tab value always shows all frac-digits fractional digits. When cleared, trailing "
 		"zeros of the fractional part are dropped, together with the decimal point if nothing is left after it "
 		"(1.500 is drawn as 1.5, 2.000 as 2).");
+
+	configlib_init_map_append(&live_data_conf.tree.layout_detail_value_min, "value-min",
+		&live_data_conf.settings.layout.detail.value_min, CONF_F, &live_data_conf.tree.layout_detail_trailing_zeros,
+		CONF_DIR_NEXT);
+	live_data_conf.tree.layout_detail_value_min.flags = CONF_READ | CONF_WRITE;
+	configlib_set_default(&live_data_conf.tree.layout_detail_value_min, (union conf_val){.f = -INFINITY});
+	configlib_set_description(&live_data_conf.tree.layout_detail_value_min, "Lowest valid value",
+		"Values below it are out of range and the detail tab shows value-ol-text instead of them. Applies to all "
+		"sections alike, a simplified substitute for the valid range of each sensor stated by its calibration "
+		"certificate. Defaults to -inf (no lower limit).");
+
+	configlib_init_map_append(&live_data_conf.tree.layout_detail_value_max, "value-max",
+		&live_data_conf.settings.layout.detail.value_max, CONF_F, &live_data_conf.tree.layout_detail_value_min,
+		CONF_DIR_NEXT);
+	live_data_conf.tree.layout_detail_value_max.flags = CONF_READ | CONF_WRITE;
+	configlib_set_default(&live_data_conf.tree.layout_detail_value_max, (union conf_val){.f = INFINITY});
+	configlib_set_description(&live_data_conf.tree.layout_detail_value_max, "Highest valid value",
+		"Values above it are out of range and the detail tab shows value-ol-text instead of them. Applies to all "
+		"sections alike, a simplified substitute for the valid range of each sensor stated by its calibration "
+		"certificate. Defaults to inf (no upper limit).");
+
+	configlib_init(&live_data_conf.tree.layout_detail_value_ol_text, "value-ol-text");
+	configlib_map_string(&live_data_conf.tree.layout_detail_value_ol_text,
+		live_data_conf.settings.layout.detail.value_ol_text, sizeof(live_data_conf.settings.layout.detail.value_ol_text));
+	configlib_append(&live_data_conf.tree.layout_detail_value_ol_text, &live_data_conf.tree.layout_detail_value_max,
+		CONF_DIR_NEXT);
+	live_data_conf.tree.layout_detail_value_ol_text.flags = CONF_READ | CONF_WRITE;
+	configlib_set_default(&live_data_conf.tree.layout_detail_value_ol_text,
+		(union conf_val){.str = {.buf = (char *)"OL", .len = 2}});
+	configlib_set_constraint(&live_data_conf.tree.layout_detail_value_ol_text, (union conf_constraint){
+		.str.max_len = LIVE_DATA_MAX_OL_TEXT_LEN - 1,
+	});
+	configlib_set_description(&live_data_conf.tree.layout_detail_value_ol_text, "Text shown for out-of-range values",
+		"Shown on the detail tab instead of a value outside the value-min to value-max range (overload), in the "
+		"same font as the value.");
 
 	configlib_init_map_append(&live_data_conf.tree.leds, "leds", NULL, CONF_SUBTREE, &live_data_conf.tree.layout,
 		CONF_DIR_NEXT);
