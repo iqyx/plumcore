@@ -38,7 +38,7 @@
  * edge, and the upper bound on the number of sensors the list holds. All dimensions are in pixels. */
 #define LIVE_DATA_ROW_H 12
 #define LIVE_DATA_SCROLLBAR_W 8
-#define LIVE_DATA_MAX_SENSORS 32
+#define LIVE_DATA_MAX_SENSORS 64
 
 /* Number of top LEDs (led0..led11) the applet discovers through the service locator. */
 #define LIVE_DATA_MAX_LEDS 12
@@ -1040,7 +1040,7 @@ const Applet live_data = {
 	},
 	.name = "Live data",
 	.help = "Display live measurement data",
-	.stack_size = 1536,
+	.stack_size = 2112,
 	.icon = &graph_data,
 	.conf = &live_data_conf.tree.live_data.conf,
 	.conf_init = live_data_conf_init,
