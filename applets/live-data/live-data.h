@@ -33,6 +33,9 @@ enum live_data_tab {
 /* Maximum length of the text shown instead of an out-of-range value, including the terminator. */
 #define LIVE_DATA_MAX_OL_TEXT_LEN 16
 
+/* Maximum length of the detail section caption (a sed substitution), including the terminator. */
+#define LIVE_DATA_MAX_SECTION_CAPTION_LEN 64
+
 /* Applet static configuration, its root exposed as live_data.conf. Built in conf.c, the nodes map the values in
  * settings. It outlives the applet instances, so the values persist between runs. */
 struct live_data_conf {
@@ -44,7 +47,11 @@ struct live_data_conf {
 		ConfiglibValue layout;
 		ConfiglibValue layout_detail;
 		ConfiglibValue layout_detail_sections;
-		ConfiglibValue layout_detail_section[4];
+		struct {
+			ConfiglibValue section;
+			ConfiglibValue topic;
+			ConfiglibValue caption;
+		} layout_detail_section[4];
 		ConfiglibValue layout_detail_int_digits;
 		ConfiglibValue layout_detail_frac_digits;
 		ConfiglibValue layout_detail_leading_zeros;
@@ -66,8 +73,12 @@ struct live_data_conf {
 			struct {
 				/* Number of detail tab sections, 0 = auto (one per selected sensor). */
 				uint32_t sections;
-				/* Sensor or topic name shown in each section instead of the selection, empty = no override. */
-				char section[4][LIVE_DATA_MAX_TOPIC_LEN];
+				struct {
+					/* Sensor or topic filter shown instead of the selection, empty = no override. */
+					char topic[LIVE_DATA_MAX_TOPIC_LEN];
+					/* sed substitution applied to the shown name, or a plain text, empty = the name as is. */
+					char caption[LIVE_DATA_MAX_SECTION_CAPTION_LEN];
+				} section[4];
 				/* Value formatting: integer digits padded to (0 = no padding), fractional digits, padding with
 				 * zeros instead of blanks and keeping the trailing fractional zeros. */
 				uint8_t int_digits;

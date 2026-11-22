@@ -17,9 +17,10 @@
  *     /applet/live-data/top-caption                    text of the caption bar at the top, empty = no bar
  *     /applet/live-data/default-tab                    tab shown when the applet is started (list, detail or graph)
  *     /applet/live-data/layout/detail/sections         number of detail tab sections (auto, 1, 2, 3 or 4)
- *     /applet/live-data/layout/detail/section0         topic filter of the sensor or topic shown instead of the selection
+ *     /applet/live-data/layout/detail/section0/topic   topic filter of the sensor shown instead of the selection
+ *     /applet/live-data/layout/detail/section0/caption sed substitution (or plain text) making the shown caption
  *     ...
- *     /applet/live-data/layout/detail/section3
+ *     /applet/live-data/layout/detail/section3/...
  *     /applet/live-data/layout/detail/int-digits       integer digits the value is padded to (0 = no padding)
  *     /applet/live-data/layout/detail/frac-digits      fractional digits of the value
  *     /applet/live-data/layout/detail/leading-zeros    pad the integer part with zeros instead of blanks
@@ -77,7 +78,8 @@ applet_ret_t live_data_conf_init(Applet *self) {
 	live_data_conf.settings.default_tab = LIVE_DATA_TAB_LIST;
 	live_data_conf.settings.layout.detail.sections = 0;
 	for (size_t i = 0; i < 4; i++) {
-		live_data_conf.settings.layout.detail.section[i][0] = '\0';
+		live_data_conf.settings.layout.detail.section[i].topic[0] = '\0';
+		live_data_conf.settings.layout.detail.section[i].caption[0] = '\0';
 	}
 	live_data_conf.settings.layout.detail.int_digits = 0;
 	live_data_conf.settings.layout.detail.frac_digits = 3;
@@ -152,25 +154,52 @@ applet_ret_t live_data_conf_init(Applet *self) {
 		"one section per selected sensor (up to four). With a fixed number the layout stays the same regardless "
 		"of the selection: the selected sensors fill the sections in order and any spare section is left empty.");
 
-	/* Section overrides chained after sections, in order. */
+	/* Section subtrees chained after sections, in order. */
 	ConfiglibValue *prev = &live_data_conf.tree.layout_detail_sections;
 	for (size_t i = 0; i < 4; i++) {
-		ConfiglibValue *node = &live_data_conf.tree.layout_detail_section[i];
-		configlib_init(node, live_data_conf_section_names[i]);
-		configlib_map_string(node, live_data_conf.settings.layout.detail.section[i],
-			sizeof(live_data_conf.settings.layout.detail.section[i]));
-		configlib_append(node, prev, CONF_DIR_NEXT);
-		node->flags = CONF_READ | CONF_WRITE;
-		configlib_set_default(node, (union conf_val){.str = {.buf = (char *)"", .len = 0}});
-		configlib_set_constraint(node, (union conf_constraint){
+		configlib_init_map_append(&live_data_conf.tree.layout_detail_section[i].section,
+			live_data_conf_section_names[i], NULL, CONF_SUBTREE, prev, CONF_DIR_NEXT);
+
+		configlib_init(&live_data_conf.tree.layout_detail_section[i].topic, "topic");
+		configlib_map_string(&live_data_conf.tree.layout_detail_section[i].topic,
+			live_data_conf.settings.layout.detail.section[i].topic,
+			sizeof(live_data_conf.settings.layout.detail.section[i].topic));
+		configlib_append(&live_data_conf.tree.layout_detail_section[i].topic,
+			&live_data_conf.tree.layout_detail_section[i].section, CONF_DIR_CHILD);
+		live_data_conf.tree.layout_detail_section[i].topic.flags = CONF_READ | CONF_WRITE;
+		configlib_set_default(&live_data_conf.tree.layout_detail_section[i].topic,
+			(union conf_val){.str = {.buf = (char *)"", .len = 0}});
+		configlib_set_constraint(&live_data_conf.tree.layout_detail_section[i].topic, (union conf_constraint){
 			.str.max_len = LIVE_DATA_MAX_TOPIC_LEN - 1,
 		});
-		configlib_set_description(node, "Sensor or topic shown in the section",
+		configlib_set_description(&live_data_conf.tree.layout_detail_section[i].topic,
+			"Sensor or topic shown in the section",
 			"Topic filter (with the + and # wildcards) of the sensor or MQ topic drawn in this detail tab section, "
 			"eg. math/force0/# matching both math/force0 and math/force0/<sn>. The most recently updated matching "
 			"name in the list is shown with its value, replacing the selected sensor the section would show "
 			"otherwise. Until a matching topic is received the section shows dashes. Empty shows the selection.");
-		prev = node;
+
+		configlib_init(&live_data_conf.tree.layout_detail_section[i].caption, "caption");
+		configlib_map_string(&live_data_conf.tree.layout_detail_section[i].caption,
+			live_data_conf.settings.layout.detail.section[i].caption,
+			sizeof(live_data_conf.settings.layout.detail.section[i].caption));
+		configlib_append(&live_data_conf.tree.layout_detail_section[i].caption,
+			&live_data_conf.tree.layout_detail_section[i].topic, CONF_DIR_NEXT);
+		live_data_conf.tree.layout_detail_section[i].caption.flags = CONF_READ | CONF_WRITE;
+		configlib_set_default(&live_data_conf.tree.layout_detail_section[i].caption,
+			(union conf_val){.str = {.buf = (char *)"", .len = 0}});
+		configlib_set_constraint(&live_data_conf.tree.layout_detail_section[i].caption, (union conf_constraint){
+			.str.max_len = LIVE_DATA_MAX_SECTION_CAPTION_LEN - 1,
+		});
+		configlib_set_description(&live_data_conf.tree.layout_detail_section[i].caption,
+			"Caption of the section",
+			"Text shown in the section label instead of the sensor or topic name. A sed substitution command "
+			"s/regex/replacement/[g] is applied to the shown name, eg. s/.*\\/\\([^/]*\\)$/Force \\1/ turns "
+			"math/force0/2026.abcd into Force 2026.abcd. Basic regular expressions are supported, with groups "
+			"referenced as \\1 to \\9 and & in the replacement. Any other text is shown verbatim. Empty shows the "
+			"name as is.");
+
+		prev = &live_data_conf.tree.layout_detail_section[i].section;
 	}
 
 	configlib_init_map_append(&live_data_conf.tree.layout_detail_int_digits, "int-digits",

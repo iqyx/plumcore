@@ -28,6 +28,7 @@
 #include <services/fb-painter/assets/fonts/fonts.h>
 
 #include "live-data.h"
+#include "sed.h"
 
 #define MODULE_NAME "live-data"
 
@@ -345,12 +346,11 @@ static const struct fb_painter_font_face *const live_data_detail_faces[] = {
 };
 
 
-/* Draw one sensor's detail view into the cell at (cx, cy) of size cw x ch: a label line on top with the sensor
- * name on the left (only when the area is split across several sensors) and the unit on the right, and the
- * current value centred in the rest of the cell in the largest font it fits. The caller must have an active
- * painter frame. */
+/* Draw one sensor's detail view into the cell at (cx, cy) of size cw x ch: a label line on top with the label
+ * on the left (none when NULL) and the unit on the right, and the current value centred in the rest of the cell in
+ * the largest font it fits. The caller must have an active painter frame. */
 static void live_data_draw_detail_cell(LiveDataApplet *self, struct live_data_sensor *s, int16_t cx,
-                                       int16_t cy, uint16_t cw, uint16_t ch, bool show_name) {
+                                       int16_t cy, uint16_t cw, uint16_t ch, const char *label) {
 	Painter *painter = &self->painter.painter;
 
 	/* The current value formatted as configured in layout/detail, shown as three dashes until the first
@@ -377,11 +377,10 @@ static void live_data_draw_detail_cell(LiveDataApplet *self, struct live_data_se
 	painter->vmt->set_pen(painter, 0xffffffff, 1);
 	painter->vmt->text(painter, (int16_t)(cx + cw - 2 - unit_w), (int16_t)(cy + 1), unit);
 
-	/* Sensor name in the top-left corner on the same line in the normal font, cropped to leave room for the
-	 * unit. */
-	if (show_name) {
+	/* Label in the top-left corner on the same line in the normal font, cropped to leave room for the unit. */
+	if (label != NULL) {
 		char name[32];
-		strncpy(name, (s->name != NULL) ? s->name : "", sizeof(name) - 1);
+		strncpy(name, label, sizeof(name) - 1);
 		name[sizeof(name) - 1] = '\0';
 		painter->vmt->set_font(painter, PAINTER_FONT_NORMAL, NULL);
 		uint16_t reserve = (unit_w > 0) ? (uint16_t)(unit_w + 4) : 0;
@@ -390,7 +389,7 @@ static void live_data_draw_detail_cell(LiveDataApplet *self, struct live_data_se
 	}
 
 	/* The value takes the area below the label line, which is only reserved when there is a label. */
-	uint16_t top = (show_name || unit_w > 0) ? (uint16_t)(label_h + 2) : 0;
+	uint16_t top = (label != NULL || unit_w > 0) ? (uint16_t)(label_h + 2) : 0;
 	uint16_t area_w = (uint16_t)(cw - 4);
 	uint16_t area_h = (uint16_t)(ch - top);
 
@@ -517,7 +516,7 @@ static void live_data_update_leds(LiveDataApplet *self) {
  * content area is split into a number of sections set by the layout/detail/sections conf value, or by the
  * selection count when it is auto: the whole area for one, two stacked rows for two, and a 2x2 grid for three
  * or four. Sensors beyond the section count are ignored, spare sections are left empty. A non-empty
- * layout/detail/sectionN conf value shows the most recently updated sensor or topic matching it as a topic filter
+ * layout/detail/sectionN/topic conf value shows the most recently updated sensor or topic matching it as a topic filter
  * in section N instead of the selection, as dashes until a matching value is known. The caller must have an active painter frame. */
 static void live_data_draw_detail(LiveDataApplet *self) {
 	Painter *painter = &self->painter.painter;
@@ -556,7 +555,7 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 		 * start arriving under it instead of math/force0. Recency is judged by the local tick count stamped on
 		 * reception, never by the message timestamps (UTC, possibly offset among devices). An override not matching
 		 * any known name is drawn from a placeholder carrying just the filter, so the section shows it with dashes. */
-		const char *override = live_data_conf.settings.layout.detail.section[k];
+		const char *override = live_data_conf.settings.layout.detail.section[k].topic;
 		struct live_data_sensor placeholder = {.name = override};
 		struct live_data_sensor *s = NULL;
 		if (override[0] != '\0') {
@@ -580,7 +579,20 @@ static void live_data_draw_detail(LiveDataApplet *self) {
 		/* The last column/row takes the remaining space so rounding never leaves a gap on the edge. */
 		uint16_t cw = (col == cols - 1) ? (uint16_t)(self->w - cx) : cell_w;
 		uint16_t ch = (row == rows - 1) ? (uint16_t)(area_h - row * cell_h) : cell_h;
-		live_data_draw_detail_cell(self, s, cx, cy, cw, ch, sections > 1);
+
+		/* The sensor name is shown only when the area is split across several sensors. A configured caption is
+		 * always shown, made by its sed substitution from the name, or verbatim when it is not a valid one. */
+		const char *name = (s->name != NULL) ? s->name : "";
+		const char *label = (sections > 1) ? name : NULL;
+		char caption[LIVE_DATA_MAX_SECTION_CAPTION_LEN];
+		if (live_data_conf.settings.layout.detail.section[k].caption[0] != '\0') {
+			if (sed_subst(live_data_conf.settings.layout.detail.section[k].caption, name, caption, sizeof(caption)) !=
+			    SED_RET_OK) {
+				strcpy(caption, live_data_conf.settings.layout.detail.section[k].caption);
+			}
+			label = caption;
+		}
+		live_data_draw_detail_cell(self, s, cx, cy, cw, ch, label);
 	}
 }
 
