@@ -21,8 +21,9 @@
 /* How often the power source voltages are sampled and the window repainted, in milliseconds. */
 #define CHARGE_WINDOW_PERIOD_MS 1000
 
-/* How long the window stays on screen after a power source gets connected or disconnected, in milliseconds. */
-#define CHARGE_WINDOW_SHOW_MS 10000
+/* How long the window stays on screen after a power source gets connected or disconnected, in milliseconds.
+ * If set to 0, the window is not hidden automatically, it stays on screen until dismissed by ESC. */
+#define CHARGE_WINDOW_SHOW_MS 0
 
 /* A power source with its voltage above this threshold is considered connected, in volts. */
 #define CHARGE_WINDOW_SOURCE_MIN_V 3.5f
@@ -66,11 +67,13 @@ typedef struct {
 
 	/* Task periodically sampling the power sources, showing the window when they get connected or disconnected,
 	 * hiding it when the show timeout expires and repainting it while shown. connected holds the last sampled
-	 * state, show_ms the time remaining until the window is hidden (0 while hidden). */
+	 * state, shown is set while the window is on screen, show_ms the time remaining until the window is hidden
+	 * (unused if CHARGE_WINDOW_SHOW_MS is 0). */
 	TaskHandle_t task;
 	volatile bool can_run;
 	volatile bool running;
 	bool connected;
+	volatile bool shown;
 	volatile int32_t show_ms;
 
 	/* Task listening on the window's own event source, dismissing the window on ESC. */

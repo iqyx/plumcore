@@ -14,7 +14,7 @@
  * of the power flow: the two power source ports with their voltages and currents feed the device, which charges or
  * is discharged from the battery. The battery shows its remaining and full charge capacity and voltage, the flow
  * to/from the battery is labelled with the battery current. The window is dismissed by ESC or after
- * CHARGE_WINDOW_SHOW_MS, it is shown again on the next connection change.
+ * CHARGE_WINDOW_SHOW_MS (never if set to 0), it is shown again on the next connection change.
  */
 
 #include <stdint.h>
@@ -195,15 +195,16 @@ static void charge_window_render(ChargeWindow *self) {
 }
 
 
-/* Hide the window and stop the show timeout. */
+/* Hide the window, stop repainting it and stop the show timeout. */
 static void charge_window_hide(ChargeWindow *self) {
+	self->shown = false;
 	self->show_ms = 0;
 	self->window->vmt->show(self->window, false);
 }
 
 
 /* Periodically sample the power sources. Bring the window to front when they get connected or disconnected,
- * hide it when the show timeout expires and keep repainting it while shown. */
+ * hide it when the show timeout expires (if enabled) and keep repainting it while shown. */
 static void charge_window_task(void *p) {
 	ChargeWindow *self = (ChargeWindow *)p;
 
@@ -214,15 +215,18 @@ static void charge_window_task(void *p) {
 			u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("power source %s"),
 			      connected ? "connected" : "disconnected");
 			charge_window_render(self);
+			self->shown = true;
 			self->show_ms = CHARGE_WINDOW_SHOW_MS;
 			self->window->vmt->to_front(self->window);
 			self->window->vmt->show(self->window, true);
-		} else if (self->show_ms > 0) {
-			self->show_ms -= CHARGE_WINDOW_PERIOD_MS;
-			if (self->show_ms > 0) {
-				charge_window_render(self);
-			} else {
+		} else if (self->shown) {
+			if (CHARGE_WINDOW_SHOW_MS > 0) {
+				self->show_ms -= CHARGE_WINDOW_PERIOD_MS;
+			}
+			if (CHARGE_WINDOW_SHOW_MS > 0 && self->show_ms <= 0) {
 				charge_window_hide(self);
+			} else {
+				charge_window_render(self);
 			}
 		}
 		self->connected = connected;
