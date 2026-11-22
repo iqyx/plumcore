@@ -10,16 +10,20 @@
 ``pynbus2-mq -j`` output, one JSON object per line, e.g.::
 
 	pynbus2-mq rible://nwdaq-hh1/mq -t "sensor/#" -j -a >> battery.log &
-	tools/battery-stats.py -f battery.log
+	tools/battery-stats.py -f -e battery.log
+
+With -e the graph is also exported as battery.svg and battery.png (the log name without its last extension), once
+at start and then every 10 seconds while following.
 """
 
 import argparse
 import json
 import logging
+import os
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib.ticker import MultipleLocator
+from matplotlib.ticker import MaxNLocator
 
 # Topics are matched by their last level, so a topic prefix given to pynbus2-mq (-p) does not matter.
 VOLTAGE = 'bat_voltage'
@@ -28,6 +32,9 @@ SOC = 'bat_soc'
 
 # How often the followed file is checked for new lines, in milliseconds.
 FOLLOW_INTERVAL_MS = 1000
+
+# How often the graph is exported while following, in milliseconds.
+EXPORT_INTERVAL_MS = 10000
 
 log = logging.getLogger('battery-stats')
 
@@ -61,6 +68,14 @@ class Series:
 		y.append(value)
 
 
+def label(name, data, unit, decimals):
+	"""A legend label showing the last value of the series ``data``, e.g. "voltage 3.912 V"."""
+	_, y = data
+	if not y:
+		return f'{name} - {unit}'
+	return f'{name} {y[-1]:.{decimals}f} {unit}'
+
+
 def read_lines(f, pending):
 	"""Read the complete lines appended to ``f`` since the last call. A line not terminated yet (being written)
 	is kept in ``pending[0]`` until the rest of it arrives."""
@@ -75,11 +90,27 @@ def read_lines(f, pending):
 			pending[0] = ''
 
 
+def export(fig, base):
+	"""Save the figure as <base>.svg and <base>.png. Each is written to a temporary file renamed over the old one,
+	so a viewer never reads a partially written export."""
+	for ext in ('svg', 'png'):
+		path = f'{base}.{ext}'
+		tmp = f'{path}.tmp'
+		try:
+			fig.savefig(tmp, format=ext)
+			os.replace(tmp, path)
+		except OSError as e:
+			log.error('cannot export %s: %s', path, e)
+
+
 def main():
 	parser = argparse.ArgumentParser(description='Plot the battery voltage, current and state of charge from a '
 	                                             'pynbus2-mq JSON log (pynbus2-mq -j).')
 	parser.add_argument('log', type=str, help='the log file, one JSON object per line')
 	parser.add_argument('-f', '--follow', action='store_true', help='follow the log as it is appended to')
+	parser.add_argument('-e', '--export', action='store_true',
+	                    help='export the graph as <log>.svg and <log>.png (the log name without its last extension), '
+	                         'every 10 seconds while following')
 	parser.add_argument('--debug', action='store_true', help='DEBUG level logging')
 	args = parser.parse_args()
 	logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
@@ -105,25 +136,24 @@ def main():
 
 	fig, left = plt.subplots(figsize=(12, 6))
 	right = left.twinx()
-	voltage, = left.plot([], [], color='tab:blue', label='voltage [V]')
-	current, = left.plot([], [], color='tab:orange', label='current [A]')
-	soc, = right.plot([], [], color='tab:green', linestyle='--', label='SoC [%]')
+	voltage, = left.plot([], [], color='tab:blue')
+	current, = left.plot([], [], color='tab:orange')
+	soc, = right.plot([], [], color='tab:green', linestyle='--')
 	left.set_xlabel('time [s]')
 	left.set_ylabel('voltage [V], current [A]')
 	right.set_ylabel('SoC [%]')
 	right.set_ylim(0, 100)
-	# The time grid: a dashed gray line every minute, a gray line every 10 minutes (labelled) and a black one
-	# every hour, drawn in redraw() as the axes have only two tick levels.
-	left.xaxis.set_major_locator(MultipleLocator(600))
-	left.xaxis.set_minor_locator(MultipleLocator(60))
-	left.grid(True, which='major', axis='x', color='gray', linestyle='-')
-	left.grid(True, which='minor', axis='x', color='gray', linestyle='--', alpha=0.5)
+	# About 10 labelled ticks on the time axis, at round numbers of seconds. The time grid is independent of them:
+	# a dashed gray line every minute, a gray line every 10 minutes and a black one every hour, drawn in redraw().
+	left.xaxis.set_major_locator(MaxNLocator(nbins=10, steps=[1, 2, 3, 5, 6, 10]))
 	left.grid(True, which='major', axis='y')
-	hours = []
-	left.legend(handles=[voltage, current, soc], loc='upper left')
+	grid = []
 	fig.suptitle(args.log)
 
 	def redraw():
+		# Removed before rescaling, so the grid lines do not take part in the data limits.
+		while grid:
+			grid.pop().remove()
 		voltage.set_data(*series.data[VOLTAGE])
 		current.set_data(*series.data[CURRENT])
 		soc.set_data(*series.data[SOC])
@@ -131,10 +161,21 @@ def main():
 		left.autoscale_view()
 		right.relim()
 		right.autoscale_view(scaley=False)
-		while hours:
-			hours.pop().remove()
-		end = left.get_xlim()[1]
-		hours.extend(left.axvline(h, color='black', linewidth=1.0, zorder=1) for h in range(3600, int(end) + 1, 3600))
+
+		# The legends show the last value received, the SoC one next to its axis on the right.
+		voltage.set_label(label('voltage', series.data[VOLTAGE], 'V', 3))
+		current.set_label(label('current', series.data[CURRENT], 'A', 3))
+		soc.set_label(label('SoC', series.data[SOC], '%', 1))
+		left.legend(handles=[voltage, current], loc='upper left')
+		right.legend(handles=[soc], loc='upper right')
+
+		for t in range(60, int(left.get_xlim()[1]) + 1, 60):
+			if t % 3600 == 0:
+				grid.append(left.axvline(t, color='black', linewidth=1.0, zorder=1))
+			elif t % 600 == 0:
+				grid.append(left.axvline(t, color='gray', linewidth=0.8, zorder=1))
+			else:
+				grid.append(left.axvline(t, color='gray', linewidth=0.8, linestyle='--', alpha=0.5, zorder=1))
 
 	def update(frame):
 		lines = read_lines(f, pending)
@@ -144,9 +185,16 @@ def main():
 			redraw()
 
 	redraw()
+	base = os.path.splitext(args.log)[0]
+	if args.export:
+		export(fig, base)
 	if args.follow:
-		# Kept referenced until the window is closed, the animation stops when collected.
+		# Kept referenced until the window is closed, the animation and the timer stop when collected.
 		animation = FuncAnimation(fig, update, interval=FOLLOW_INTERVAL_MS, cache_frame_data=False)
+		if args.export:
+			timer = fig.canvas.new_timer(interval=EXPORT_INTERVAL_MS)
+			timer.add_callback(export, fig, base)
+			timer.start()
 	plt.show()
 	f.close()
 
