@@ -115,8 +115,9 @@
 /* Channel of the access point created in WIFI_MODE_AP. */
 #define ST67W611_AP_CHANNEL       1
 
-/* The module limits the remote host name of a connection to 64 bytes. */
+/* The module limits the remote host name of a connection and the TLS server name (SNI) to 64 bytes. */
 #define ST67W611_HOST_LEN_MAX     64
+#define ST67W611_SNI_LEN_MAX      64
 
 /* Maximum payload of a single AT+CIPSEND. */
 #define ST67W611_SEND_MAX         1024
@@ -1940,7 +1941,8 @@ static tcp_ret_t st67w611_link_connect(St67w611 *self, const char *host, uint16_
 	if (host == NULL || stream == NULL) {
 		return TCP_RET_NULL;
 	}
-	if (strlen(host) > ST67W611_HOST_LEN_MAX) {
+	if (strlen(host) > ST67W611_HOST_LEN_MAX ||
+	    (params != NULL && params->server_name != NULL && strlen(params->server_name) > ST67W611_SNI_LEN_MAX)) {
 		return TCP_RET_BAD_ARG;
 	}
 	if (self->wifi_status.state != WIFI_STATE_UP) {
@@ -1981,17 +1983,23 @@ static tcp_ret_t st67w611_link_connect(St67w611 *self, const char *host, uint16_
 		}
 
 		/* Authentication mode, bit 0 = client certificate, bit 1 = server verification with a CA. */
+		/* Without any authentication the file names are omitted. */
 		unsigned auth = ((params->cert != NULL) ? 1u : 0u) | ((params->ca != NULL) ? 2u : 0u);
-		pos = (size_t)snprintf(cmd, sizeof(cmd), "AT+CIPSSLCCONF=%u,%u,", id, auth);
-		pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->cert != NULL) ? params->cert : "");
-		if (pos < sizeof(cmd) - 1) {
-			cmd[pos++] = ',';
+		pos = (size_t)snprintf(cmd, sizeof(cmd), "AT+CIPSSLCCONF=%u,%u", id, auth);
+		if (auth != 0) {
+			if (pos < sizeof(cmd) - 1) {
+				cmd[pos++] = ',';
+			}
+			pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->cert != NULL) ? params->cert : "");
+			if (pos < sizeof(cmd) - 1) {
+				cmd[pos++] = ',';
+			}
+			pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->key != NULL) ? params->key : "");
+			if (pos < sizeof(cmd) - 1) {
+				cmd[pos++] = ',';
+			}
+			pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->ca != NULL) ? params->ca : "");
 		}
-		pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->key != NULL) ? params->key : "");
-		if (pos < sizeof(cmd) - 1) {
-			cmd[pos++] = ',';
-		}
-		pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->ca != NULL) ? params->ca : "");
 		if (pos >= sizeof(cmd) - 3) {
 			link->used = false;
 			return TCP_RET_BAD_ARG;
