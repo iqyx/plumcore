@@ -17,6 +17,11 @@
 #include <interfaces/spi.h>
 #include <interfaces/gpio.h>
 #include <interfaces/ble.h>
+#include <interfaces/wifi.h>
+#include <interfaces/tcp.h>
+#include <interfaces/tls.h>
+#include <interfaces/conf.h>
+#include <configlib.h>
 
 #define ST67W611_RESP_MAX 512
 
@@ -29,6 +34,12 @@
 /* Bytes of a characteristic's value cached locally to answer get_value; a longer value set is truncated
  * in the cache while the full value is still pushed to the module. */
 #define ST67W611_CHAR_VALUE_MAX 64
+
+/* The module supports at most five concurrent TCP/TLS connections (link IDs 0..4). */
+#define ST67W611_LINK_COUNT 5
+
+/* The module limits the station host name to 32 bytes. */
+#define ST67W611_HOSTNAME_LEN_MAX 32
 
 typedef enum {
 	ST67W611_RET_OK = 0,
@@ -74,11 +85,62 @@ struct st67w611_char {
 	uint8_t value[ST67W611_CHAR_VALUE_MAX];
 };
 
+/* Driver-private per-connection context, the opaque session pointer of the Tcp and Tls interfaces. The index in
+ * St67w611.links is the module link ID. */
+struct st67w611_link {
+	/* The slot is allocated to a session. */
+	bool used;
+	/* The connection is established, cleared when the module reports it closed. */
+	volatile bool connected;
+	/* Number of received bytes buffered in the module (passive receive mode), as reported by "+IPD". */
+	volatile size_t pending;
+	/* Notified when data is received or the connection closes, NULL if the user polls. */
+	Notify *notify;
+};
+
 typedef struct {
 	struct st67w611_conf conf;
 
 	/* Generic BLE device interface exposed on top of the module's AT command set. */
 	Ble ble;
+
+	/* Generic Wi-Fi device interface and the TCP/TLS connection interfaces of the module's internal network
+	 * stack. Tcp and Tls share the module's connection slots. */
+	Wifi wifi;
+	Tcp tcp;
+	Tls tls;
+
+	/* Wi-Fi configuration set through the Wifi interface or the configuration subtree, applied when the link
+	 * is started. The enums are stored as uint32_t as the configuration enum leaves map onto them. */
+	struct {
+		uint32_t mode;
+		char ssid[WIFI_SSID_LEN_MAX + 1];
+		uint32_t security;
+		char psk[WIFI_PSK_LEN_MAX + 1];
+		char hostname[ST67W611_HOSTNAME_LEN_MAX + 1];
+	} wifi_settings;
+
+	/* The Wi-Fi link was started through the Wifi interface, configuration changes are re-applied. */
+	volatile bool wifi_started;
+
+	/* Wi-Fi link state maintained from the "+CW:" reports and the traffic counters, polled through get_status. */
+	struct wifi_status wifi_status;
+
+	/* Wi-Fi event callback, invoked from the receive task. */
+	wifi_event_cb wifi_event_cb;
+	void *wifi_event_ctx;
+
+	/* TCP/TLS connection slots. */
+	struct st67w611_link links[ST67W611_LINK_COUNT];
+
+	/* Configuration subtree with the Wi-Fi settings. */
+	struct {
+		ConfiglibValue wifi;
+		ConfiglibValue mode;
+		ConfiglibValue ssid;
+		ConfiglibValue security;
+		ConfiglibValue psk;
+	} conf_tree;
 
 	/* Number of GATT services created so far, used as the next service index. */
 	uint8_t srv_count;
@@ -147,6 +209,12 @@ typedef struct {
 	 * emits the ">" data prompt, so the background task must treat that interim "OK" as a ready ack rather
 	 * than the command's final result (completing on it would skip the payload phase). */
 	volatile bool cmd_wait_prompt;
+
+	/* Set while AT+CIPRECVDATA is running. Its response carries raw binary data, so the response end is found
+	 * by the length announced in its header rather than by searching for a result code, which may appear in
+	 * the data. cmd_link is the link the data belongs to. */
+	volatile bool cmd_binary;
+	uint8_t cmd_link;
 	uint8_t resp_buf[ST67W611_RESP_MAX];
 	size_t resp_len;
 	bool resp_overflow;
@@ -177,6 +245,6 @@ st67w611_ret_t st67w611_set_conn_security(St67w611 *self, enum st67w611_conn_sec
  * is powered down (CHIP_EN low) and the driver's receive and security tasks idle (they keep running but do no
  * work), so no SPI traffic occurs and the command path must not be used. Waking power-cycles and re-probes the
  * module back to its fresh post-boot AT-ready state and resets the per-module GATT/link bookkeeping to match;
- * the application then rebuilds its BLE configuration on top, exactly as it does after st67w611_init(). Both
- * directions are idempotent. */
+ * the application then rebuilds its BLE configuration on top, exactly as it does after st67w611_init(). All TCP/TLS
+ * connections are lost, a started Wi-Fi link is brought back up by the driver. Both directions are idempotent. */
 st67w611_ret_t st67w611_set_sleep(St67w611 *self, bool sleep);

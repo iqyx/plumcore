@@ -105,6 +105,31 @@
 /* Scratch buffer for building parametrized AT commands. */
 #define ST67W611_CMD_MAX          64
 
+/* Buffer for building the Wi-Fi join/access point commands holding the escaped SSID and passphrase, and the
+ * TLS/connect commands holding host and credential names. */
+#define ST67W611_NET_CMD_MAX      224
+
+/* Joining a network takes up to 15 s in the module (its default join timeout). */
+#define ST67W611_WIFI_JOIN_TIMEOUT_MS 20000
+
+/* Channel of the access point created in WIFI_MODE_AP. */
+#define ST67W611_AP_CHANNEL       1
+
+/* The module limits the remote host name of a connection to 64 bytes. */
+#define ST67W611_HOST_LEN_MAX     64
+
+/* Maximum payload of a single AT+CIPSEND. */
+#define ST67W611_SEND_MAX         1024
+
+/* Maximum data requested by a single AT+CIPRECVDATA, the whole response (header, data and result code) must fit
+ * a single frame received into rx_buf. */
+#define ST67W611_RECV_MAX         (ST67W611_RESP_MAX - 64)
+
+/* recv() polls the link state at this interval, and resynchronizes the buffered data length with
+ * AT+CIPRECVLEN? at the longer one in case a "+IPD" report was missed. */
+#define ST67W611_LINK_POLL_MS     10
+#define ST67W611_RECVLEN_POLL_MS  1000
+
 
 /* Kinds of deferred security action the receive task hands off to the security task. These run as blocking
  * AT commands, which the receive task cannot issue itself (it would deadlock waiting for its own response). */
@@ -112,12 +137,15 @@ enum st67w611_sec_job {
 	ST67W611_SEC_JOB_PAIR,
 	ST67W611_SEC_JOB_DISCONNECT,
 	ST67W611_SEC_JOB_CONN_PARAM,
+	ST67W611_SEC_JOB_WIFI_APPLY,
 };
 
 struct st67w611_sec_msg {
 	enum st67w611_sec_job job;
 	ble_conn_t conn;
 };
+
+static void st67w611_wifi_apply(St67w611 *self);
 
 
 /* SPI_RDY is asserted high by the module. Poll it until it reaches the requested state or the
@@ -539,7 +567,155 @@ static void st67w611_log_at(const char *tag, const char *text, size_t len) {
  * appended to that command's response; once the accumulated response carries a final result code the
  * command is completed and its waiter released. Frames received with no command running are unsolicited
  * event messages. */
+/* Deliver a Wi-Fi event to the application callback. Runs in the receive task. */
+static void st67w611_wifi_emit(St67w611 *self, enum wifi_event_type type, int32_t reason) {
+	if (self->wifi_event_cb != NULL) {
+		const struct wifi_event ev = {
+			.type = type,
+			.reason = reason,
+		};
+		self->wifi_event_cb(self->wifi_event_ctx, &ev);
+	}
+}
+
+
+/* Test whether the report @p s starts with the word @p word followed by the end of the line. */
+static bool st67w611_is_word(const char *s, const char *word) {
+	size_t len = strlen(word);
+	return !strncmp(s, word, len) && (s[len] == '\r' || s[len] == '\n' || s[len] == '\0');
+}
+
+
+/* Notify the user of a link that its state changed (data received or connection closed). */
+static void st67w611_link_notify(struct st67w611_link *link) {
+	if (link->notify != NULL) {
+		link->notify->vmt->notify(link->notify, link->connected ? (uint32_t)link->pending : 0);
+	}
+}
+
+
+/* Parse a single line of a "+CW:" Wi-Fi report (the prefix already removed). */
+static bool st67w611_wifi_report(St67w611 *self, const char *s) {
+	if (st67w611_is_word(s, "CONNECTING")) {
+		self->wifi_status.state = WIFI_STATE_CONNECTING;
+	} else if (st67w611_is_word(s, "CONNECTED")) {
+		self->wifi_status.state = WIFI_STATE_CONNECTED;
+		st67w611_wifi_emit(self, WIFI_EVENT_CONNECTED, 0);
+	} else if (st67w611_is_word(s, "GOTIP")) {
+		self->wifi_status.state = WIFI_STATE_UP;
+		st67w611_wifi_emit(self, WIFI_EVENT_GOT_IP, 0);
+	} else if (st67w611_is_word(s, "DISCONNECTED")) {
+		self->wifi_status.state = WIFI_STATE_IDLE;
+		st67w611_wifi_emit(self, WIFI_EVENT_DISCONNECTED, 0);
+	} else if (!strncmp(s, "ERROR", 5)) {
+		/* "+CW:ERROR[,<reason_code>]" */
+		self->wifi_status.state = WIFI_STATE_IDLE;
+		st67w611_wifi_emit(self, WIFI_EVENT_CONNECT_FAILED, (s[5] == ',') ? (int32_t)strtol(s + 6, NULL, 10) : 0);
+	} else {
+		return false;
+	}
+	return true;
+}
+
+
+/* Parse the network reports in a frame: Wi-Fi state changes ("+CW:..."), received data ("+IPD:<id>,<len>") and
+ * connection state changes ("[+CIP:]<id>,CONNECTED", "[+CIP:]<id>,CLOSED"). A frame may hold several lines and
+ * the reports may also arrive inside the response of a running command, so every line is checked. Returns true
+ * if any report was recognized. Runs in the receive task. */
+static bool st67w611_net_reports(St67w611 *self, const char *s) {
+	bool found = false;
+	for (const char *line = s; line != NULL; line = strchr(line, '\n')) {
+		while (*line == '\r' || *line == '\n') {
+			line++;
+		}
+		if (!strncmp(line, "+CW:", 4)) {
+			found |= st67w611_wifi_report(self, line + 4);
+			continue;
+		}
+
+		char *end = NULL;
+		if (!strncmp(line, "+IPD:", 5)) {
+			unsigned long id = strtoul(line + 5, &end, 10);
+			if (end != line + 5 && *end == ',' && id < ST67W611_LINK_COUNT) {
+				/* The length is the total amount of data buffered for the link, not an increment. */
+				self->links[id].pending = (size_t)strtoul(end + 1, NULL, 10);
+				st67w611_link_notify(&self->links[id]);
+				found = true;
+			}
+			continue;
+		}
+
+		const char *p = !strncmp(line, "+CIP:", 5) ? line + 5 : line;
+		if (*p < '0' || *p > '9') {
+			continue;
+		}
+		unsigned long id = strtoul(p, &end, 10);
+		if (*end != ',' || id >= ST67W611_LINK_COUNT) {
+			continue;
+		}
+		if (st67w611_is_word(end + 1, "CLOSED")) {
+			self->links[id].connected = false;
+			st67w611_link_notify(&self->links[id]);
+			found = true;
+		} else if (st67w611_is_word(end + 1, "CONNECTED")) {
+			self->links[id].connected = true;
+			found = true;
+		}
+	}
+	return found;
+}
+
+
+/* Locate the data in the "+CIPRECVDATA:<actual_len>,<data>" response accumulated in resp_buf. Returns true with
+ * the data offset and length once the whole data was received. */
+static bool st67w611_recv_data_parse(St67w611 *self, size_t *off, size_t *actual) {
+	const char *hdr = strstr((const char *)self->resp_buf, "+CIPRECVDATA:");
+	if (hdr == NULL) {
+		return false;
+	}
+	char *end = NULL;
+	size_t n = (size_t)strtoul(hdr + 13, &end, 10);
+	if (end == hdr + 13 || *end != ',') {
+		return false;
+	}
+	size_t data = (size_t)(end + 1 - (const char *)self->resp_buf);
+	if (self->resp_len < data + n) {
+		return false;
+	}
+	*off = data;
+	*actual = n;
+	return true;
+}
+
+
+/* Completion check of a running AT+CIPRECVDATA. The data may contain anything, so the result code is searched
+ * for only after the data announced by the header. The bytes read are deducted from the link's pending count
+ * here, in order with the "+IPD" reports updating it. */
+static void st67w611_recv_data_check(St67w611 *self, const uint8_t *frame) {
+	size_t off = 0;
+	size_t actual = 0;
+	if (st67w611_recv_data_parse(self, &off, &actual)) {
+		const char *tail = (const char *)self->resp_buf + off + actual;
+		if (strstr(tail, "OK") == NULL && strstr(tail, "ERROR") == NULL) {
+			return;
+		}
+		struct st67w611_link *link = &self->links[self->cmd_link];
+		link->pending = (link->pending > actual) ? link->pending - actual : 0;
+	} else if (strstr((const char *)frame, "ERROR") == NULL) {
+		return;
+	}
+	self->cmd_running = false;
+	xSemaphoreGive(self->cmd_sem);
+}
+
+
 static void st67w611_dispatch_frame(St67w611 *self, const uint8_t *frame, size_t len) {
+	/* Network reports are parsed from every frame except the raw data of a running AT+CIPRECVDATA. */
+	bool net_report = false;
+	if (!(self->cmd_running && self->cmd_binary)) {
+		net_report = st67w611_net_reports(self, (const char *)frame);
+	}
+
 	if (self->cmd_running) {
 		size_t space = sizeof(self->resp_buf) - 1 - self->resp_len;
 		size_t copy = (len < space) ? len : space;
@@ -549,6 +725,11 @@ static void st67w611_dispatch_frame(St67w611 *self, const uint8_t *frame, size_t
 		/* Note when the frame did not fit so the command can report ST67W611_RET_OVERFLOW. */
 		if (copy < len) {
 			self->resp_overflow = true;
+		}
+
+		if (self->cmd_binary) {
+			st67w611_recv_data_check(self, frame);
+			return;
 		}
 
 		if (self->cmd_wait_prompt) {
@@ -590,11 +771,9 @@ static void st67w611_dispatch_frame(St67w611 *self, const uint8_t *frame, size_t
 	/* An unsolicited URC frame: log the raw line before parsing it into an event. */
 	st67w611_log_at("<", (const char *)frame, len);
 
-	if (st67w611_emit_event(self, frame, len)) {
-		return;
+	if (!net_report) {
+		st67w611_emit_event(self, frame, len);
 	}
-
-	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("unsolicited: %s"), frame);
 }
 
 
@@ -636,14 +815,9 @@ static void st67w611_rx_task(void *p) {
 }
 
 
-st67w611_ret_t st67w611_command(St67w611 *self, const char *cmd, char *resp, size_t resp_size, size_t *resp_len) {
-	if (u_assert(self != NULL) ||
-	    u_assert(cmd != NULL)) {
-		return ST67W611_RET_NULL;
-	}
-
-	/* Only one command may be in flight at a time. */
-	xSemaphoreTake(self->cmd_lock, portMAX_DELAY);
+/* Send an AT command and wait up to @p timeout_ms for its response, which is left in resp_buf. The caller holds
+ * cmd_lock. With @p binary set the response is an AT+CIPRECVDATA one carrying raw data. */
+static st67w611_ret_t st67w611_cmd_run(St67w611 *self, const char *cmd, bool binary, uint32_t timeout_ms) {
 	st67w611_log_at(">", cmd, strlen(cmd));
 
 	/* Arm the command and send it while holding comm_lock, so the background task cannot process any
@@ -654,6 +828,7 @@ st67w611_ret_t st67w611_command(St67w611 *self, const char *cmd, char *resp, siz
 	self->resp_buf[0] = '\0';
 	self->resp_overflow = false;
 	self->cmd_running = true;
+	self->cmd_binary = binary;
 	/* Single-step command: complete on the first terminating result code, no data phase. */
 	self->cmd_wait_prompt = false;
 	/* Discard any stale completion signal left over from a previous command. */
@@ -664,40 +839,68 @@ st67w611_ret_t st67w611_command(St67w611 *self, const char *cmd, char *resp, siz
 	if (ret != ST67W611_RET_OK) {
 		xSemaphoreTake(self->comm_lock, portMAX_DELAY);
 		self->cmd_running = false;
+		self->cmd_binary = false;
 		xSemaphoreGive(self->comm_lock);
 		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("command '%s' not accepted"), cmd);
-		xSemaphoreGive(self->cmd_lock);
 		return ret;
 	}
 
 	/* Wait for the background task to capture the response. A "busy p..." frame is only an interim status
 	 * (the module is busy but continues and delivers the real result in a later frame), so completion is
 	 * driven purely by the terminating OK/ERROR and the wait naturally rides through it. */
-	if (xSemaphoreTake(self->cmd_sem, pdMS_TO_TICKS(ST67W611_CMD_TIMEOUT_MS)) != pdTRUE) {
+	if (xSemaphoreTake(self->cmd_sem, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
 		xSemaphoreTake(self->comm_lock, portMAX_DELAY);
 		self->cmd_running = false;
+		self->cmd_binary = false;
 		xSemaphoreGive(self->comm_lock);
 		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("no response to '%s'"), cmd);
-		xSemaphoreGive(self->cmd_lock);
 		return ST67W611_RET_TIMEOUT;
 	}
+	self->cmd_binary = false;
 
 	st67w611_log_at("<", (const char *)self->resp_buf, self->resp_len);
 
-	/* The response is now sitting in resp_buf; hand it back to the caller. */
-	if (resp != NULL && resp_size > 0) {
-		size_t copy = (self->resp_len < resp_size - 1) ? self->resp_len : resp_size - 1;
-		memcpy(resp, self->resp_buf, copy);
-		resp[copy] = '\0';
-	}
-	if (resp_len != NULL) {
-		*resp_len = self->resp_len;
-	}
 	/* The response is captured (possibly truncated); report the overflow so the caller knows. */
-	st67w611_ret_t cmd_ret = self->resp_overflow ? ST67W611_RET_OVERFLOW : ST67W611_RET_OK;
+	return self->resp_overflow ? ST67W611_RET_OVERFLOW : ST67W611_RET_OK;
+}
 
+
+st67w611_ret_t st67w611_command(St67w611 *self, const char *cmd, char *resp, size_t resp_size, size_t *resp_len) {
+	if (u_assert(self != NULL) ||
+	    u_assert(cmd != NULL)) {
+		return ST67W611_RET_NULL;
+	}
+
+	/* Only one command may be in flight at a time. */
+	xSemaphoreTake(self->cmd_lock, portMAX_DELAY);
+	st67w611_ret_t ret = st67w611_cmd_run(self, cmd, false, ST67W611_CMD_TIMEOUT_MS);
+	if (ret == ST67W611_RET_OK || ret == ST67W611_RET_OVERFLOW) {
+		/* The response is now sitting in resp_buf; hand it back to the caller. */
+		if (resp != NULL && resp_size > 0) {
+			size_t copy = (self->resp_len < resp_size - 1) ? self->resp_len : resp_size - 1;
+			memcpy(resp, self->resp_buf, copy);
+			resp[copy] = '\0';
+		}
+		if (resp_len != NULL) {
+			*resp_len = self->resp_len;
+		}
+	}
 	xSemaphoreGive(self->cmd_lock);
-	return cmd_ret;
+	return ret;
+}
+
+
+/* Run an AT command which only reports success or failure, waiting up to @p timeout_ms. A final ERROR or FAIL
+ * result is reported as ST67W611_RET_FAILED. The response is checked in place, not copied. */
+static st67w611_ret_t st67w611_at(St67w611 *self, const char *cmd, uint32_t timeout_ms) {
+	xSemaphoreTake(self->cmd_lock, portMAX_DELAY);
+	st67w611_ret_t ret = st67w611_cmd_run(self, cmd, false, timeout_ms);
+	if (ret == ST67W611_RET_OK && (strstr((char *)self->resp_buf, "ERROR") != NULL ||
+	                               strstr((char *)self->resp_buf, "FAIL") != NULL)) {
+		ret = ST67W611_RET_FAILED;
+	}
+	xSemaphoreGive(self->cmd_lock);
+	return ret;
 }
 
 
@@ -881,6 +1084,9 @@ static void st67w611_sec_task(void *p) {
 				}
 				break;
 			}
+			case ST67W611_SEC_JOB_WIFI_APPLY:
+				st67w611_wifi_apply(self);
+				break;
 			default:
 				break;
 		}
@@ -1354,6 +1560,655 @@ static const struct ble_vmt ble_vmt = {
 /* Power the module up and confirm it is present and speaking the SPI NCP protocol, following the
  * documented start-up sequence: enable, wait for the "ready" banner, then verify with an AT/OK
  * round-trip. */
+/**********************************************************************************************************************
+ * Generic Wi-Fi device interface (interfaces/wifi.h)
+ *
+ * The setters only store the configuration in wifi_settings (shared with the configuration subtree). Applying it
+ * takes a series of blocking AT commands and the join itself takes seconds, so start(), stop() and configuration
+ * changes of a started link hand the work to the security task. The link state is tracked from the "+CW:"
+ * reports.
+ **********************************************************************************************************************/
+
+/* Append @p str to the command in @p buf at position @p pos as a quoted AT string parameter, escaping the
+ * characters the module requires to be escaped. Returns the new position, or @p size if it does not fit. */
+static size_t st67w611_append_quoted(char *buf, size_t size, size_t pos, const char *str) {
+	if (pos >= size - 1) {
+		return size;
+	}
+	buf[pos++] = '"';
+	for (; *str != '\0'; str++) {
+		if (*str == '"' || *str == ',' || *str == '\\') {
+			if (pos >= size - 1) {
+				return size;
+			}
+			buf[pos++] = '\\';
+		}
+		if (pos >= size - 1) {
+			return size;
+		}
+		buf[pos++] = *str;
+	}
+	if (pos >= size - 1) {
+		return size;
+	}
+	buf[pos++] = '"';
+	buf[pos] = '\0';
+	return pos;
+}
+
+
+/* Ask the security task to apply the Wi-Fi configuration. */
+static wifi_ret_t st67w611_wifi_request_apply(St67w611 *self) {
+	const struct st67w611_sec_msg msg = {
+		.job = ST67W611_SEC_JOB_WIFI_APPLY,
+	};
+	if (self->sec_queue == NULL || xQueueSend(self->sec_queue, &msg, 0) != pdTRUE) {
+		return WIFI_RET_FAILED;
+	}
+	return WIFI_RET_OK;
+}
+
+
+/* Apply the Wi-Fi configuration, run by the security task. All connections are dropped, they do not survive
+ * a mode change. The link comes up asynchronously, reported by the "+CW:" reports. */
+static void st67w611_wifi_apply(St67w611 *self) {
+	for (size_t i = 0; i < ST67W611_LINK_COUNT; i++) {
+		self->links[i].connected = false;
+		self->links[i].pending = 0;
+	}
+	self->wifi_status.state = WIFI_STATE_IDLE;
+
+	if (!self->wifi_started || self->wifi_settings.mode == WIFI_MODE_OFF) {
+		/* Leave the network (fails harmlessly if not joined) and disable the radio. */
+		st67w611_at(self, "AT+CWQAP\r\n", ST67W611_CMD_TIMEOUT_MS);
+		st67w611_at(self, "AT+CWMODE=0\r\n", ST67W611_CMD_TIMEOUT_MS);
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Wi-Fi off"));
+		return;
+	}
+
+	/* Station or softAP mode, without the module's own automatic connection to a stored network. */
+	char cmd[ST67W611_NET_CMD_MAX];
+	snprintf(cmd, sizeof(cmd), "AT+CWMODE=%u,0\r\n", (self->wifi_settings.mode == WIFI_MODE_STA) ? 1u : 2u);
+	if (st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot set the Wi-Fi mode"));
+		return;
+	}
+
+	/* Multiple connections (link IDs) with received data buffered in the module until read. */
+	if (st67w611_at(self, "AT+CIPMUX=1\r\n", ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK ||
+	    st67w611_at(self, "AT+CIPRECVMODE=1\r\n", ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot set the connection mode"));
+	}
+
+	if (self->wifi_settings.ssid[0] == '\0') {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("no SSID configured"));
+		return;
+	}
+	const char *psk = (self->wifi_settings.security == WIFI_SECURITY_OPEN) ? "" : self->wifi_settings.psk;
+
+	if (self->wifi_settings.mode == WIFI_MODE_STA) {
+		if (self->wifi_settings.hostname[0] != '\0') {
+			size_t pos = st67w611_append_quoted(cmd, sizeof(cmd), strlen(strcpy(cmd, "AT+CWHOSTNAME=")),
+			                                    self->wifi_settings.hostname);
+			if (pos < sizeof(cmd) - 3) {
+				strcpy(cmd + pos, "\r\n");
+				if (st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+					u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot set the host name"));
+				}
+			}
+		}
+
+		size_t pos = st67w611_append_quoted(cmd, sizeof(cmd), strlen(strcpy(cmd, "AT+CWJAP=")), self->wifi_settings.ssid);
+		if (pos < sizeof(cmd) - 1) {
+			cmd[pos++] = ',';
+		}
+		pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, psk);
+		if (pos >= sizeof(cmd) - 3) {
+			return;
+		}
+		strcpy(cmd + pos, "\r\n");
+
+		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("joining '%s'"), self->wifi_settings.ssid);
+		self->wifi_status.state = WIFI_STATE_CONNECTING;
+		/* The outcome is also reported by "+CW:" reports, which update the state and emit the events. */
+		if (st67w611_at(self, cmd, ST67W611_WIFI_JOIN_TIMEOUT_MS) != ST67W611_RET_OK) {
+			if (self->wifi_status.state == WIFI_STATE_CONNECTING) {
+				self->wifi_status.state = WIFI_STATE_IDLE;
+			}
+			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot join '%s'"), self->wifi_settings.ssid);
+		}
+		return;
+	}
+
+	/* SoftAP, ecn 0 = open, 3 = WPA2-PSK, 4 = WPA3-PSK. */
+	static const uint8_t ecn[] = {0, 3, 4};
+	size_t pos = st67w611_append_quoted(cmd, sizeof(cmd), strlen(strcpy(cmd, "AT+CWSAP=")), self->wifi_settings.ssid);
+	if (pos < sizeof(cmd) - 1) {
+		cmd[pos++] = ',';
+	}
+	pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, psk);
+	if (pos >= sizeof(cmd) - 16) {
+		return;
+	}
+	snprintf(cmd + pos, sizeof(cmd) - pos, ",%u,%u\r\n", (unsigned)ST67W611_AP_CHANNEL,
+	         (unsigned)ecn[self->wifi_settings.security]);
+	if (st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start the access point '%s'"),
+		      self->wifi_settings.ssid);
+		return;
+	}
+	self->wifi_status.state = WIFI_STATE_UP;
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("access point '%s' started"), self->wifi_settings.ssid);
+}
+
+
+static wifi_ret_t wifi_start(Wifi *self) {
+	St67w611 *dev = (St67w611 *)self->parent;
+	dev->wifi_started = true;
+	return st67w611_wifi_request_apply(dev);
+}
+
+
+static wifi_ret_t wifi_stop(Wifi *self) {
+	St67w611 *dev = (St67w611 *)self->parent;
+	dev->wifi_started = false;
+	return st67w611_wifi_request_apply(dev);
+}
+
+
+static wifi_ret_t wifi_set_mode(Wifi *self, enum wifi_mode mode) {
+	if (mode > WIFI_MODE_AP) {
+		return WIFI_RET_NOT_IMPLEMENTED;
+	}
+	((St67w611 *)self->parent)->wifi_settings.mode = (uint32_t)mode;
+	return WIFI_RET_OK;
+}
+
+
+static wifi_ret_t wifi_set_ssid(Wifi *self, const char *ssid) {
+	if (ssid == NULL) {
+		return WIFI_RET_NULL;
+	}
+	St67w611 *dev = (St67w611 *)self->parent;
+	size_t len = strlen(ssid);
+	if (len >= sizeof(dev->wifi_settings.ssid)) {
+		return WIFI_RET_BAD_ARG;
+	}
+	memcpy(dev->wifi_settings.ssid, ssid, len + 1);
+	return WIFI_RET_OK;
+}
+
+
+static wifi_ret_t wifi_set_security(Wifi *self, enum wifi_security security, const char *psk) {
+	if (security > WIFI_SECURITY_WPA3_SAE) {
+		return WIFI_RET_NOT_IMPLEMENTED;
+	}
+	St67w611 *dev = (St67w611 *)self->parent;
+	if (security == WIFI_SECURITY_OPEN) {
+		dev->wifi_settings.psk[0] = '\0';
+	} else {
+		if (psk == NULL) {
+			return WIFI_RET_NULL;
+		}
+		size_t len = strlen(psk);
+		if (len >= sizeof(dev->wifi_settings.psk)) {
+			return WIFI_RET_BAD_ARG;
+		}
+		memcpy(dev->wifi_settings.psk, psk, len + 1);
+	}
+	dev->wifi_settings.security = (uint32_t)security;
+	return WIFI_RET_OK;
+}
+
+
+static wifi_ret_t wifi_set_hostname(Wifi *self, const char *hostname) {
+	if (hostname == NULL) {
+		return WIFI_RET_NULL;
+	}
+	St67w611 *dev = (St67w611 *)self->parent;
+	size_t len = strlen(hostname);
+	if (len >= sizeof(dev->wifi_settings.hostname)) {
+		return WIFI_RET_BAD_ARG;
+	}
+	memcpy(dev->wifi_settings.hostname, hostname, len + 1);
+	return WIFI_RET_OK;
+}
+
+
+static wifi_ret_t wifi_set_event_handler(Wifi *self, wifi_event_cb cb, void *cb_ctx) {
+	St67w611 *dev = (St67w611 *)self->parent;
+	dev->wifi_event_cb = cb;
+	dev->wifi_event_ctx = cb_ctx;
+	return WIFI_RET_OK;
+}
+
+
+static wifi_ret_t wifi_get_status(Wifi *self, struct wifi_status *status) {
+	if (status == NULL) {
+		return WIFI_RET_NULL;
+	}
+	*status = ((St67w611 *)self->parent)->wifi_status;
+	return WIFI_RET_OK;
+}
+
+
+static const struct wifi_vmt wifi_vmt = {
+	.start = wifi_start,
+	.stop = wifi_stop,
+	.set_mode = wifi_set_mode,
+	.set_ssid = wifi_set_ssid,
+	.set_security = wifi_set_security,
+	.set_hostname = wifi_set_hostname,
+	.set_event_handler = wifi_set_event_handler,
+	.get_status = wifi_get_status,
+};
+
+
+/**********************************************************************************************************************
+ * Wi-Fi configuration subtree
+ *
+ * The leaves map directly onto wifi_settings. A write to a started link re-applies the configuration. The "wifi"
+ * subtree node holds the driver instance as its variable.
+ **********************************************************************************************************************/
+
+static const char * const st67w611_wifi_mode_names[] = WIFI_MODE_NAMES;
+static const char * const st67w611_wifi_security_names[] = WIFI_SECURITY_NAMES;
+
+/* Copy of the configlib vmt with write replaced, shared by all the leaves. */
+static struct conf_vmt st67w611_wifi_conf_vmt;
+static const struct conf_vmt *st67w611_configlib_vmt;
+
+static conf_ret_t st67w611_wifi_conf_write(Conf *self, const union conf_val val) {
+	if (st67w611_configlib_vmt->write(self, val) != CONF_RET_OK) {
+		return CONF_RET_FAILED;
+	}
+	St67w611 *dev = ((ConfiglibValue *)self->parent)->parent->var;
+	if (dev->wifi_started) {
+		st67w611_wifi_request_apply(dev);
+	}
+	return CONF_RET_OK;
+}
+
+
+static void st67w611_conf_init(St67w611 *self) {
+	configlib_init_map(&self->conf_tree.wifi, "wifi", self, CONF_SUBTREE);
+
+	configlib_init_map_append(&self->conf_tree.mode, "mode", &self->wifi_settings.mode, CONF_ENUM,
+	                          &self->conf_tree.wifi, CONF_DIR_CHILD);
+	configlib_set_constraint(&self->conf_tree.mode, (union conf_constraint) {
+		.enumeration = {.values = st67w611_wifi_mode_names, .count = WIFI_MODE_AP + 1},
+	});
+	configlib_set_default(&self->conf_tree.mode, (union conf_val) {.u32 = WIFI_MODE_OFF});
+	configlib_set_description(&self->conf_tree.mode, "Wi-Fi mode",
+		"off disables the radio, sta joins the network named by ssid, ap creates it.");
+
+	configlib_init(&self->conf_tree.ssid, "ssid");
+	configlib_map_string(&self->conf_tree.ssid, self->wifi_settings.ssid, sizeof(self->wifi_settings.ssid));
+	configlib_append(&self->conf_tree.ssid, &self->conf_tree.mode, CONF_DIR_NEXT);
+	configlib_set_constraint(&self->conf_tree.ssid, (union conf_constraint) {
+		.str = {.max_len = WIFI_SSID_LEN_MAX},
+	});
+	configlib_set_description(&self->conf_tree.ssid, "Network name (SSID)",
+		"Network to join in the sta mode or to create in the ap mode.");
+
+	configlib_init_map_append(&self->conf_tree.security, "security", &self->wifi_settings.security, CONF_ENUM,
+	                          &self->conf_tree.ssid, CONF_DIR_NEXT);
+	configlib_set_constraint(&self->conf_tree.security, (union conf_constraint) {
+		.enumeration = {.values = st67w611_wifi_security_names, .count = WIFI_SECURITY_WPA3_SAE + 1},
+	});
+	configlib_set_default(&self->conf_tree.security, (union conf_val) {.u32 = WIFI_SECURITY_WPA2_PSK});
+	configlib_set_description(&self->conf_tree.security, "Network security",
+		"Security of the created network in the ap mode. In the sta mode it is negotiated with the access point, "
+		"open only omits the passphrase.");
+
+	configlib_init(&self->conf_tree.psk, "psk");
+	configlib_map_string(&self->conf_tree.psk, self->wifi_settings.psk, sizeof(self->wifi_settings.psk));
+	configlib_append(&self->conf_tree.psk, &self->conf_tree.security, CONF_DIR_NEXT);
+	configlib_set_constraint(&self->conf_tree.psk, (union conf_constraint) {
+		.str = {.max_len = WIFI_PSK_LEN_MAX},
+	});
+	configlib_set_description(&self->conf_tree.psk, "WPA passphrase", NULL);
+
+	self->conf_tree.mode.flags = CONF_READ | CONF_WRITE;
+	self->conf_tree.ssid.flags = CONF_READ | CONF_WRITE;
+	self->conf_tree.security.flags = CONF_READ | CONF_WRITE;
+	self->conf_tree.psk.flags = CONF_READ | CONF_WRITE;
+
+	st67w611_configlib_vmt = self->conf_tree.mode.conf.vmt;
+	st67w611_wifi_conf_vmt = *st67w611_configlib_vmt;
+	st67w611_wifi_conf_vmt.write = st67w611_wifi_conf_write;
+	self->conf_tree.mode.conf.vmt = &st67w611_wifi_conf_vmt;
+	self->conf_tree.ssid.conf.vmt = &st67w611_wifi_conf_vmt;
+	self->conf_tree.security.conf.vmt = &st67w611_wifi_conf_vmt;
+	self->conf_tree.psk.conf.vmt = &st67w611_wifi_conf_vmt;
+}
+
+
+/**********************************************************************************************************************
+ * Generic TCP and TLS connection interfaces (interfaces/tcp.h, interfaces/tls.h)
+ *
+ * Both are served by the module's internal network stack and share its connection slots (link IDs). Received
+ * data is kept in the module (passive receive mode) and read with AT+CIPRECVDATA when the user asks for it, the
+ * "+IPD" reports only update the buffered length. The Tls methods use the Tcp implementation, tls_ret_t has
+ * the same values in the same order as tcp_ret_t.
+ **********************************************************************************************************************/
+
+static const struct tcp_desc st67w611_tcp_desc = {
+	.max_sessions = ST67W611_LINK_COUNT,
+};
+
+static const struct tls_desc st67w611_tls_desc = {
+	.max_sessions = ST67W611_LINK_COUNT,
+};
+
+
+/* Validate an opaque session pointer, returning the link or NULL. */
+static struct st67w611_link *st67w611_link_get(St67w611 *self, void *session) {
+	struct st67w611_link *link = session;
+	if (link < &self->links[0] || link >= &self->links[ST67W611_LINK_COUNT] || !link->used) {
+		return NULL;
+	}
+	return link;
+}
+
+
+static unsigned st67w611_link_id(St67w611 *self, struct st67w611_link *link) {
+	return (unsigned)(link - self->links);
+}
+
+
+/* Allocate a link, configure TLS on it if @p params is not NULL and connect it. */
+static tcp_ret_t st67w611_link_connect(St67w611 *self, const char *host, uint16_t port,
+                                       const struct tls_params *params, Notify *notify, void **session,
+                                       uint32_t timeout_ms) {
+	if (host == NULL || session == NULL) {
+		return TCP_RET_NULL;
+	}
+	if (strlen(host) > ST67W611_HOST_LEN_MAX) {
+		return TCP_RET_BAD_ARG;
+	}
+	if (self->wifi_status.state != WIFI_STATE_UP) {
+		return TCP_RET_BAD_STATE;
+	}
+
+	struct st67w611_link *link = NULL;
+	taskENTER_CRITICAL();
+	for (size_t i = 0; i < ST67W611_LINK_COUNT; i++) {
+		if (!self->links[i].used) {
+			link = &self->links[i];
+			link->used = true;
+			link->connected = false;
+			link->pending = 0;
+			link->notify = notify;
+			break;
+		}
+	}
+	taskEXIT_CRITICAL();
+	if (link == NULL) {
+		return TCP_RET_NOMEM;
+	}
+	unsigned id = st67w611_link_id(self, link);
+
+	char cmd[ST67W611_NET_CMD_MAX];
+	if (params != NULL) {
+		/* SNI, also checked against the server certificate. */
+		size_t pos = (size_t)snprintf(cmd, sizeof(cmd), "AT+CIPSSLCSNI=%u,", id);
+		pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->server_name != NULL) ? params->server_name : host);
+		if (pos >= sizeof(cmd) - 3) {
+			link->used = false;
+			return TCP_RET_BAD_ARG;
+		}
+		strcpy(cmd + pos, "\r\n");
+		if (st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+			link->used = false;
+			return TCP_RET_FAILED;
+		}
+
+		/* Authentication mode, bit 0 = client certificate, bit 1 = server verification with a CA. */
+		unsigned auth = ((params->cert != NULL) ? 1u : 0u) | ((params->ca != NULL) ? 2u : 0u);
+		snprintf(cmd, sizeof(cmd), "AT+CIPSSLCCONF=%u,%u,\"%s\",\"%s\",\"%s\"\r\n", id, auth,
+		         (params->cert != NULL) ? params->cert : "", (params->key != NULL) ? params->key : "",
+		         (params->ca != NULL) ? params->ca : "");
+		if (st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+			link->used = false;
+			return TCP_RET_BAD_ARG;
+		}
+	}
+
+	snprintf(cmd, sizeof(cmd), "AT+CIPSTART=%u,\"%s\",\"%s\",%u\r\n", id, (params != NULL) ? "SSL" : "TCP", host,
+	         (unsigned)port);
+	st67w611_ret_t ret = st67w611_at(self, cmd, timeout_ms);
+	if (ret != ST67W611_RET_OK) {
+		if (ret == ST67W611_RET_TIMEOUT) {
+			/* The module may still complete the connection, close it to free the link ID. */
+			snprintf(cmd, sizeof(cmd), "AT+CIPCLOSE=%u\r\n", id);
+			st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS);
+		}
+		link->connected = false;
+		link->used = false;
+		return (ret == ST67W611_RET_TIMEOUT) ? TCP_RET_TIMEOUT : TCP_RET_CONNECT_FAILED;
+	}
+
+	link->connected = true;
+	*session = link;
+	return TCP_RET_OK;
+}
+
+
+static tcp_ret_t st67w611_link_close(St67w611 *self, void *session) {
+	if (session == NULL) {
+		return TCP_RET_NULL;
+	}
+	struct st67w611_link *link = st67w611_link_get(self, session);
+	if (link == NULL) {
+		return TCP_RET_BAD_ARG;
+	}
+	if (link->connected) {
+		char cmd[ST67W611_CMD_MAX];
+		snprintf(cmd, sizeof(cmd), "AT+CIPCLOSE=%u\r\n", st67w611_link_id(self, link));
+		st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS);
+	}
+	link->notify = NULL;
+	link->connected = false;
+	link->pending = 0;
+	link->used = false;
+	return TCP_RET_OK;
+}
+
+
+static tcp_ret_t st67w611_link_send(St67w611 *self, void *session, const void *buf, size_t len, uint32_t timeout_ms) {
+	struct st67w611_link *link = st67w611_link_get(self, session);
+	if (link == NULL) {
+		return TCP_RET_BAD_ARG;
+	}
+
+	TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+	const uint8_t *data = buf;
+	while (len > 0) {
+		if (!link->connected) {
+			return TCP_RET_CLOSED;
+		}
+		if (xTaskGetTickCount() >= deadline) {
+			return TCP_RET_TIMEOUT;
+		}
+		size_t n = (len < ST67W611_SEND_MAX) ? len : ST67W611_SEND_MAX;
+		char cmd[ST67W611_CMD_MAX];
+		snprintf(cmd, sizeof(cmd), "AT+CIPSEND=%u,%u\r\n", st67w611_link_id(self, link), (unsigned)n);
+		st67w611_ret_t ret = st67w611_command_data(self, cmd, data, n);
+		if (ret == ST67W611_RET_TIMEOUT) {
+			return TCP_RET_TIMEOUT;
+		}
+		if (ret != ST67W611_RET_OK) {
+			return link->connected ? TCP_RET_FAILED : TCP_RET_CLOSED;
+		}
+		self->wifi_status.tx_bytes += (uint32_t)n;
+		data += n;
+		len -= n;
+	}
+	return TCP_RET_OK;
+}
+
+
+/* Read up to @p size buffered bytes of the link with AT+CIPRECVDATA into @p buf. */
+static tcp_ret_t st67w611_link_read(St67w611 *self, struct st67w611_link *link, void *buf, size_t size,
+                                    size_t *len) {
+	char cmd[ST67W611_CMD_MAX];
+	unsigned id = st67w611_link_id(self, link);
+	snprintf(cmd, sizeof(cmd), "AT+CIPRECVDATA=%u,%u\r\n", id, (unsigned)size);
+
+	xSemaphoreTake(self->cmd_lock, portMAX_DELAY);
+	self->cmd_link = (uint8_t)id;
+	st67w611_ret_t ret = st67w611_cmd_run(self, cmd, true, ST67W611_CMD_TIMEOUT_MS);
+	size_t off = 0;
+	size_t actual = 0;
+	*len = 0;
+	if (ret == ST67W611_RET_OK && st67w611_recv_data_parse(self, &off, &actual) && actual <= size) {
+		memcpy(buf, self->resp_buf + off, actual);
+		*len = actual;
+	} else {
+		/* Nothing (more) to read, the pending count was stale. */
+		link->pending = 0;
+	}
+	xSemaphoreGive(self->cmd_lock);
+
+	return (ret == ST67W611_RET_TIMEOUT) ? TCP_RET_TIMEOUT : TCP_RET_OK;
+}
+
+
+/* Resynchronize the buffered data length of all used links from "+CIPRECVLEN:<len0>,<len1>,...". */
+static void st67w611_links_refresh(St67w611 *self) {
+	xSemaphoreTake(self->cmd_lock, portMAX_DELAY);
+	if (st67w611_cmd_run(self, "AT+CIPRECVLEN?\r\n", false, ST67W611_CMD_TIMEOUT_MS) == ST67W611_RET_OK) {
+		const char *s = strstr((const char *)self->resp_buf, "+CIPRECVLEN:");
+		if (s != NULL) {
+			s += 12;
+			for (size_t i = 0; i < ST67W611_LINK_COUNT; i++) {
+				char *end = NULL;
+				size_t n = (size_t)strtoul(s, &end, 10);
+				if (end == s) {
+					break;
+				}
+				if (self->links[i].used && n > 0) {
+					self->links[i].pending = n;
+				}
+				if (*end != ',') {
+					break;
+				}
+				s = end + 1;
+			}
+		}
+	}
+	xSemaphoreGive(self->cmd_lock);
+}
+
+
+static tcp_ret_t st67w611_link_recv(St67w611 *self, void *session, void *buf, size_t size, size_t *len,
+                                    uint32_t timeout_ms) {
+	struct st67w611_link *link = st67w611_link_get(self, session);
+	if (link == NULL || buf == NULL || len == NULL || size == 0) {
+		return TCP_RET_BAD_ARG;
+	}
+	*len = 0;
+
+	TickType_t start = xTaskGetTickCount();
+	TickType_t last_refresh = start;
+	while (true) {
+		if (link->pending > 0) {
+			size_t n = link->pending;
+			n = (n < size) ? n : size;
+			n = (n < ST67W611_RECV_MAX) ? n : ST67W611_RECV_MAX;
+			tcp_ret_t ret = st67w611_link_read(self, link, buf, n, len);
+			if (ret != TCP_RET_OK) {
+				return ret;
+			}
+			if (*len > 0) {
+				self->wifi_status.rx_bytes += (uint32_t)*len;
+				return TCP_RET_OK;
+			}
+			continue;
+		}
+		if (!link->connected) {
+			return TCP_RET_EOF;
+		}
+
+		TickType_t now = xTaskGetTickCount();
+		if (now - start >= pdMS_TO_TICKS(timeout_ms)) {
+			return TCP_RET_TIMEOUT;
+		}
+		if (now - last_refresh >= pdMS_TO_TICKS(ST67W611_RECVLEN_POLL_MS)) {
+			st67w611_links_refresh(self);
+			last_refresh = now;
+		}
+		vTaskDelay(pdMS_TO_TICKS(ST67W611_LINK_POLL_MS));
+	}
+}
+
+
+static tcp_ret_t tcp_connect(Tcp *self, const char *host, uint16_t port, Notify *notify, void **session,
+                             uint32_t timeout_ms) {
+	return st67w611_link_connect((St67w611 *)self->parent, host, port, NULL, notify, session, timeout_ms);
+}
+
+
+static tcp_ret_t tcp_close(Tcp *self, void *session) {
+	return st67w611_link_close((St67w611 *)self->parent, session);
+}
+
+
+static tcp_ret_t tcp_send(Tcp *self, void *session, const void *buf, size_t len, uint32_t timeout_ms) {
+	return st67w611_link_send((St67w611 *)self->parent, session, buf, len, timeout_ms);
+}
+
+
+static tcp_ret_t tcp_recv(Tcp *self, void *session, void *buf, size_t size, size_t *len, uint32_t timeout_ms) {
+	return st67w611_link_recv((St67w611 *)self->parent, session, buf, size, len, timeout_ms);
+}
+
+
+static const struct tcp_vmt tcp_vmt = {
+	.connect = tcp_connect,
+	.close = tcp_close,
+	.send = tcp_send,
+	.recv = tcp_recv,
+};
+
+
+static tls_ret_t tls_connect(Tls *self, const char *host, uint16_t port, const struct tls_params *params,
+                             Notify *notify, void **session, uint32_t timeout_ms) {
+	if (params == NULL) {
+		return TLS_RET_NULL;
+	}
+	if ((params->cert == NULL) != (params->key == NULL)) {
+		return TLS_RET_BAD_ARG;
+	}
+	return (tls_ret_t)st67w611_link_connect((St67w611 *)self->parent, host, port, params, notify, session,
+	                                        timeout_ms);
+}
+
+
+static tls_ret_t tls_close(Tls *self, void *session) {
+	return (tls_ret_t)st67w611_link_close((St67w611 *)self->parent, session);
+}
+
+
+static tls_ret_t tls_send(Tls *self, void *session, const void *buf, size_t len, uint32_t timeout_ms) {
+	return (tls_ret_t)st67w611_link_send((St67w611 *)self->parent, session, buf, len, timeout_ms);
+}
+
+
+static tls_ret_t tls_recv(Tls *self, void *session, void *buf, size_t size, size_t *len, uint32_t timeout_ms) {
+	return (tls_ret_t)st67w611_link_recv((St67w611 *)self->parent, session, buf, size, len, timeout_ms);
+}
+
+
+static const struct tls_vmt tls_vmt = {
+	.connect = tls_connect,
+	.close = tls_close,
+	.send = tls_send,
+	.recv = tls_recv,
+};
+
+
 static st67w611_ret_t st67w611_probe(St67w611 *self) {
 	/* BOOT low selects booting the NCP firmware over SPI. Power-cycle the module first: an already
 	 * running module (e.g. after an MCU-only reset that left CHIP_EN high) would not re-emit its boot
@@ -1455,6 +2310,19 @@ st67w611_ret_t st67w611_init(St67w611 *self, const struct st67w611_conf *conf) {
 	self->ble.vmt = &ble_vmt;
 	self->ble.parent = self;
 
+	/* Expose the Wi-Fi device and the network interfaces of the module's stack. The Wi-Fi link stays off until
+	 * started through the Wifi interface. */
+	self->wifi.vmt = &wifi_vmt;
+	self->wifi.parent = self;
+	self->tcp.vmt = &tcp_vmt;
+	self->tcp.parent = self;
+	self->tcp.desc = &st67w611_tcp_desc;
+	self->tls.vmt = &tls_vmt;
+	self->tls.parent = self;
+	self->tls.desc = &st67w611_tls_desc;
+	self->wifi_settings.security = WIFI_SECURITY_WPA2_PSK;
+	st67w611_conf_init(self);
+
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("init ok"));
 
 	/* Query the module firmware version through the background-task command path now that it is up. */
@@ -1536,6 +2404,12 @@ st67w611_ret_t st67w611_set_sleep(St67w611 *self, bool sleep) {
 		self->sleeping = true;
 		xSemaphoreTake(self->comm_lock, portMAX_DELAY);
 		self->conf.en_gpio->vmt->set(self->conf.en_gpio, false);
+		/* All connections and the Wi-Fi link are gone with the module power. */
+		for (size_t i = 0; i < ST67W611_LINK_COUNT; i++) {
+			self->links[i].connected = false;
+			self->links[i].pending = 0;
+		}
+		self->wifi_status.state = WIFI_STATE_IDLE;
 		xSemaphoreGive(self->comm_lock);
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("asleep"));
 		return ST67W611_RET_OK;
@@ -1559,5 +2433,10 @@ st67w611_ret_t st67w611_set_sleep(St67w611 *self, bool sleep) {
 
 	self->sleeping = false;
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("awake"));
+
+	/* Unlike the GATT server, the Wi-Fi configuration is kept by the driver, bring a started link back up. */
+	if (self->wifi_started) {
+		st67w611_wifi_request_apply(self);
+	}
 	return ST67W611_RET_OK;
 }
