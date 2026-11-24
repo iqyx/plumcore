@@ -1321,6 +1321,8 @@ static void port_setup_applets(void) {
 	/* The updater fetches over the network stack of the BLE/WIFI module. */
 	updater_conf.net.tcp = &ble.tcp;
 	updater_conf.net.tls = &ble.tls;
+	/* The bootloader flashes the update from the fw-update volume of the QSPI flash. */
+	updater_conf.volume = lv_fw_update;
 	port_add_applet((Applet *)&updater, "updater", "applet updater");
 #endif
 }
