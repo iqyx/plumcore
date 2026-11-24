@@ -1,0 +1,7 @@
+config APPLET_UPDATER
+	bool "Firmware updater applet"
+	depends on SERVICE_PROTO_HTTP
+
+config APPLET_UPDATER_GUI
+	bool "Graphical user interface of the updater applet"
+	depends on APPLET_UPDATER && SERVICE_FB_PAINTER
