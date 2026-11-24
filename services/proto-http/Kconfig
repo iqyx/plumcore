@@ -1,0 +1,13 @@
+config SERVICE_PROTO_HTTP
+	bool "HTTP/1.1 client over a Tcp or Tls connection"
+	default n
+
+	config SERVICE_PROTO_HTTP_MAX_SESSIONS
+		int "Maximum number of concurrent requests"
+		default 1
+		depends on SERVICE_PROTO_HTTP
+
+	config SERVICE_PROTO_HTTP_BUF_SIZE
+		int "Size of the per-session buffer holding the request head and the response headers (bytes)"
+		default 512
+		depends on SERVICE_PROTO_HTTP

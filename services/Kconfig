@@ -734,6 +734,8 @@ menu "Communication protocols"
 	endmenu
 
 	menu "Application layer protocols"
+		source "services/proto-http/Kconfig"
+
 		config SERVICE_MQTT_TCPIP
 			bool "MQTT protocol support over a raw TCP connection"
 			select LIB_WOLFMQTT
