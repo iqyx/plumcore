@@ -950,6 +950,13 @@ static void port_setup_ble(void) {
 	Ble *ble_iface = NULL;
 	st67w611_get_ble(&ble, &ble_iface);
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_BLE, (Interface *)ble_iface, "ble");
+
+	/* Advertise the Wi-Fi device, the network interfaces of the module's internal stack and the Wi-Fi
+	 * configuration subtree. The application starts the Wi-Fi link. */
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_WIFI, (Interface *)&ble.wifi, "wifi");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_TCP, (Interface *)&ble.tcp, "tcp");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_TLS, (Interface *)&ble.tls, "tls");
+	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)&ble.conf_tree.wifi.conf, "device wifi wifi0");
 }
 
 
