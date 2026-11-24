@@ -594,6 +594,20 @@ static void st67w611_link_notify(struct st67w611_link *link) {
 }
 
 
+/* Drop all connections when the network goes away, notifying the users of the connected ones that they were
+ * closed. */
+static void st67w611_links_drop(St67w611 *self) {
+	for (size_t i = 0; i < ST67W611_LINK_COUNT; i++) {
+		bool was_connected = self->links[i].connected;
+		self->links[i].connected = false;
+		self->links[i].pending = 0;
+		if (was_connected) {
+			st67w611_link_notify(&self->links[i]);
+		}
+	}
+}
+
+
 /* Parse a single line of a "+CW:" Wi-Fi report (the prefix already removed). */
 static bool st67w611_wifi_report(St67w611 *self, const char *s) {
 	if (st67w611_is_word(s, "CONNECTING")) {
@@ -606,6 +620,7 @@ static bool st67w611_wifi_report(St67w611 *self, const char *s) {
 		st67w611_wifi_emit(self, WIFI_EVENT_GOT_IP, 0);
 	} else if (st67w611_is_word(s, "DISCONNECTED")) {
 		self->wifi_status.state = WIFI_STATE_IDLE;
+		st67w611_links_drop(self);
 		st67w611_wifi_emit(self, WIFI_EVENT_DISCONNECTED, 0);
 	} else if (!strncmp(s, "ERROR", 5)) {
 		/* "+CW:ERROR[,<reason_code>]" */
@@ -1612,10 +1627,7 @@ static wifi_ret_t st67w611_wifi_request_apply(St67w611 *self) {
 /* Apply the Wi-Fi configuration, run by the security task. All connections are dropped, they do not survive
  * a mode change. The link comes up asynchronously, reported by the "+CW:" reports. */
 static void st67w611_wifi_apply(St67w611 *self) {
-	for (size_t i = 0; i < ST67W611_LINK_COUNT; i++) {
-		self->links[i].connected = false;
-		self->links[i].pending = 0;
-	}
+	st67w611_links_drop(self);
 	self->wifi_status.state = WIFI_STATE_IDLE;
 
 	if (!self->wifi_started || self->wifi_settings.mode == WIFI_MODE_OFF) {
@@ -2405,10 +2417,7 @@ st67w611_ret_t st67w611_set_sleep(St67w611 *self, bool sleep) {
 		xSemaphoreTake(self->comm_lock, portMAX_DELAY);
 		self->conf.en_gpio->vmt->set(self->conf.en_gpio, false);
 		/* All connections and the Wi-Fi link are gone with the module power. */
-		for (size_t i = 0; i < ST67W611_LINK_COUNT; i++) {
-			self->links[i].connected = false;
-			self->links[i].pending = 0;
-		}
+		st67w611_links_drop(self);
 		self->wifi_status.state = WIFI_STATE_IDLE;
 		xSemaphoreGive(self->comm_lock);
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("asleep"));
