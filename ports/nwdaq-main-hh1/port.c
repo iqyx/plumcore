@@ -63,6 +63,7 @@
 #include <applets/hello-wren/generated/hello-wren.h>
 #include <applets/settings/settings.h>
 #include <applets/live-data/live-data.h>
+#include <applets/updater/updater.h>
 #endif
 
 
@@ -1315,6 +1316,12 @@ static void port_setup_applets(void) {
 #endif
 #if defined(CONFIG_APPLET_HELLO_WREN)
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_APPLET, (Interface *)&hello_wren, "hello-wren");
+#endif
+#if defined(CONFIG_APPLET_UPDATER)
+	/* The updater fetches over the network stack of the BLE/WIFI module. */
+	updater_conf.net.tcp = &ble.tcp;
+	updater_conf.net.tls = &ble.tls;
+	port_add_applet((Applet *)&updater, "updater", "applet updater");
 #endif
 }
 #endif
