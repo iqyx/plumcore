@@ -8,7 +8,6 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <stdio.h>
 
 #include <main.h>
 
@@ -53,20 +52,8 @@ app_ret_t app_wifi_init(App *self) {
 
 	self->wifi->vmt->set_event_handler(self->wifi, app_wifi_event_handler, self);
 
-	/* Announce the device under its hostname, the port name is used when the hostname is missing or empty. */
-	char hostname[33];
-	union conf_val val = {0};
-	if (app_conf_str("system", "hostname", &val) == CONF_RET_OK && val.str.len > 0) {
-		snprintf(hostname, sizeof(hostname), "%.*s", (int)val.str.len, val.str.buf);
-	} else {
-		snprintf(hostname, sizeof(hostname), "%s", PORT_NAME);
-	}
-	if (self->wifi->vmt->set_hostname != NULL && self->wifi->vmt->set_hostname(self->wifi, hostname) != WIFI_RET_OK) {
-		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot set the host name"));
-	}
-
-	/* The mode, SSID and security were already loaded into the device's configuration subtree, start the link
-	 * with them. The link comes up asynchronously, reported through the event handler. */
+	/* The mode, SSID, security and host name were already loaded into the device's configuration subtree, start
+	 * the link with them. The link comes up asynchronously, reported through the event handler. */
 	if (self->wifi->vmt->start(self->wifi) != WIFI_RET_OK) {
 		u_log(system_log, LOG_TYPE_ERROR, U_LOG_MODULE_PREFIX("cannot start Wi-Fi"));
 		return APP_RET_FAILED;
