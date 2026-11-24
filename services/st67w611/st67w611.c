@@ -427,8 +427,8 @@ static bool st67w611_emit_event(St67w611 *self, const uint8_t *frame, size_t len
 	} else if (!strncmp(s, "+BLE:GATTWRITE:", 15)) {
 		/* +BLE:GATTWRITE:<conn>,<srv>,<char>,<len>,<data>. Parse the four decimal fields, then take the
 		 * trailing <len> bytes verbatim (the payload is binary and may contain commas or NULs). */
-		char *p = (char *)s + 15;
-		unsigned long conn = strtoul(p, &p, 10);
+		char *p = NULL;
+		unsigned long conn = strtoul(s + 15, &p, 10);
 		if (*p != ',') {
 			return false;
 		}
@@ -459,8 +459,8 @@ static bool st67w611_emit_event(St67w611 *self, const uint8_t *frame, size_t len
 		/* Subscription state (CCCD) change: +BLE:NOTIFICATION:<status>,<srv>,<char> (status 0/1) or
 		 * +BLE:INDICATION:<status>,<srv>,<char> (status 0/1, or 2 = indication acknowledged). */
 		bool is_ind = (s[5] == 'I');
-		char *p = (char *)s + (is_ind ? 16 : 18);
-		unsigned long status = strtoul(p, &p, 10);
+		char *p = NULL;
+		unsigned long status = strtoul(s + (is_ind ? 16 : 18), &p, 10);
 		if (*p != ',') {
 			return false;
 		}
@@ -503,8 +503,8 @@ static bool st67w611_emit_event(St67w611 *self, const uint8_t *frame, size_t len
 		 * (and whenever the central changes them), reporting the values actually in effect. Interval is
 		 * in 1.25 ms units and timeout in 10 ms units; log them in milliseconds. Carries no application
 		 * event. */
-		char *p = (char *)s + 15;
-		strtoul(p, &p, 10);                            /* <idx> */
+		char *p = NULL;
+		strtoul(s + 15, &p, 10);                       /* <idx> */
 		unsigned long interval = (*p == ',') ? strtoul(p + 1, &p, 10) : 0;
 		unsigned long latency = (*p == ',') ? strtoul(p + 1, &p, 10) : 0;
 		unsigned long timeout = (*p == ',') ? strtoul(p + 1, &p, 10) : 0;
