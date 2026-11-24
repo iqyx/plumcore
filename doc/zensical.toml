@@ -48,6 +48,7 @@ nav = [
             "services/sensor-keypad.md",
             "services/shtc3.md",
             "services/si7006.md",
+            "services/st67w611.md",
             "services/tdk-accel.md",
         ] },
         { "DAQ and data processing services" = [
