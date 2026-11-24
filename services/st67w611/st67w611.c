@@ -1978,17 +1978,34 @@ static tcp_ret_t st67w611_link_connect(St67w611 *self, const char *host, uint16_
 
 		/* Authentication mode, bit 0 = client certificate, bit 1 = server verification with a CA. */
 		unsigned auth = ((params->cert != NULL) ? 1u : 0u) | ((params->ca != NULL) ? 2u : 0u);
-		snprintf(cmd, sizeof(cmd), "AT+CIPSSLCCONF=%u,%u,\"%s\",\"%s\",\"%s\"\r\n", id, auth,
-		         (params->cert != NULL) ? params->cert : "", (params->key != NULL) ? params->key : "",
-		         (params->ca != NULL) ? params->ca : "");
+		pos = (size_t)snprintf(cmd, sizeof(cmd), "AT+CIPSSLCCONF=%u,%u,", id, auth);
+		pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->cert != NULL) ? params->cert : "");
+		if (pos < sizeof(cmd) - 1) {
+			cmd[pos++] = ',';
+		}
+		pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->key != NULL) ? params->key : "");
+		if (pos < sizeof(cmd) - 1) {
+			cmd[pos++] = ',';
+		}
+		pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, (params->ca != NULL) ? params->ca : "");
+		if (pos >= sizeof(cmd) - 3) {
+			link->used = false;
+			return TCP_RET_BAD_ARG;
+		}
+		strcpy(cmd + pos, "\r\n");
 		if (st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
 			link->used = false;
 			return TCP_RET_BAD_ARG;
 		}
 	}
 
-	snprintf(cmd, sizeof(cmd), "AT+CIPSTART=%u,\"%s\",\"%s\",%u\r\n", id, (params != NULL) ? "SSL" : "TCP", host,
-	         (unsigned)port);
+	size_t pos = (size_t)snprintf(cmd, sizeof(cmd), "AT+CIPSTART=%u,\"%s\",", id, (params != NULL) ? "SSL" : "TCP");
+	pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, host);
+	if (pos >= sizeof(cmd) - 9) {
+		link->used = false;
+		return TCP_RET_BAD_ARG;
+	}
+	snprintf(cmd + pos, sizeof(cmd) - pos, ",%u\r\n", (unsigned)port);
 	st67w611_ret_t ret = st67w611_at(self, cmd, timeout_ms);
 	if (ret != ST67W611_RET_OK) {
 		if (ret == ST67W611_RET_TIMEOUT) {
