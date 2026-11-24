@@ -20,6 +20,7 @@
 #include <interfaces/wifi.h>
 #include <interfaces/tcp.h>
 #include <interfaces/tls.h>
+#include <interfaces/stream.h>
 #include <interfaces/conf.h>
 #include <configlib.h>
 
@@ -85,17 +86,19 @@ struct st67w611_char {
 	uint8_t value[ST67W611_CHAR_VALUE_MAX];
 };
 
-/* Driver-private per-connection context, the opaque session pointer of the Tcp and Tls interfaces. The index in
- * St67w611.links is the module link ID. */
+/* Driver-private per-connection context of the Tcp and Tls interfaces, carrying the Stream of the connection. The
+ * index in St67w611.links is the module link ID. */
 struct st67w611_link {
-	/* The slot is allocated to a session. */
+	/* The slot is allocated to a connection. */
 	bool used;
 	/* The connection is established, cleared when the module reports it closed. */
 	volatile bool connected;
 	/* Number of received bytes buffered in the module (passive receive mode), as reported by "+IPD". */
 	volatile size_t pending;
-	/* Notified when data is received or the connection closes, NULL if the user polls. */
+	/* Notified when data is received or the connection closes, NULL if the user blocks in read. */
 	Notify *notify;
+	/* Stream of the connection handed to the user, its parent is the driver instance. */
+	Stream stream;
 };
 
 typedef struct {

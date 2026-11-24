@@ -130,6 +130,8 @@
 #define ST67W611_LINK_POLL_MS     10
 #define ST67W611_RECVLEN_POLL_MS  1000
 
+#define ST67W611_STREAM_WAIT_MS   1000
+
 
 /* Kinds of deferred security action the receive task hands off to the security task. These run as blocking
  * AT commands, which the receive task cannot issue itself (it would deadlock waiting for its own response). */
@@ -1901,8 +1903,9 @@ static void st67w611_conf_init(St67w611 *self) {
  *
  * Both are served by the module's internal network stack and share its connection slots (link IDs). Received
  * data is kept in the module (passive receive mode) and read with AT+CIPRECVDATA when the user asks for it, the
- * "+IPD" reports only update the buffered length. The Tls methods use the Tcp implementation, tls_ret_t has
- * the same values in the same order as tcp_ret_t.
+ * "+IPD" reports only update the buffered length. Each link carries the Stream handed to the user for the open
+ * connection. The Tls methods use the Tcp implementation, tls_ret_t has the same values in the same order as
+ * tcp_ret_t.
  **********************************************************************************************************************/
 
 static const struct tcp_desc st67w611_tcp_desc = {
@@ -1914,13 +1917,14 @@ static const struct tls_desc st67w611_tls_desc = {
 };
 
 
-/* Validate an opaque session pointer, returning the link or NULL. */
-static struct st67w611_link *st67w611_link_get(St67w611 *self, void *session) {
-	struct st67w611_link *link = session;
-	if (link < &self->links[0] || link >= &self->links[ST67W611_LINK_COUNT] || !link->used) {
-		return NULL;
+/* Find the used link a Stream handed to the user belongs to, NULL if there is none. */
+static struct st67w611_link *st67w611_link_get(St67w611 *self, Stream *stream) {
+	for (size_t i = 0; i < ST67W611_LINK_COUNT; i++) {
+		if (&self->links[i].stream == stream) {
+			return self->links[i].used ? &self->links[i] : NULL;
+		}
 	}
-	return link;
+	return NULL;
 }
 
 
@@ -1931,9 +1935,9 @@ static unsigned st67w611_link_id(St67w611 *self, struct st67w611_link *link) {
 
 /* Allocate a link, configure TLS on it if @p params is not NULL and connect it. */
 static tcp_ret_t st67w611_link_connect(St67w611 *self, const char *host, uint16_t port,
-                                       const struct tls_params *params, Notify *notify, void **session,
+                                       const struct tls_params *params, Notify *notify, Stream **stream,
                                        uint32_t timeout_ms) {
-	if (host == NULL || session == NULL) {
+	if (host == NULL || stream == NULL) {
 		return TCP_RET_NULL;
 	}
 	if (strlen(host) > ST67W611_HOST_LEN_MAX) {
@@ -2019,16 +2023,16 @@ static tcp_ret_t st67w611_link_connect(St67w611 *self, const char *host, uint16_
 	}
 
 	link->connected = true;
-	*session = link;
+	*stream = &link->stream;
 	return TCP_RET_OK;
 }
 
 
-static tcp_ret_t st67w611_link_close(St67w611 *self, void *session) {
-	if (session == NULL) {
+static tcp_ret_t st67w611_link_close(St67w611 *self, Stream *stream) {
+	if (stream == NULL) {
 		return TCP_RET_NULL;
 	}
-	struct st67w611_link *link = st67w611_link_get(self, session);
+	struct st67w611_link *link = st67w611_link_get(self, stream);
 	if (link == NULL) {
 		return TCP_RET_BAD_ARG;
 	}
@@ -2045,42 +2049,42 @@ static tcp_ret_t st67w611_link_close(St67w611 *self, void *session) {
 }
 
 
-static tcp_ret_t st67w611_link_send(St67w611 *self, void *session, const void *buf, size_t len, uint32_t timeout_ms) {
-	struct st67w611_link *link = st67w611_link_get(self, session);
-	if (link == NULL) {
-		return TCP_RET_BAD_ARG;
-	}
-
-	TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+/* Send @p len bytes over the link in chunks the module accepts, @p written is the number of bytes sent. The
+ * timeout is checked between the chunks. */
+static stream_ret_t st67w611_link_send(St67w611 *self, struct st67w611_link *link, const void *buf, size_t len,
+                                       size_t *written, uint32_t timeout_ms) {
+	*written = 0;
+	TickType_t start = xTaskGetTickCount();
 	const uint8_t *data = buf;
 	while (len > 0) {
 		if (!link->connected) {
-			return TCP_RET_CLOSED;
-		}
-		if (xTaskGetTickCount() >= deadline) {
-			return TCP_RET_TIMEOUT;
+			return STREAM_RET_EOF;
 		}
 		size_t n = (len < ST67W611_SEND_MAX) ? len : ST67W611_SEND_MAX;
 		char cmd[ST67W611_CMD_MAX];
 		snprintf(cmd, sizeof(cmd), "AT+CIPSEND=%u,%u\r\n", st67w611_link_id(self, link), (unsigned)n);
 		st67w611_ret_t ret = st67w611_command_data(self, cmd, data, n);
 		if (ret == ST67W611_RET_TIMEOUT) {
-			return TCP_RET_TIMEOUT;
+			return STREAM_RET_TIMEOUT;
 		}
 		if (ret != ST67W611_RET_OK) {
-			return link->connected ? TCP_RET_FAILED : TCP_RET_CLOSED;
+			return link->connected ? STREAM_RET_FAILED : STREAM_RET_EOF;
 		}
 		self->wifi_status.tx_bytes += (uint32_t)n;
+		*written += n;
 		data += n;
 		len -= n;
+		if (len > 0 && xTaskGetTickCount() - start >= pdMS_TO_TICKS(timeout_ms)) {
+			return STREAM_RET_TIMEOUT;
+		}
 	}
-	return TCP_RET_OK;
+	return STREAM_RET_OK;
 }
 
 
 /* Read up to @p size buffered bytes of the link with AT+CIPRECVDATA into @p buf. */
-static tcp_ret_t st67w611_link_read(St67w611 *self, struct st67w611_link *link, void *buf, size_t size,
-                                    size_t *len) {
+static stream_ret_t st67w611_link_read(St67w611 *self, struct st67w611_link *link, void *buf, size_t size,
+                                       size_t *len) {
 	char cmd[ST67W611_CMD_MAX];
 	unsigned id = st67w611_link_id(self, link);
 	snprintf(cmd, sizeof(cmd), "AT+CIPRECVDATA=%u,%u\r\n", id, (unsigned)size);
@@ -2100,7 +2104,7 @@ static tcp_ret_t st67w611_link_read(St67w611 *self, struct st67w611_link *link, 
 	}
 	xSemaphoreGive(self->cmd_lock);
 
-	return (ret == ST67W611_RET_TIMEOUT) ? TCP_RET_TIMEOUT : TCP_RET_OK;
+	return (ret == ST67W611_RET_TIMEOUT) ? STREAM_RET_TIMEOUT : STREAM_RET_OK;
 }
 
 
@@ -2131,12 +2135,9 @@ static void st67w611_links_refresh(St67w611 *self) {
 }
 
 
-static tcp_ret_t st67w611_link_recv(St67w611 *self, void *session, void *buf, size_t size, size_t *len,
-                                    uint32_t timeout_ms) {
-	struct st67w611_link *link = st67w611_link_get(self, session);
-	if (link == NULL || buf == NULL || len == NULL || size == 0) {
-		return TCP_RET_BAD_ARG;
-	}
+/* Receive up to @p size bytes, waiting up to @p timeout_ms for at least one. */
+static stream_ret_t st67w611_link_recv(St67w611 *self, struct st67w611_link *link, void *buf, size_t size,
+                                       size_t *len, uint32_t timeout_ms) {
 	*len = 0;
 
 	TickType_t start = xTaskGetTickCount();
@@ -2146,23 +2147,23 @@ static tcp_ret_t st67w611_link_recv(St67w611 *self, void *session, void *buf, si
 			size_t n = link->pending;
 			n = (n < size) ? n : size;
 			n = (n < ST67W611_RECV_MAX) ? n : ST67W611_RECV_MAX;
-			tcp_ret_t ret = st67w611_link_read(self, link, buf, n, len);
-			if (ret != TCP_RET_OK) {
+			stream_ret_t ret = st67w611_link_read(self, link, buf, n, len);
+			if (ret != STREAM_RET_OK) {
 				return ret;
 			}
 			if (*len > 0) {
 				self->wifi_status.rx_bytes += (uint32_t)*len;
-				return TCP_RET_OK;
+				return STREAM_RET_OK;
 			}
 			continue;
 		}
 		if (!link->connected) {
-			return TCP_RET_EOF;
+			return STREAM_RET_EOF;
 		}
 
 		TickType_t now = xTaskGetTickCount();
 		if (now - start >= pdMS_TO_TICKS(timeout_ms)) {
-			return TCP_RET_TIMEOUT;
+			return STREAM_RET_TIMEOUT;
 		}
 		if (now - last_refresh >= pdMS_TO_TICKS(ST67W611_RECVLEN_POLL_MS)) {
 			st67w611_links_refresh(self);
@@ -2173,68 +2174,98 @@ static tcp_ret_t st67w611_link_recv(St67w611 *self, void *session, void *buf, si
 }
 
 
-static tcp_ret_t tcp_connect(Tcp *self, const char *host, uint16_t port, Notify *notify, void **session,
+static stream_ret_t link_stream_write_timeout(Stream *self, const void *buf, size_t size, size_t *written,
+                                              uint32_t timeout_ms) {
+	St67w611 *dev = (St67w611 *)self->parent;
+	struct st67w611_link *link = st67w611_link_get(dev, self);
+	if (link == NULL || buf == NULL || written == NULL) {
+		return STREAM_RET_FAILED;
+	}
+	return st67w611_link_send(dev, link, buf, size, written, timeout_ms);
+}
+
+
+static stream_ret_t link_stream_write(Stream *self, const void *buf, size_t size) {
+	const uint8_t *data = buf;
+	while (size > 0) {
+		size_t written = 0;
+		stream_ret_t ret = link_stream_write_timeout(self, data, size, &written, ST67W611_STREAM_WAIT_MS);
+		if (ret != STREAM_RET_OK && ret != STREAM_RET_TIMEOUT) {
+			return ret;
+		}
+		data += written;
+		size -= written;
+	}
+	return STREAM_RET_OK;
+}
+
+
+static stream_ret_t link_stream_read_timeout(Stream *self, void *buf, size_t size, size_t *read,
+                                             uint32_t timeout_ms) {
+	St67w611 *dev = (St67w611 *)self->parent;
+	struct st67w611_link *link = st67w611_link_get(dev, self);
+	if (link == NULL || buf == NULL || read == NULL || size == 0) {
+		return STREAM_RET_FAILED;
+	}
+	return st67w611_link_recv(dev, link, buf, size, read, timeout_ms);
+}
+
+
+static stream_ret_t link_stream_read(Stream *self, void *buf, size_t size, size_t *read) {
+	stream_ret_t ret;
+	do {
+		ret = link_stream_read_timeout(self, buf, size, read, ST67W611_STREAM_WAIT_MS);
+	} while (ret == STREAM_RET_TIMEOUT);
+	return ret;
+}
+
+
+static const struct stream_vmt link_stream_vmt = {
+	.write = link_stream_write,
+	.read = link_stream_read,
+	.write_timeout = link_stream_write_timeout,
+	.read_timeout = link_stream_read_timeout,
+};
+
+
+static tcp_ret_t tcp_connect(Tcp *self, const char *host, uint16_t port, Notify *notify, Stream **stream,
                              uint32_t timeout_ms) {
-	return st67w611_link_connect((St67w611 *)self->parent, host, port, NULL, notify, session, timeout_ms);
+	return st67w611_link_connect((St67w611 *)self->parent, host, port, NULL, notify, stream, timeout_ms);
 }
 
 
-static tcp_ret_t tcp_close(Tcp *self, void *session) {
-	return st67w611_link_close((St67w611 *)self->parent, session);
-}
-
-
-static tcp_ret_t tcp_send(Tcp *self, void *session, const void *buf, size_t len, uint32_t timeout_ms) {
-	return st67w611_link_send((St67w611 *)self->parent, session, buf, len, timeout_ms);
-}
-
-
-static tcp_ret_t tcp_recv(Tcp *self, void *session, void *buf, size_t size, size_t *len, uint32_t timeout_ms) {
-	return st67w611_link_recv((St67w611 *)self->parent, session, buf, size, len, timeout_ms);
+static tcp_ret_t tcp_close(Tcp *self, Stream *stream) {
+	return st67w611_link_close((St67w611 *)self->parent, stream);
 }
 
 
 static const struct tcp_vmt tcp_vmt = {
 	.connect = tcp_connect,
 	.close = tcp_close,
-	.send = tcp_send,
-	.recv = tcp_recv,
 };
 
 
 static tls_ret_t tls_connect(Tls *self, const char *host, uint16_t port, const struct tls_params *params,
-                             Notify *notify, void **session, uint32_t timeout_ms) {
+                             Notify *notify, Stream **stream, uint32_t timeout_ms) {
 	if (params == NULL) {
 		return TLS_RET_NULL;
 	}
 	if ((params->cert == NULL) != (params->key == NULL)) {
 		return TLS_RET_BAD_ARG;
 	}
-	return (tls_ret_t)st67w611_link_connect((St67w611 *)self->parent, host, port, params, notify, session,
+	return (tls_ret_t)st67w611_link_connect((St67w611 *)self->parent, host, port, params, notify, stream,
 	                                        timeout_ms);
 }
 
 
-static tls_ret_t tls_close(Tls *self, void *session) {
-	return (tls_ret_t)st67w611_link_close((St67w611 *)self->parent, session);
-}
-
-
-static tls_ret_t tls_send(Tls *self, void *session, const void *buf, size_t len, uint32_t timeout_ms) {
-	return (tls_ret_t)st67w611_link_send((St67w611 *)self->parent, session, buf, len, timeout_ms);
-}
-
-
-static tls_ret_t tls_recv(Tls *self, void *session, void *buf, size_t size, size_t *len, uint32_t timeout_ms) {
-	return (tls_ret_t)st67w611_link_recv((St67w611 *)self->parent, session, buf, size, len, timeout_ms);
+static tls_ret_t tls_close(Tls *self, Stream *stream) {
+	return (tls_ret_t)st67w611_link_close((St67w611 *)self->parent, stream);
 }
 
 
 static const struct tls_vmt tls_vmt = {
 	.connect = tls_connect,
 	.close = tls_close,
-	.send = tls_send,
-	.recv = tls_recv,
 };
 
 
@@ -2349,6 +2380,10 @@ st67w611_ret_t st67w611_init(St67w611 *self, const struct st67w611_conf *conf) {
 	self->tls.vmt = &tls_vmt;
 	self->tls.parent = self;
 	self->tls.desc = &st67w611_tls_desc;
+	for (size_t i = 0; i < ST67W611_LINK_COUNT; i++) {
+		self->links[i].stream.vmt = &link_stream_vmt;
+		self->links[i].stream.parent = self;
+	}
 	self->wifi_settings.security = WIFI_SECURITY_WPA2_PSK;
 	st67w611_conf_init(self);
 
