@@ -17,7 +17,12 @@
  *
  * The parameters of the latest firmware are parsed from it and its name is reported. With the GUI, a notification
  * with an indeterminate progress bar is shown while fetching and a failure is shown in a notification offering to
- * retry. The applet runs without a GUI, the result is logged. If the GUI is enabled
+ * retry.
+ *
+ * With the GUI, the applet then offers to update the device. The update volume (updater_conf.volume) is erased and
+ * the firmware image is downloaded and written to it as it is received, both showing their progress in a notification
+ * which cancels the update on ESC. The bootloader flashes the image from the volume after a reset, which is offered
+ * once the image is written. The applet runs without a GUI, the result is logged. If the GUI is enabled
  * (APPLET_UPDATER_GUI) and the applet is given a framebuffer, the result is also shown until ESC is pressed.
  *
  * The configuration tree is advertised as "applet updater", mounted at /applet/updater:
@@ -58,6 +63,7 @@
 #define UPDATER_LIST_LEN 1024
 #define UPDATER_TEXT_LEN 48
 #define UPDATER_NAME_LEN 96
+#define UPDATER_WRITE_BUF_LEN 512
 
 #if defined(CONFIG_APPLET_UPDATER_GUI)
 #define UPDATER_LINE_H 12
@@ -87,6 +93,14 @@ struct updater {
 	uint16_t h;
 	/* Number of status lines shown so far. */
 	uint16_t lines;
+
+	/* The user chose to exit, the applet does not wait for ESC. */
+	bool exit;
+
+	/* Progress notification of the update and the task setting cancel when ESC is pressed in it. */
+	struct notify_window *progress;
+	TaskHandle_t cancel_task;
+	volatile bool cancel;
 #endif
 };
 
@@ -129,6 +143,13 @@ static void updater_report(struct updater *self, uint8_t type, const char *text)
 }
 
 
+static void updater_report_latest(struct updater *self) {
+	char latest[UPDATER_NAME_LEN + 8];
+	snprintf(latest, sizeof(latest), "latest: %s", self->latest.name);
+	updater_report(self, LOG_TYPE_INFO, latest);
+}
+
+
 /* Parse the parameters of the latest firmware from the directory listing in @p list. */
 static applet_ret_t updater_parse_latest(struct updater *self, const char *list, size_t len) {
 	struct json_value root;
@@ -153,6 +174,40 @@ static applet_ret_t updater_parse_latest(struct updater *self, const char *list,
 }
 
 
+/* Send a GET request for @p target and wait for a successful response, failures are reported. The session is open
+ * on success. */
+static applet_ret_t updater_get(struct updater *self, Http *http, const char *target, void **session,
+                                struct http_response *response) {
+	char text[UPDATER_TEXT_LEN];
+	const struct http_request request = {
+		.method = HTTP_METHOD_GET,
+		.target = target,
+		.has_content_length = true,
+		.content_length = 0,
+	};
+	http_ret_t ret = http->vmt->open(http, &request, session, UPDATER_CONNECT_TIMEOUT_MS);
+	if (ret != HTTP_RET_OK) {
+		snprintf(text, sizeof(text), "cannot connect (%d)", (int)ret);
+		updater_report(self, LOG_TYPE_ERROR, text);
+		return APPLET_RET_FAILED;
+	}
+	ret = http->vmt->get_response(http, *session, response, UPDATER_RESPONSE_TIMEOUT_MS);
+	if (ret != HTTP_RET_OK) {
+		http->vmt->close(http, *session);
+		snprintf(text, sizeof(text), "no response (%d)", (int)ret);
+		updater_report(self, LOG_TYPE_ERROR, text);
+		return APPLET_RET_FAILED;
+	}
+	if (response->status != 200) {
+		http->vmt->close(http, *session);
+		snprintf(text, sizeof(text), "status %u", (unsigned)response->status);
+		updater_report(self, LOG_TYPE_ERROR, text);
+		return APPLET_RET_FAILED;
+	}
+	return APPLET_RET_OK;
+}
+
+
 /* Fetch the directory listing of the configured URL with @p http and find the latest firmware in it. */
 static applet_ret_t updater_fetch(struct updater *self, Http *http) {
 	char text[UPDATER_TEXT_LEN];
@@ -170,32 +225,9 @@ static applet_ret_t updater_fetch(struct updater *self, Http *http) {
 	      U_LOG_MODULE_PREFIX("fetching %s"), target);
 	updater_report(self, LOG_TYPE_INFO, "fetching...");
 
-	const struct http_request request = {
-		.method = HTTP_METHOD_GET,
-		.target = target,
-		.has_content_length = true,
-		.content_length = 0,
-	};
 	void *session = NULL;
-	http_ret_t ret = http->vmt->open(http, &request, &session, UPDATER_CONNECT_TIMEOUT_MS);
-	if (ret != HTTP_RET_OK) {
-		snprintf(text, sizeof(text), "cannot connect (%d)", (int)ret);
-		updater_report(self, LOG_TYPE_ERROR, text);
-		return APPLET_RET_FAILED;
-	}
-
 	struct http_response response = {0};
-	ret = http->vmt->get_response(http, session, &response, UPDATER_RESPONSE_TIMEOUT_MS);
-	if (ret != HTTP_RET_OK) {
-		http->vmt->close(http, session);
-		snprintf(text, sizeof(text), "no response (%d)", (int)ret);
-		updater_report(self, LOG_TYPE_ERROR, text);
-		return APPLET_RET_FAILED;
-	}
-	if (response.status != 200) {
-		http->vmt->close(http, session);
-		snprintf(text, sizeof(text), "status %u", (unsigned)response.status);
-		updater_report(self, LOG_TYPE_ERROR, text);
+	if (updater_get(self, http, target, &session, &response) != APPLET_RET_OK) {
 		return APPLET_RET_FAILED;
 	}
 
@@ -203,6 +235,7 @@ static applet_ret_t updater_fetch(struct updater *self, Http *http) {
 	char list[UPDATER_LIST_LEN];
 	size_t size = 0;
 	size_t len = 0;
+	http_ret_t ret = HTTP_RET_OK;
 	while (size < sizeof(list) &&
 	       (ret = http->vmt->read(http, session, list + size, sizeof(list) - size, &len, UPDATER_READ_TIMEOUT_MS)) ==
 	       HTTP_RET_OK) {
@@ -223,9 +256,7 @@ static applet_ret_t updater_fetch(struct updater *self, Http *http) {
 		updater_report(self, LOG_TYPE_ERROR, "no firmware found");
 		return APPLET_RET_FAILED;
 	}
-	char latest[UPDATER_NAME_LEN + 8];
-	snprintf(latest, sizeof(latest), "latest: %s", self->latest.name);
-	updater_report(self, LOG_TYPE_INFO, latest);
+	updater_report_latest(self);
 	return APPLET_RET_OK;
 }
 
@@ -269,7 +300,7 @@ static void updater_gui_free(struct updater *self) {
 		return;
 	}
 	updater_report(self, LOG_TYPE_INFO, "press ESC to exit");
-	while (true) {
+	while (!self->exit) {
 		enum event_type type = EV_TYPE_NONE;
 		enum event_code code = EV_CODE_NONE;
 		int32_t value = 0;
@@ -325,6 +356,274 @@ static applet_ret_t updater_check(struct updater *self, Http *http) {
 }
 
 
+#if defined(CONFIG_APPLET_UPDATER_GUI)
+/* Set cancel when ESC is pressed in the progress notification. Runs until deleted by updater_progress_close(). */
+static void updater_cancel_task(void *p) {
+	struct updater *self = (struct updater *)p;
+	Event *event = self->progress->event;
+
+	while (true) {
+		enum event_type type = EV_TYPE_NONE;
+		enum event_code code = EV_CODE_NONE;
+		int32_t value = 0;
+		if (event->vmt->listen(event, &type, &code, &value) == EV_RET_OK && type == EV_TYPE_KEY &&
+		    code == EV_KEY_ESC && value != 0) {
+			self->cancel = true;
+		}
+	}
+}
+
+
+/* Show a progress notification with @p message which cancels the update on ESC. */
+static applet_ret_t updater_progress_open(struct updater *self, const char *message) {
+	static const struct notify_window_action actions[] = {
+		{.key = EV_KEY_ESC, .label = "ESC: Cancel"},
+	};
+	if (gui_wm_fs_notify(updater_conf.gui, NOTIFY_WINDOW_ICON_INFO, message, actions,
+	                     sizeof(actions) / sizeof(actions[0]), 0, NULL, &self->progress) != GUI_WM_FS_RET_OK) {
+		updater_report(self, LOG_TYPE_ERROR, "cannot show the progress");
+		return APPLET_RET_FAILED;
+	}
+	if (xTaskCreate(updater_cancel_task, "updater-cancel", configMINIMAL_STACK_SIZE, (void *)self, 1,
+	                &self->cancel_task) != pdPASS) {
+		notify_window_close(self->progress);
+		self->progress = NULL;
+		updater_report(self, LOG_TYPE_ERROR, "cannot show the progress");
+		return APPLET_RET_FAILED;
+	}
+	return APPLET_RET_OK;
+}
+
+
+static void updater_progress_close(struct updater *self) {
+	if (self->progress == NULL) {
+		return;
+	}
+	/* The task blocks on the notification events forever, delete it before the notification goes away. */
+	vTaskDelete(self->cancel_task);
+	notify_window_close(self->progress);
+	self->progress = NULL;
+}
+
+
+/* Erase the whole update volume of @p volume_size bytes, block by block. */
+static applet_ret_t updater_erase(struct updater *self, size_t volume_size) {
+	Flash *flash = updater_conf.volume;
+
+	/* The smallest erasable block, the deepest level supporting the erase. */
+	size_t block = 0;
+	size_t size = 0;
+	flash_block_ops_t ops = 0;
+	for (uint32_t i = 1; flash->vmt->get_size(flash, i, &size, &ops) == FLASH_RET_OK; i++) {
+		if (ops & FLASH_BLOCK_OPS_ERASE) {
+			block = size;
+		}
+	}
+	if (block == 0 || volume_size % block != 0) {
+		updater_report(self, LOG_TYPE_ERROR, "cannot erase the volume");
+		return APPLET_RET_FAILED;
+	}
+
+	for (size_t addr = 0; addr < volume_size && !self->cancel; addr += block) {
+		if (flash->vmt->erase(flash, addr, block) != FLASH_RET_OK) {
+			updater_report(self, LOG_TYPE_ERROR, "erase failed");
+			return APPLET_RET_FAILED;
+		}
+		notify_window_set_progress(self->progress, (uint32_t)volume_size, (uint32_t)(addr + block));
+	}
+	return APPLET_RET_OK;
+}
+
+
+/* Download the latest firmware with @p http and write it to the update volume as it is received. A write must not
+ * cross a flash page of @p page bytes. */
+static applet_ret_t updater_download(struct updater *self, Http *http, size_t volume_size, size_t page) {
+	Flash *flash = updater_conf.volume;
+	char text[UPDATER_TEXT_LEN];
+
+	/* The listing gives the URL relative to the server, the scheme and the authority of the configured URL are
+	 * prepended to it. */
+	char target[2 * UPDATER_URL_LEN];
+	const char *url = updater_conf.settings.url;
+	const char *scheme_end = strstr(url, "://");
+	if (strstr(self->latest.url, "://") != NULL || scheme_end == NULL) {
+		snprintf(target, sizeof(target), "%s", self->latest.url);
+	} else {
+		size_t prefix = (size_t)(scheme_end + 3 - url) + strcspn(scheme_end + 3, "/?#");
+		snprintf(target, sizeof(target), "%.*s%s", (int)prefix, url, self->latest.url);
+	}
+	u_log((self->args->logger != NULL) ? self->args->logger : system_log, LOG_TYPE_INFO,
+	      U_LOG_MODULE_PREFIX("downloading %s"), target);
+
+	void *session = NULL;
+	struct http_response response = {0};
+	if (updater_get(self, http, target, &session, &response) != APPLET_RET_OK) {
+		return APPLET_RET_FAILED;
+	}
+	size_t total = response.has_content_length ? response.content_length : (size_t)self->latest.size;
+	if (total > volume_size) {
+		http->vmt->close(http, session);
+		updater_report(self, LOG_TYPE_ERROR, "the image is too large");
+		return APPLET_RET_FAILED;
+	}
+
+	/* The download progress is logged every 10 %. */
+	struct log_cbuffer *log = (self->args->logger != NULL) ? self->args->logger : system_log;
+	TickType_t start = xTaskGetTickCount();
+	size_t log_step = (total >= 10) ? total / 10 : 1;
+	size_t log_next = log_step;
+
+	uint8_t buf[UPDATER_WRITE_BUF_LEN];
+	size_t written = 0;
+	size_t len = 0;
+	http_ret_t ret = HTTP_RET_OK;
+	applet_ret_t result = APPLET_RET_OK;
+	while (!self->cancel &&
+	       (ret = http->vmt->read(http, session, buf, sizeof(buf), &len, UPDATER_READ_TIMEOUT_MS)) == HTTP_RET_OK) {
+		if (written + len > volume_size) {
+			updater_report(self, LOG_TYPE_ERROR, "the image is too large");
+			result = APPLET_RET_FAILED;
+			break;
+		}
+		for (size_t off = 0; off < len;) {
+			size_t n = page - written % page;
+			n = (n < len - off) ? n : len - off;
+			if (flash->vmt->write(flash, written, buf + off, n) != FLASH_RET_OK) {
+				updater_report(self, LOG_TYPE_ERROR, "flash write failed");
+				result = APPLET_RET_FAILED;
+				break;
+			}
+			written += n;
+			off += n;
+		}
+		if (result != APPLET_RET_OK) {
+			break;
+		}
+		notify_window_set_progress(self->progress, (uint32_t)total, (uint32_t)written);
+		if (written >= log_next) {
+			u_log(log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("downloaded %lu/%lu B in %lu ms"), (unsigned long)written,
+			      (unsigned long)total, (unsigned long)pdTICKS_TO_MS(xTaskGetTickCount() - start));
+			log_next += log_step;
+		}
+	}
+	http->vmt->close(http, session);
+	if (written < total || ret != HTTP_RET_EOF) {
+		u_log(log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("download stopped at %lu/%lu B after %lu ms (%d)"),
+		      (unsigned long)written, (unsigned long)total,
+		      (unsigned long)pdTICKS_TO_MS(xTaskGetTickCount() - start), (int)ret);
+	}
+	if (result != APPLET_RET_OK || self->cancel) {
+		return APPLET_RET_FAILED;
+	}
+	if (ret != HTTP_RET_EOF) {
+		snprintf(text, sizeof(text), "read failed (%d)", (int)ret);
+		updater_report(self, LOG_TYPE_ERROR, text);
+		return APPLET_RET_FAILED;
+	}
+	if (total > 0 && written != total) {
+		updater_report(self, LOG_TYPE_ERROR, "incomplete download");
+		return APPLET_RET_FAILED;
+	}
+	return APPLET_RET_OK;
+}
+
+
+/* Erase the update volume and write the latest firmware to it, each phase showing its progress. ESC cancels it. */
+static applet_ret_t updater_write(struct updater *self, Http *http) {
+	Flash *flash = updater_conf.volume;
+	self->cancel = false;
+
+	/* The volume size is level 0, the write unit is the level supporting the write. */
+	size_t volume_size = 0;
+	size_t page = 0;
+	size_t size = 0;
+	flash_block_ops_t ops = 0;
+	flash->vmt->get_size(flash, 0, &volume_size, &ops);
+	for (uint32_t i = 1; flash->vmt->get_size(flash, i, &size, &ops) == FLASH_RET_OK; i++) {
+		if (ops & FLASH_BLOCK_OPS_WRITE) {
+			page = size;
+		}
+	}
+	if (volume_size == 0 || page == 0) {
+		updater_report(self, LOG_TYPE_ERROR, "cannot use the update volume");
+		return APPLET_RET_FAILED;
+	}
+
+	if (updater_progress_open(self, "Erasing the update volume") != APPLET_RET_OK) {
+		return APPLET_RET_FAILED;
+	}
+	applet_ret_t ret = updater_erase(self, volume_size);
+	updater_progress_close(self);
+	if (ret != APPLET_RET_OK || self->cancel) {
+		return APPLET_RET_FAILED;
+	}
+
+	char message[UPDATER_NAME_LEN + 16];
+	snprintf(message, sizeof(message), "Downloading %s", self->latest.name);
+	if (updater_progress_open(self, message) != APPLET_RET_OK) {
+		return APPLET_RET_FAILED;
+	}
+	ret = updater_download(self, http, volume_size, page);
+	updater_progress_close(self);
+	return ret;
+}
+
+
+/* Offer to update the device to the latest firmware and reset it once the image is written. */
+static void updater_offer(struct updater *self, Http *http) {
+	/* The default action 0 (also returned while the device is off) is always the harmless one. */
+	static const struct notify_window_action ask[] = {
+		{.key = EV_KEY_ESC, .label = "ESC: No & Exit"},
+		{.key = EV_KEY_ENTER, .label = "OK: Update"},
+	};
+	char message[UPDATER_NAME_LEN + 48];
+	snprintf(message, sizeof(message), "Fetch %s and update the device?", self->latest.name);
+	size_t index = 0;
+	gui_wm_fs_notify(updater_conf.gui, NOTIFY_WINDOW_ICON_INFO, message, ask, sizeof(ask) / sizeof(ask[0]),
+	                 UINT32_MAX, &index, NULL);
+	if (index != 1) {
+		self->exit = true;
+		return;
+	}
+
+	applet_ret_t ret = updater_write(self, http);
+
+	/* Back to the applet screen showing the file. */
+	updater_gui_clear(self);
+	updater_report_latest(self);
+	if (self->cancel) {
+		updater_report(self, LOG_TYPE_INFO, "update cancelled");
+		return;
+	}
+	if (ret != APPLET_RET_OK) {
+		static const struct notify_window_action dismiss[] = {
+			{.key = EV_KEY_ESC, .label = "ESC: Dismiss"},
+		};
+		snprintf(message, sizeof(message), "Update failed: %s", self->error);
+		gui_wm_fs_notify(updater_conf.gui, NOTIFY_WINDOW_ICON_ERROR, message, dismiss,
+		                 sizeof(dismiss) / sizeof(dismiss[0]), UINT32_MAX, &index, NULL);
+		return;
+	}
+
+	updater_report(self, LOG_TYPE_INFO, "update written to the flash");
+	static const struct notify_window_action reset[] = {
+		{.key = EV_KEY_ESC, .label = "ESC: No & return"},
+		{.key = EV_KEY_ENTER, .label = "OK: Reset"},
+	};
+	index = 0;
+	gui_wm_fs_notify(updater_conf.gui, NOTIFY_WINDOW_ICON_INFO,
+	                 "The update was written to the flash. Reset the device now?", reset,
+	                 sizeof(reset) / sizeof(reset[0]), UINT32_MAX, &index, NULL);
+	if (index == 1) {
+		u_log((self->args->logger != NULL) ? self->args->logger : system_log, LOG_TYPE_INFO,
+		      U_LOG_MODULE_PREFIX("resetting to apply the update"));
+		vTaskDelay(pdMS_TO_TICKS(100));
+		platform_reset();
+	}
+}
+#endif
+
+
 static applet_ret_t updater_main(Applet *self, struct applet_args *args) {
 	(void)self;
 	struct updater u;
@@ -346,6 +645,11 @@ static applet_ret_t updater_main(Applet *self, struct applet_args *args) {
 		.password = updater_conf.settings.password,
 	}) == PROTO_HTTP_RET_OK && proto_http_start(&http) == PROTO_HTTP_RET_OK) {
 		ret = updater_check(&u, &http.http);
+#if defined(CONFIG_APPLET_UPDATER_GUI)
+		if (ret == APPLET_RET_OK && u.gui && updater_conf.gui != NULL && updater_conf.volume != NULL) {
+			updater_offer(&u, &http.http);
+		}
+#endif
 		proto_http_stop(&http);
 	} else {
 		updater_report(&u, LOG_TYPE_ERROR, "no Tcp or Tls interface");

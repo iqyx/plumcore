@@ -14,6 +14,7 @@
 #include <interfaces/applet.h>
 #include <interfaces/tcp.h>
 #include <interfaces/tls.h>
+#include <interfaces/flash.h>
 #include <configlib.h>
 #if defined(CONFIG_APPLET_UPDATER_GUI)
 #include <services/gui-wm-fs/gui-wm-fs.h>
@@ -31,6 +32,10 @@ struct updater_conf {
 		Tcp *tcp;
 		Tls *tls;
 	} net;
+
+	/* Volume the firmware image is written to, the update volume the bootloader flashes the image from. Set by the
+	 * port before the applet is advertised, NULL if the device cannot be updated. */
+	Flash *volume;
 
 #if defined(CONFIG_APPLET_UPDATER_GUI)
 	/* Window manager showing the progress and the error notifications, set by the application once the GUI is up.
