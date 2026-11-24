@@ -15,7 +15,9 @@
  *
  *     {"entries":[{"mime":"...","mtime":"...","name":"...","size":61380,"type":"file","url":"..."}],"path":"..."}
  *
- * The parameters of the latest firmware are parsed from it and its name is reported. The applet runs without a GUI, the result is logged. If the GUI is enabled
+ * The parameters of the latest firmware are parsed from it and its name is reported. With the GUI, a notification
+ * with an indeterminate progress bar is shown while fetching and a failure is shown in a notification offering to
+ * retry. The applet runs without a GUI, the result is logged. If the GUI is enabled
  * (APPLET_UPDATER_GUI) and the applet is given a framebuffer, the result is also shown until ESC is pressed.
  *
  * The configuration tree is advertised as "applet updater", mounted at /applet/updater:
@@ -67,6 +69,9 @@ struct updater_conf updater_conf;
 struct updater {
 	struct applet_args *args;
 
+	/* The last reported error. */
+	char error[UPDATER_TEXT_LEN];
+
 	/* Parameters of the latest firmware on the server, the URL is relative to the server. */
 	struct {
 		char name[UPDATER_NAME_LEN];
@@ -89,6 +94,9 @@ struct updater {
 /* Report a status line, it is logged and shown on the screen if the GUI is active. */
 static void updater_report(struct updater *self, uint8_t type, const char *text) {
 	u_log((self->args->logger != NULL) ? self->args->logger : system_log, type, U_LOG_MODULE_PREFIX("%s"), text);
+	if (type == LOG_TYPE_ERROR) {
+		snprintf(self->error, sizeof(self->error), "%s", text);
+	}
 
 #if defined(CONFIG_APPLET_UPDATER_GUI)
 	if (!self->gui) {
@@ -237,13 +245,21 @@ static void updater_gui_init(struct updater *self) {
 	if (args->window != NULL) {
 		args->window->vmt->set_title(args->window, "Updater");
 	}
+}
 
+
+/* Clear the window, the status lines start from the top again. */
+static void updater_gui_clear(struct updater *self) {
+	if (!self->gui) {
+		return;
+	}
 	Painter *painter = &self->painter.painter;
 	painter->vmt->begin(painter);
 	painter->vmt->set_pen(painter, 0xff000000, 1);
 	painter->vmt->set_brush(painter, 0xff000000);
 	painter->vmt->rect(painter, 0, 0, self->w, self->h);
 	painter->vmt->end(painter);
+	self->lines = 0;
 }
 
 
@@ -267,6 +283,48 @@ static void updater_gui_free(struct updater *self) {
 #endif
 
 
+/* Fetch the listing. With the GUI, a progress notification is shown meanwhile and a failure is shown in a notification
+ * offering to retry. */
+static applet_ret_t updater_check(struct updater *self, Http *http) {
+	while (true) {
+#if defined(CONFIG_APPLET_UPDATER_GUI)
+		bool notify = self->gui && updater_conf.gui != NULL;
+		struct notify_window *progress = NULL;
+		if (notify) {
+			updater_gui_clear(self);
+			gui_wm_fs_notify(updater_conf.gui, NOTIFY_WINDOW_ICON_INFO, "Checking for updates", NULL, 0, 0, NULL,
+			                 &progress);
+		}
+#endif
+
+		applet_ret_t ret = updater_fetch(self, http);
+
+#if defined(CONFIG_APPLET_UPDATER_GUI)
+		if (progress != NULL) {
+			notify_window_close(progress);
+		}
+		if (ret != APPLET_RET_OK && notify) {
+			/* The default action 0 (also returned while the device is off) must not retry. */
+			static const struct notify_window_action actions[] = {
+				{.key = EV_KEY_ESC, .label = "ESC: Dismiss"},
+				{.key = EV_KEY_ENTER, .label = "OK: Retry"},
+			};
+			char message[UPDATER_TEXT_LEN + 24];
+			snprintf(message, sizeof(message), "Update check failed: %s", self->error);
+			/* UINT32_MAX ms is the maximal delay, the notification waits for the user. */
+			size_t index = 0;
+			gui_wm_fs_notify(updater_conf.gui, NOTIFY_WINDOW_ICON_ERROR, message, actions,
+			                 sizeof(actions) / sizeof(actions[0]), UINT32_MAX, &index, NULL);
+			if (index == 1) {
+				continue;
+			}
+		}
+#endif
+		return ret;
+	}
+}
+
+
 static applet_ret_t updater_main(Applet *self, struct applet_args *args) {
 	(void)self;
 	struct updater u;
@@ -275,6 +333,7 @@ static applet_ret_t updater_main(Applet *self, struct applet_args *args) {
 
 #if defined(CONFIG_APPLET_UPDATER_GUI)
 	updater_gui_init(&u);
+	updater_gui_clear(&u);
 #endif
 
 	/* The HTTP client lives only while the applet runs. */
@@ -286,7 +345,7 @@ static applet_ret_t updater_main(Applet *self, struct applet_args *args) {
 		.username = (updater_conf.settings.username[0] != '\0') ? updater_conf.settings.username : NULL,
 		.password = updater_conf.settings.password,
 	}) == PROTO_HTTP_RET_OK && proto_http_start(&http) == PROTO_HTTP_RET_OK) {
-		ret = updater_fetch(&u, &http.http);
+		ret = updater_check(&u, &http.http);
 		proto_http_stop(&http);
 	} else {
 		updater_report(&u, LOG_TYPE_ERROR, "no Tcp or Tls interface");

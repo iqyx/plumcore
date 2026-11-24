@@ -5,4 +5,4 @@ config APPLET_UPDATER
 
 config APPLET_UPDATER_GUI
 	bool "Graphical user interface of the updater applet"
-	depends on APPLET_UPDATER && SERVICE_FB_PAINTER
+	depends on APPLET_UPDATER && SERVICE_FB_PAINTER && SERVICE_GUI_WM_FS

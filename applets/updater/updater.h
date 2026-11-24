@@ -15,6 +15,9 @@
 #include <interfaces/tcp.h>
 #include <interfaces/tls.h>
 #include <configlib.h>
+#if defined(CONFIG_APPLET_UPDATER_GUI)
+#include <services/gui-wm-fs/gui-wm-fs.h>
+#endif
 
 #define UPDATER_URL_LEN 192
 #define UPDATER_CRED_LEN 64
@@ -28,6 +31,12 @@ struct updater_conf {
 		Tcp *tcp;
 		Tls *tls;
 	} net;
+
+#if defined(CONFIG_APPLET_UPDATER_GUI)
+	/* Window manager showing the progress and the error notifications, set by the application once the GUI is up.
+	 * NULL if there is none. */
+	GuiWmFs *gui;
+#endif
 
 	struct {
 		ConfiglibValue updater;

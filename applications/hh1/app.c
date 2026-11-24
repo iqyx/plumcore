@@ -16,6 +16,10 @@
 #include <interfaces/led-sequences.h>
 #include "app.h"
 
+#if defined(CONFIG_APPLET_UPDATER_GUI)
+	#include <applets/updater/updater.h>
+#endif
+
 #define MODULE_NAME "hh1"
 
 #define APP_BATTERY_W 28
@@ -225,6 +229,11 @@ static app_ret_t app_setup_ui(App *self) {
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)&self->gui.conf_tree.gui.conf, "service gui");
 	iservicelocator_add(locator, ISERVICELOCATOR_TYPE_CONF, (Interface *)&self->gui.launcher.conf_tree.launcher.conf,
 		"service launcher");
+
+	#if defined(CONFIG_APPLET_UPDATER_GUI)
+		/* The updater applet shows its notifications through the window manager. */
+		updater_conf.gui = &self->gui;
+	#endif
 
 	return APP_RET_OK;
 }
