@@ -112,6 +112,8 @@
 /* Joining a network takes up to 15 s in the module (its default join timeout). */
 #define ST67W611_WIFI_JOIN_TIMEOUT_MS 20000
 #define ST67W611_WIFI_RETRY_MS        10000
+#define ST67W611_COEX_WIFI_MS         70
+#define ST67W611_COEX_DELAY_MS        2000
 
 /* Channel of the access point created in WIFI_MODE_AP. */
 #define ST67W611_AP_CHANNEL       1
@@ -159,6 +161,7 @@ struct st67w611_sec_msg {
 
 static void st67w611_wifi_apply(St67w611 *self);
 static void st67w611_time_sync(St67w611 *self);
+static void st67w611_coex_enable(St67w611 *self);
 
 
 /* SPI_RDY is asserted high by the module. Poll it until it reaches the requested state or the
@@ -633,6 +636,8 @@ static bool st67w611_wifi_report(St67w611 *self, const char *s) {
 		/* Configure SNTP and read the time in the security task, it takes blocking commands. */
 		self->time_sntp_cfg = false;
 		self->time_sync_due = true;
+		self->coex_due = true;
+		self->coex_attempt = xTaskGetTickCount();
 		st67w611_wifi_emit(self, WIFI_EVENT_GOT_IP, 0);
 	} else if (st67w611_is_word(s, "DISCONNECTED")) {
 		self->wifi_status.state = WIFI_STATE_IDLE;
@@ -1086,6 +1091,15 @@ static void st67w611_sec_task(void *p) {
 		    xTaskGetTickCount() - self->join_attempt >= pdMS_TO_TICKS(ST67W611_WIFI_RETRY_MS)) {
 			self->join_attempt = xTaskGetTickCount();
 			st67w611_wifi_apply(self);
+		}
+
+		/* Enable the coexistence shortly after the station got its address, the module is busy right after
+		 * that. Tried once per connection, firmware older than 2.0.106 does not support it. */
+		if (self->coex_due && self->wifi_settings.mode == WIFI_MODE_STA &&
+		    self->wifi_status.state == WIFI_STATE_UP &&
+		    xTaskGetTickCount() - self->coex_attempt >= pdMS_TO_TICKS(ST67W611_COEX_DELAY_MS)) {
+			self->coex_due = false;
+			st67w611_coex_enable(self);
 		}
 
 		/* Read the SNTP time when the station got its address, then periodically. */
@@ -1720,6 +1734,24 @@ static void st67w611_wifi_join(St67w611 *self) {
 		}
 		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot join '%s'"), self->wifi_settings.ssid);
 	}
+}
+
+
+/* Share the radio between Wi-Fi and BLE. Without it heavy Wi-Fi traffic competes with BLE and the station gets
+ * disconnected. Coexistence needs a station which is fully up, the duty cycle is set first. */
+static void st67w611_coex_enable(St67w611 *self) {
+	char cmd[ST67W611_CMD_MAX];
+	snprintf(cmd, sizeof(cmd), "AT+CWCOEXDUTY=%u\r\n", (unsigned)ST67W611_COEX_WIFI_MS);
+	if (st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot set the coexistence duty cycle"));
+		return;
+	}
+	if (st67w611_at(self, "AT+CWCOEXEN=1\r\n", ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot enable Wi-Fi/BLE coexistence"));
+		return;
+	}
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Wi-Fi/BLE coexistence enabled, Wi-Fi %u ms"),
+	      (unsigned)ST67W611_COEX_WIFI_MS);
 }
 
 

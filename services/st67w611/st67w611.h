@@ -148,6 +148,11 @@ typedef struct {
 	bool time_sntp_cfg;
 	TickType_t time_attempt;
 
+	/* Wi-Fi/BLE coexistence is enabled by the security task shortly after coex_attempt, when the station got its
+	 * address. */
+	volatile bool coex_due;
+	TickType_t coex_attempt;
+
 	/* Time of the last station join attempt, the configuration of a station which is not connected is applied
 	 * again after the retry interval. */
 	TickType_t join_attempt;
