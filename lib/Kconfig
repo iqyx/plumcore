@@ -111,6 +111,10 @@ config LIB_PLUMCORE_CONFIGLIB
 	bool "plumCore configuration library/helpers"
 	default y
 
+config LIB_PLUMCORE_JSON
+	bool "plumCore minimal JSON pull parser"
+	default n
+
 config LIB_XZ_EMBEDDED
 	bool "xz-embedded LZMA decompressor"
 	default n
