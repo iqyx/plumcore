@@ -133,6 +133,14 @@
 
 #define ST67W611_STREAM_WAIT_MS   1000
 
+/* The SNTP time is read again after the resync interval once it is known, or after the retry interval while the
+ * module has not obtained it yet. A module time before the valid year means it was not obtained yet. */
+#define ST67W611_TIME_RESYNC_MS   3600000
+#define ST67W611_TIME_RETRY_MS    5000
+#define ST67W611_TIME_EDGE_MS     1500
+#define ST67W611_TIME_VALID_YEAR  2025
+#define ST67W611_TIME_RESP_MAX    96
+
 
 /* Kinds of deferred security action the receive task hands off to the security task. These run as blocking
  * AT commands, which the receive task cannot issue itself (it would deadlock waiting for its own response). */
@@ -149,6 +157,7 @@ struct st67w611_sec_msg {
 };
 
 static void st67w611_wifi_apply(St67w611 *self);
+static void st67w611_time_sync(St67w611 *self);
 
 
 /* SPI_RDY is asserted high by the module. Poll it until it reaches the requested state or the
@@ -620,6 +629,9 @@ static bool st67w611_wifi_report(St67w611 *self, const char *s) {
 		st67w611_wifi_emit(self, WIFI_EVENT_CONNECTED, 0);
 	} else if (st67w611_is_word(s, "GOTIP")) {
 		self->wifi_status.state = WIFI_STATE_UP;
+		/* Configure SNTP and read the time in the security task, it takes blocking commands. */
+		self->time_sntp_cfg = false;
+		self->time_sync_due = true;
 		st67w611_wifi_emit(self, WIFI_EVENT_GOT_IP, 0);
 	} else if (st67w611_is_word(s, "DISCONNECTED")) {
 		self->wifi_status.state = WIFI_STATE_IDLE;
@@ -1064,6 +1076,15 @@ static void st67w611_sec_task(void *p) {
 			/* The module is powered down; do nothing until woken. */
 			vTaskDelay(pdMS_TO_TICKS(ST67W611_SLEEP_POLL_MS));
 			continue;
+		}
+
+		/* Read the SNTP time when the station got its address, then periodically. */
+		if (self->wifi_settings.mode == WIFI_MODE_STA && self->wifi_status.state == WIFI_STATE_UP &&
+		    (self->time_sync_due || xTaskGetTickCount() - self->time_attempt >=
+		     pdMS_TO_TICKS(self->time_synced ? ST67W611_TIME_RESYNC_MS : ST67W611_TIME_RETRY_MS))) {
+			self->time_sync_due = false;
+			self->time_attempt = xTaskGetTickCount();
+			st67w611_time_sync(self);
 		}
 
 		struct st67w611_sec_msg msg;
@@ -1900,6 +1921,123 @@ static void st67w611_conf_init(St67w611 *self) {
 
 
 /**********************************************************************************************************************
+ * SNTP time (interfaces/clock.h)
+ *
+ * The module obtains the time over SNTP and reports it with a 1 s resolution. The driver finds the moment the
+ * module time ticks over to the next second and remembers it together with the MCU tick, the Clock interpolates
+ * between the resyncs with the tick. The precision is given by the duration of a single AT command.
+ **********************************************************************************************************************/
+
+/* Days since 1970-01-01 of a proleptic Gregorian date. */
+static int32_t st67w611_days_from_civil(int32_t y, uint32_t m, uint32_t d) {
+	y -= (m <= 2) ? 1 : 0;
+	int32_t era = ((y >= 0) ? y : y - 399) / 400;
+	uint32_t yoe = (uint32_t)(y - era * 400);
+	uint32_t doy = (153 * ((m > 2) ? m - 3 : m + 9) + 2) / 5 + d - 1;
+	uint32_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+	return era * 146097 + (int32_t)doe - 719468;
+}
+
+
+/* Read the module time, "+CIPSNTPTIME:Tue Oct 19 17:47:56 2021" in UTC. Returns false if it cannot be read or
+ * the module has not obtained the time yet. */
+static bool st67w611_time_read(St67w611 *self, time_t *time) {
+	char resp[ST67W611_TIME_RESP_MAX];
+	if (st67w611_command(self, "AT+CIPSNTPTIME?\r\n", resp, sizeof(resp), NULL) != ST67W611_RET_OK) {
+		return false;
+	}
+	const char *s = strstr(resp, "+CIPSNTPTIME:");
+	if (s == NULL) {
+		return false;
+	}
+	char mon[4] = {0};
+	int day = 0;
+	int hour = 0;
+	int min = 0;
+	int sec = 0;
+	int year = 0;
+	if (sscanf(s + 13, "%*3s %3s %d %d:%d:%d %d", mon, &day, &hour, &min, &sec, &year) != 6 ||
+	    year < ST67W611_TIME_VALID_YEAR) {
+		return false;
+	}
+	static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+	const char *m = strstr(months, mon);
+	if (m == NULL || (m - months) % 3 != 0) {
+		return false;
+	}
+	*time = (time_t)st67w611_days_from_civil(year, (uint32_t)((m - months) / 3 + 1), (uint32_t)day) * 86400 +
+	        hour * 3600 + min * 60 + sec;
+	return true;
+}
+
+
+/* Read the module time and align it with the MCU tick, run by the security task. */
+static void st67w611_time_sync(St67w611 *self) {
+	if (!self->time_sntp_cfg) {
+		/* Enable SNTP with the module's default servers, the time is reported in UTC. */
+		if (st67w611_at(self, "AT+CIPSNTPCFG=1,0\r\n", ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot configure SNTP"));
+			return;
+		}
+		self->time_sntp_cfg = true;
+	}
+
+	time_t first = 0;
+	if (!st67w611_time_read(self, &first)) {
+		return;
+	}
+
+	/* Read the time until it changes, the tick at the start of that read is the beginning of the new second. */
+	TickType_t start = xTaskGetTickCount();
+	while (xTaskGetTickCount() - start < pdMS_TO_TICKS(ST67W611_TIME_EDGE_MS)) {
+		TickType_t tick = xTaskGetTickCount();
+		time_t time = 0;
+		if (!st67w611_time_read(self, &time)) {
+			return;
+		}
+		if (time != first) {
+			bool was_synced = self->time_synced;
+			taskENTER_CRITICAL();
+			self->time_sec = time;
+			self->time_tick = tick;
+			self->time_synced = true;
+			taskEXIT_CRITICAL();
+			if (!was_synced) {
+				u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("SNTP time obtained, %lu s"),
+				      (unsigned long)time);
+			}
+			return;
+		}
+	}
+}
+
+
+static clock_ret_t sntp_clock_get(Clock *self, struct timespec *time) {
+	St67w611 *dev = (St67w611 *)self->parent;
+	if (time == NULL) {
+		return CLOCK_RET_BAD_ARG;
+	}
+	if (!dev->time_synced) {
+		return CLOCK_RET_FAILED;
+	}
+	taskENTER_CRITICAL();
+	time_t sec = dev->time_sec;
+	TickType_t tick = dev->time_tick;
+	taskEXIT_CRITICAL();
+
+	uint32_t elapsed_ms = (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount() - tick);
+	time->tv_sec = sec + (time_t)(elapsed_ms / 1000);
+	time->tv_nsec = (long)(elapsed_ms % 1000) * 1000000L;
+	return CLOCK_RET_OK;
+}
+
+
+static const struct clock_vmt sntp_clock_vmt = {
+	.get = sntp_clock_get,
+};
+
+
+/**********************************************************************************************************************
  * Generic TCP and TLS connection interfaces (interfaces/tcp.h, interfaces/tls.h)
  *
  * Both are served by the module's internal network stack and share its connection slots (link IDs). Received
@@ -1946,6 +2084,11 @@ static tcp_ret_t st67w611_link_connect(St67w611 *self, const char *host, uint16_
 		return TCP_RET_BAD_ARG;
 	}
 	if (self->wifi_status.state != WIFI_STATE_UP) {
+		return TCP_RET_BAD_STATE;
+	}
+	if (params != NULL && params->ca != NULL && !self->time_synced) {
+		/* The module checks the validity period of the server certificate against its time. */
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("no SNTP time yet, cannot verify the server"));
 		return TCP_RET_BAD_STATE;
 	}
 
@@ -2392,6 +2535,9 @@ st67w611_ret_t st67w611_init(St67w611 *self, const struct st67w611_conf *conf) {
 		self->links[i].stream.vmt = &link_stream_vmt;
 		self->links[i].stream.parent = self;
 	}
+	self->clock.vmt = &sntp_clock_vmt;
+	self->clock.parent = self;
+	self->clock.name = "sntp";
 	self->wifi_settings.security = WIFI_SECURITY_WPA2_PSK;
 	st67w611_conf_init(self);
 

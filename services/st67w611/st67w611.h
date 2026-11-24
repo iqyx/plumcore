@@ -21,6 +21,7 @@
 #include <interfaces/tcp.h>
 #include <interfaces/tls.h>
 #include <interfaces/stream.h>
+#include <interfaces/clock.h>
 #include <interfaces/conf.h>
 #include <configlib.h>
 
@@ -135,6 +136,17 @@ typedef struct {
 
 	/* TCP/TLS connection slots. */
 	struct st67w611_link links[ST67W611_LINK_COUNT];
+
+	/* Clock providing the SNTP time obtained by the module. time_sec is the UTC time at the MCU tick time_tick,
+	 * valid once time_synced is set. The security task reads the time when time_sync_due is set (the station got
+	 * its address, SNTP is configured again as time_sntp_cfg is cleared) and periodically after time_attempt. */
+	Clock clock;
+	volatile bool time_synced;
+	time_t time_sec;
+	TickType_t time_tick;
+	volatile bool time_sync_due;
+	bool time_sntp_cfg;
+	TickType_t time_attempt;
 
 	/* Configuration subtree with the Wi-Fi settings. */
 	struct {
