@@ -24,6 +24,17 @@ void platform_init(void) {
 }
 
 
+void platform_reset(void) {
+	/* SCB->AIRCR with the VECTKEY and SYSRESETREQ set. */
+	__asm volatile ("dsb" ::: "memory");
+	*(volatile uint32_t *)0xe000ed0c = 0x05fa0004;
+	__asm volatile ("dsb" ::: "memory");
+	while (1) {
+		;
+	}
+}
+
+
 void vApplicationMallocFailedHook(void);
 void vApplicationMallocFailedHook(void) {
 	/* This error should not cause system malfunction. The service or module must

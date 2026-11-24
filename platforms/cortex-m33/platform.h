@@ -11,3 +11,6 @@
 
 void platform_early_init(void);
 void platform_init(void);
+
+/* Reset the whole system, does not return. */
+void platform_reset(void);
