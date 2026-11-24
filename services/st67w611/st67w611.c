@@ -2356,6 +2356,7 @@ static stream_ret_t st67w611_link_recv(St67w611 *self, struct st67w611_link *lin
 
 	TickType_t start = xTaskGetTickCount();
 	TickType_t last_refresh = start;
+	bool refreshed = false;
 	while (true) {
 		if (link->pending > 0) {
 			size_t n = link->pending;
@@ -2375,7 +2376,17 @@ static stream_ret_t st67w611_link_recv(St67w611 *self, struct st67w611_link *lin
 			return STREAM_RET_EOF;
 		}
 
+		/* A "+IPD" report arriving while AT+CIPRECVDATA runs is not parsed (the response carries raw data), so
+		 * more data may be buffered in the module although none is pending. Resynchronize the buffered length
+		 * right away when the pending data is exhausted, a sustained transfer would stall until the periodic
+		 * resynchronization otherwise. */
 		TickType_t now = xTaskGetTickCount();
+		if (!refreshed) {
+			st67w611_links_refresh(self);
+			last_refresh = now;
+			refreshed = true;
+			continue;
+		}
 		if (now - start >= pdMS_TO_TICKS(timeout_ms)) {
 			return STREAM_RET_TIMEOUT;
 		}
