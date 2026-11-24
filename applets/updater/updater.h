@@ -17,6 +17,7 @@
 #include <configlib.h>
 
 #define UPDATER_URL_LEN 192
+#define UPDATER_CRED_LEN 64
 
 /* Applet static configuration, its root exposed as updater.conf. It outlives the applet instances, so the values
  * persist between runs. */
@@ -31,11 +32,16 @@ struct updater_conf {
 	struct {
 		ConfiglibValue updater;
 		ConfiglibValue url;
+		ConfiglibValue username;
+		ConfiglibValue password;
 	} tree;
 
 	struct {
 		/* URL the updates are fetched from (http or https). */
 		char url[UPDATER_URL_LEN];
+		/* Credentials of the HTTP Basic authentication, used if the server asks for them. Empty username = none. */
+		char username[UPDATER_CRED_LEN];
+		char password[UPDATER_CRED_LEN];
 	} settings;
 };
 

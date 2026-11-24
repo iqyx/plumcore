@@ -20,7 +20,9 @@
  *
  * The configuration tree is advertised as "applet updater", mounted at /applet/updater:
  *
- *     /applet/updater/url    URL the updates are fetched from (http or https)
+ *     /applet/updater/url         URL the updates are fetched from (http or https)
+ *     /applet/updater/username    user name of the HTTP Basic authentication, empty = none
+ *     /applet/updater/password    password of the HTTP Basic authentication
  */
 
 #include <stdint.h>
@@ -281,6 +283,8 @@ static applet_ret_t updater_main(Applet *self, struct applet_args *args) {
 	if (proto_http_init(&http, &(struct proto_http_conf) {
 		.tcp = updater_conf.net.tcp,
 		.tls = updater_conf.net.tls,
+		.username = (updater_conf.settings.username[0] != '\0') ? updater_conf.settings.username : NULL,
+		.password = updater_conf.settings.password,
 	}) == PROTO_HTTP_RET_OK && proto_http_start(&http) == PROTO_HTTP_RET_OK) {
 		ret = updater_fetch(&u, &http.http);
 		proto_http_stop(&http);
@@ -299,8 +303,10 @@ static applet_ret_t updater_main(Applet *self, struct applet_args *args) {
 applet_ret_t updater_conf_init(Applet *self) {
 	(void)self;
 
-	/* No URL by default, it is set by the stored configuration. */
+	/* No URL and no credentials by default, they are set by the stored configuration. */
 	updater_conf.settings.url[0] = '\0';
+	updater_conf.settings.username[0] = '\0';
+	updater_conf.settings.password[0] = '\0';
 
 	configlib_init_map(&updater_conf.tree.updater, "updater", NULL, CONF_SUBTREE);
 
@@ -313,6 +319,28 @@ applet_ret_t updater_conf_init(Applet *self) {
 	configlib_set_description(&updater_conf.tree.url, "Update URL",
 		"URL the updates are fetched from, http:// or https://.");
 	updater_conf.tree.url.flags = CONF_READ | CONF_WRITE;
+
+	configlib_init(&updater_conf.tree.username, "username");
+	configlib_map_string(&updater_conf.tree.username, updater_conf.settings.username,
+	                     sizeof(updater_conf.settings.username));
+	configlib_append(&updater_conf.tree.username, &updater_conf.tree.url, CONF_DIR_NEXT);
+	configlib_set_constraint(&updater_conf.tree.username, (union conf_constraint) {
+		.str = {.max_len = UPDATER_CRED_LEN - 1},
+	});
+	configlib_set_description(&updater_conf.tree.username, "User name",
+		"User name of the HTTP Basic authentication, used if the server asks for it. Empty for none.");
+	updater_conf.tree.username.flags = CONF_READ | CONF_WRITE;
+
+	configlib_init(&updater_conf.tree.password, "password");
+	configlib_map_string(&updater_conf.tree.password, updater_conf.settings.password,
+	                     sizeof(updater_conf.settings.password));
+	configlib_append(&updater_conf.tree.password, &updater_conf.tree.username, CONF_DIR_NEXT);
+	configlib_set_constraint(&updater_conf.tree.password, (union conf_constraint) {
+		.str = {.max_len = UPDATER_CRED_LEN - 1},
+	});
+	configlib_set_description(&updater_conf.tree.password, "Password",
+		"Password of the HTTP Basic authentication.");
+	updater_conf.tree.password.flags = CONF_READ | CONF_WRITE;
 
 	return APPLET_RET_OK;
 }
