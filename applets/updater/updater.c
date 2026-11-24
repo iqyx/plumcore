@@ -9,8 +9,13 @@
 /**
  * @file
  *
- * Fetches the configured URL with its own HTTP client running over the Tcp or Tls interface given by the port
- * (updater_conf.net) and reports the response status and the size of the fetched content. The applet runs without a GUI, the result is logged. If the GUI is enabled
+ * Fetches the directory listing of the configured URL with its own HTTP client running over the Tcp or Tls
+ * interface given by the port (updater_conf.net). The query of the configured URL is replaced by "?list&latest", the
+ * server then returns the latest file of the directory as JSON:
+ *
+ *     {"entries":[{"mime":"...","mtime":"...","name":"...","size":61380,"type":"file","url":"..."}],"path":"..."}
+ *
+ * The parameters of the latest firmware are parsed from it and its name is reported. The applet runs without a GUI, the result is logged. If the GUI is enabled
  * (APPLET_UPDATER_GUI) and the applet is given a framebuffer, the result is also shown until ESC is pressed.
  *
  * The configuration tree is advertised as "applet updater", mounted at /applet/updater:
@@ -28,6 +33,7 @@
 #include <interfaces/conf.h>
 #include <interfaces/http.h>
 #include <configlib.h>
+#include <json.h>
 #include <services/proto-http/proto-http.h>
 
 #if defined(CONFIG_APPLET_UPDATER_GUI)
@@ -44,8 +50,10 @@
 #define UPDATER_CONNECT_TIMEOUT_MS 10000
 #define UPDATER_RESPONSE_TIMEOUT_MS 15000
 #define UPDATER_READ_TIMEOUT_MS 10000
-#define UPDATER_READ_BUF_LEN 128
+#define UPDATER_LIST_QUERY "?list&latest"
+#define UPDATER_LIST_LEN 1024
 #define UPDATER_TEXT_LEN 48
+#define UPDATER_NAME_LEN 96
 
 #if defined(CONFIG_APPLET_UPDATER_GUI)
 #define UPDATER_LINE_H 12
@@ -56,6 +64,13 @@ struct updater_conf updater_conf;
 
 struct updater {
 	struct applet_args *args;
+
+	/* Parameters of the latest firmware on the server, the URL is relative to the server. */
+	struct {
+		char name[UPDATER_NAME_LEN];
+		char url[UPDATER_URL_LEN];
+		int64_t size;
+	} latest;
 
 #if defined(CONFIG_APPLET_UPDATER_GUI)
 	/* The applet was given a framebuffer and an event source, the status is shown on the screen. */
@@ -81,14 +96,54 @@ static void updater_report(struct updater *self, uint8_t type, const char *text)
 	painter->vmt->begin(painter);
 	painter->vmt->set_pen(painter, 0xffffffff, 1);
 	painter->vmt->set_font(painter, PAINTER_FONT_NORMAL, NULL);
-	painter->vmt->text(painter, 2, (int16_t)(2 + self->lines * UPDATER_LINE_H), text);
+
+	/* Wrap a text wider than the window, each line is shortened until it fits. */
+	size_t len = strlen(text);
+	while (len > 0) {
+		char line[UPDATER_NAME_LEN];
+		size_t n = (len < sizeof(line) - 1) ? len : sizeof(line) - 1;
+		memcpy(line, text, n);
+		line[n] = '\0';
+		uint16_t tw = 0;
+		uint16_t th = 0;
+		while (n > 1 && painter->vmt->text_size(painter, line, &tw, &th) == PAINTER_RET_OK && tw > self->w - 4) {
+			line[--n] = '\0';
+		}
+		painter->vmt->text(painter, 2, (int16_t)(2 + self->lines * UPDATER_LINE_H), line);
+		self->lines++;
+		text += n;
+		len -= n;
+	}
 	painter->vmt->end(painter);
-	self->lines++;
 #endif
 }
 
 
-/* Fetch the configured URL with @p http, read the whole body and report the response status and the body size. */
+/* Parse the parameters of the latest firmware from the directory listing in @p list. */
+static applet_ret_t updater_parse_latest(struct updater *self, const char *list, size_t len) {
+	struct json_value root;
+	struct json_value entries;
+	struct json_value entry;
+	struct json_value value;
+	if (json_init(&root, list, len) != JSON_RET_OK ||
+	    json_map_find_value(&root, "entries", &entries) != JSON_RET_OK ||
+	    json_enter_container(&entries, &entry) != JSON_RET_OK ||
+	    json_get_type(&entry) != JSON_TYPE_OBJECT) {
+		return APPLET_RET_FAILED;
+	}
+	if (json_map_find_value(&entry, "name", &value) != JSON_RET_OK ||
+	    json_copy_string(&value, self->latest.name, sizeof(self->latest.name), NULL) != JSON_RET_OK ||
+	    json_map_find_value(&entry, "url", &value) != JSON_RET_OK ||
+	    json_copy_string(&value, self->latest.url, sizeof(self->latest.url), NULL) != JSON_RET_OK ||
+	    json_map_find_value(&entry, "size", &value) != JSON_RET_OK ||
+	    json_get_int(&value, &self->latest.size) != JSON_RET_OK) {
+		return APPLET_RET_FAILED;
+	}
+	return APPLET_RET_OK;
+}
+
+
+/* Fetch the directory listing of the configured URL with @p http and find the latest firmware in it. */
 static applet_ret_t updater_fetch(struct updater *self, Http *http) {
 	char text[UPDATER_TEXT_LEN];
 
@@ -96,13 +151,18 @@ static applet_ret_t updater_fetch(struct updater *self, Http *http) {
 		updater_report(self, LOG_TYPE_ERROR, "no URL configured");
 		return APPLET_RET_FAILED;
 	}
+
+	/* Replace any query (and fragment) of the configured URL with the listing query. */
+	char target[UPDATER_URL_LEN + sizeof(UPDATER_LIST_QUERY)];
+	snprintf(target, sizeof(target), "%.*s" UPDATER_LIST_QUERY, (int)strcspn(updater_conf.settings.url, "?#"),
+	         updater_conf.settings.url);
 	u_log((self->args->logger != NULL) ? self->args->logger : system_log, LOG_TYPE_INFO,
-	      U_LOG_MODULE_PREFIX("fetching %s"), updater_conf.settings.url);
+	      U_LOG_MODULE_PREFIX("fetching %s"), target);
 	updater_report(self, LOG_TYPE_INFO, "fetching...");
 
 	const struct http_request request = {
 		.method = HTTP_METHOD_GET,
-		.target = updater_conf.settings.url,
+		.target = target,
 		.has_content_length = true,
 		.content_length = 0,
 	};
@@ -122,24 +182,40 @@ static applet_ret_t updater_fetch(struct updater *self, Http *http) {
 		updater_report(self, LOG_TYPE_ERROR, text);
 		return APPLET_RET_FAILED;
 	}
-	snprintf(text, sizeof(text), "status %u", (unsigned)response.status);
-	updater_report(self, LOG_TYPE_INFO, text);
-
-	/* Only the size of the content is reported, the data is dropped. */
-	uint8_t buf[UPDATER_READ_BUF_LEN];
-	size_t size = 0;
-	size_t len = 0;
-	while ((ret = http->vmt->read(http, session, buf, sizeof(buf), &len, UPDATER_READ_TIMEOUT_MS)) == HTTP_RET_OK) {
-		size += len;
-	}
-	http->vmt->close(http, session);
-	if (ret != HTTP_RET_EOF) {
-		snprintf(text, sizeof(text), "read failed (%d) after %lu B", (int)ret, (unsigned long)size);
+	if (response.status != 200) {
+		http->vmt->close(http, session);
+		snprintf(text, sizeof(text), "status %u", (unsigned)response.status);
 		updater_report(self, LOG_TYPE_ERROR, text);
 		return APPLET_RET_FAILED;
 	}
-	snprintf(text, sizeof(text), "content size %lu B", (unsigned long)size);
-	updater_report(self, LOG_TYPE_INFO, text);
+
+	/* The listing is read whole into the buffer. */
+	char list[UPDATER_LIST_LEN];
+	size_t size = 0;
+	size_t len = 0;
+	while (size < sizeof(list) &&
+	       (ret = http->vmt->read(http, session, list + size, sizeof(list) - size, &len, UPDATER_READ_TIMEOUT_MS)) ==
+	       HTTP_RET_OK) {
+		size += len;
+	}
+	http->vmt->close(http, session);
+	if (size == sizeof(list)) {
+		updater_report(self, LOG_TYPE_ERROR, "listing too large");
+		return APPLET_RET_FAILED;
+	}
+	if (ret != HTTP_RET_EOF) {
+		snprintf(text, sizeof(text), "read failed (%d)", (int)ret);
+		updater_report(self, LOG_TYPE_ERROR, text);
+		return APPLET_RET_FAILED;
+	}
+
+	if (updater_parse_latest(self, list, size) != APPLET_RET_OK) {
+		updater_report(self, LOG_TYPE_ERROR, "no firmware found");
+		return APPLET_RET_FAILED;
+	}
+	char latest[UPDATER_NAME_LEN + 8];
+	snprintf(latest, sizeof(latest), "latest: %s", self->latest.name);
+	updater_report(self, LOG_TYPE_INFO, latest);
 	return APPLET_RET_OK;
 }
 
@@ -248,7 +324,7 @@ const Applet updater = {
 	},
 	.name = "Updater",
 	.help = "Fetch firmware updates",
-	.stack_size = 1280,
+	.stack_size = 1536,
 	.conf = &updater_conf.tree.updater.conf,
 	.conf_init = updater_conf_init,
 };

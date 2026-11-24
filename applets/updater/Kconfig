@@ -1,6 +1,7 @@
 config APPLET_UPDATER
 	bool "Firmware updater applet"
 	depends on SERVICE_PROTO_HTTP
+	select LIB_PLUMCORE_JSON
 
 config APPLET_UPDATER_GUI
 	bool "Graphical user interface of the updater applet"
