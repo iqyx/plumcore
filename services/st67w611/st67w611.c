@@ -111,6 +111,7 @@
 
 /* Joining a network takes up to 15 s in the module (its default join timeout). */
 #define ST67W611_WIFI_JOIN_TIMEOUT_MS 20000
+#define ST67W611_WIFI_RETRY_MS        10000
 
 /* Channel of the access point created in WIFI_MODE_AP. */
 #define ST67W611_AP_CHANNEL       1
@@ -1078,6 +1079,15 @@ static void st67w611_sec_task(void *p) {
 			continue;
 		}
 
+		/* Apply the configuration again when a configured station is not connected (the join failed or the
+		 * network was lost). */
+		if (self->wifi_started && self->wifi_settings.mode == WIFI_MODE_STA && self->wifi_settings.ssid[0] != '\0' &&
+		    self->wifi_status.state == WIFI_STATE_IDLE &&
+		    xTaskGetTickCount() - self->join_attempt >= pdMS_TO_TICKS(ST67W611_WIFI_RETRY_MS)) {
+			self->join_attempt = xTaskGetTickCount();
+			st67w611_wifi_apply(self);
+		}
+
 		/* Read the SNTP time when the station got its address, then periodically. */
 		if (self->wifi_settings.mode == WIFI_MODE_STA && self->wifi_status.state == WIFI_STATE_UP &&
 		    (self->time_sync_due || xTaskGetTickCount() - self->time_attempt >=
@@ -1648,15 +1658,85 @@ static wifi_ret_t st67w611_wifi_request_apply(St67w611 *self) {
 }
 
 
+/* Remove all the credentials cached by the module, including the ones stored in its flash by an earlier firmware.
+ * The cache has only 5 slots and a join fails when it is full, the configuration is owned by the driver. */
+static void st67w611_wifi_clear_creds(St67w611 *self) {
+	char resp[ST67W611_RESP_MAX];
+	if (st67w611_command(self, "AT+CWCRED?\r\n", resp, sizeof(resp), NULL) != ST67W611_RET_OK) {
+		return;
+	}
+	/* "+CWCRED:"<ssid>"" lines, the SSID is between the first and the last quote of the line. */
+	for (char *line = strtok(resp, "\r\n"); line != NULL; line = strtok(NULL, "\r\n")) {
+		char *first = strchr(line, '"');
+		char *last = strrchr(line, '"');
+		if (strncmp(line, "+CWCRED:", 8) || first == NULL || last == first) {
+			continue;
+		}
+		*last = '\0';
+		char cmd[ST67W611_NET_CMD_MAX];
+		size_t pos = st67w611_append_quoted(cmd, sizeof(cmd), strlen(strcpy(cmd, "AT+CWCREDDEL=")), first + 1);
+		if (pos < sizeof(cmd) - 3) {
+			strcpy(cmd + pos, "\r\n");
+			st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS);
+		}
+	}
+}
+
+
+/* Join the configured network in the station mode, run by the security task. The outcome is also reported by the
+ * "+CW:" reports, which update the state and emit the events. */
+static void st67w611_wifi_join(St67w611 *self) {
+	self->join_attempt = xTaskGetTickCount();
+	char cmd[ST67W611_NET_CMD_MAX];
+	if (self->wifi_settings.hostname[0] != '\0') {
+		size_t pos = st67w611_append_quoted(cmd, sizeof(cmd), strlen(strcpy(cmd, "AT+CWHOSTNAME=")),
+		                                    self->wifi_settings.hostname);
+		if (pos < sizeof(cmd) - 3) {
+			strcpy(cmd + pos, "\r\n");
+			if (st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
+				u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot set the host name"));
+			}
+		}
+	}
+
+	st67w611_wifi_clear_creds(self);
+
+	const char *psk = (self->wifi_settings.security == WIFI_SECURITY_OPEN) ? "" : self->wifi_settings.psk;
+	size_t pos = st67w611_append_quoted(cmd, sizeof(cmd), strlen(strcpy(cmd, "AT+CWJAP=")), self->wifi_settings.ssid);
+	if (pos < sizeof(cmd) - 1) {
+		cmd[pos++] = ',';
+	}
+	pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, psk);
+	if (pos >= sizeof(cmd) - 3) {
+		return;
+	}
+	strcpy(cmd + pos, "\r\n");
+
+	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("joining '%s'"), self->wifi_settings.ssid);
+	self->wifi_status.state = WIFI_STATE_CONNECTING;
+	if (st67w611_at(self, cmd, ST67W611_WIFI_JOIN_TIMEOUT_MS) != ST67W611_RET_OK) {
+		if (self->wifi_status.state == WIFI_STATE_CONNECTING) {
+			self->wifi_status.state = WIFI_STATE_IDLE;
+		}
+		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot join '%s'"), self->wifi_settings.ssid);
+	}
+}
+
+
 /* Apply the Wi-Fi configuration, run by the security task. All connections are dropped, they do not survive
  * a mode change. The link comes up asynchronously, reported by the "+CW:" reports. */
 static void st67w611_wifi_apply(St67w611 *self) {
 	st67w611_links_drop(self);
 	self->wifi_status.state = WIFI_STATE_IDLE;
 
+	/* The configuration is owned by the driver and applied after every module boot, nothing is stored in the
+	 * module flash. Leave the network, also stopping a connection the module may have started by itself (fails
+	 * harmlessly if not joined). */
+	st67w611_at(self, "AT+SYSSTORE=0\r\n", ST67W611_CMD_TIMEOUT_MS);
+	st67w611_at(self, "AT+CWQAP\r\n", ST67W611_CMD_TIMEOUT_MS);
+
 	if (!self->wifi_started || self->wifi_settings.mode == WIFI_MODE_OFF) {
-		/* Leave the network (fails harmlessly if not joined) and disable the radio. */
-		st67w611_at(self, "AT+CWQAP\r\n", ST67W611_CMD_TIMEOUT_MS);
+		/* Disable the radio. */
 		st67w611_at(self, "AT+CWMODE=0\r\n", ST67W611_CMD_TIMEOUT_MS);
 		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("Wi-Fi off"));
 		return;
@@ -1680,42 +1760,13 @@ static void st67w611_wifi_apply(St67w611 *self) {
 		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("no SSID configured"));
 		return;
 	}
-	const char *psk = (self->wifi_settings.security == WIFI_SECURITY_OPEN) ? "" : self->wifi_settings.psk;
 
 	if (self->wifi_settings.mode == WIFI_MODE_STA) {
-		if (self->wifi_settings.hostname[0] != '\0') {
-			size_t pos = st67w611_append_quoted(cmd, sizeof(cmd), strlen(strcpy(cmd, "AT+CWHOSTNAME=")),
-			                                    self->wifi_settings.hostname);
-			if (pos < sizeof(cmd) - 3) {
-				strcpy(cmd + pos, "\r\n");
-				if (st67w611_at(self, cmd, ST67W611_CMD_TIMEOUT_MS) != ST67W611_RET_OK) {
-					u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot set the host name"));
-				}
-			}
-		}
-
-		size_t pos = st67w611_append_quoted(cmd, sizeof(cmd), strlen(strcpy(cmd, "AT+CWJAP=")), self->wifi_settings.ssid);
-		if (pos < sizeof(cmd) - 1) {
-			cmd[pos++] = ',';
-		}
-		pos = st67w611_append_quoted(cmd, sizeof(cmd), pos, psk);
-		if (pos >= sizeof(cmd) - 3) {
-			return;
-		}
-		strcpy(cmd + pos, "\r\n");
-
-		u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("joining '%s'"), self->wifi_settings.ssid);
-		self->wifi_status.state = WIFI_STATE_CONNECTING;
-		/* The outcome is also reported by "+CW:" reports, which update the state and emit the events. */
-		if (st67w611_at(self, cmd, ST67W611_WIFI_JOIN_TIMEOUT_MS) != ST67W611_RET_OK) {
-			if (self->wifi_status.state == WIFI_STATE_CONNECTING) {
-				self->wifi_status.state = WIFI_STATE_IDLE;
-			}
-			u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("cannot join '%s'"), self->wifi_settings.ssid);
-		}
+		st67w611_wifi_join(self);
 		return;
 	}
 
+	const char *psk = (self->wifi_settings.security == WIFI_SECURITY_OPEN) ? "" : self->wifi_settings.psk;
 	/* SoftAP, ecn 0 = open, 3 = WPA2-PSK, 4 = WPA3-PSK. */
 	static const uint8_t ecn[] = {0, 3, 4};
 	size_t pos = st67w611_append_quoted(cmd, sizeof(cmd), strlen(strcpy(cmd, "AT+CWSAP=")), self->wifi_settings.ssid);
@@ -2542,6 +2593,14 @@ st67w611_ret_t st67w611_init(St67w611 *self, const struct st67w611_conf *conf) {
 	st67w611_conf_init(self);
 
 	u_log(system_log, LOG_TYPE_INFO, U_LOG_MODULE_PREFIX("init ok"));
+
+	/* The module would connect to a network stored in its flash by itself after power on, racing the driver.
+	 * The setting is stored in the module flash, write it only if it differs. */
+	char autoconn[ST67W611_CMD_MAX];
+	if (st67w611_command(self, "AT+CWAUTOCONN?\r\n", autoconn, sizeof(autoconn), NULL) != ST67W611_RET_OK ||
+	    strstr(autoconn, "+CWAUTOCONN:0") == NULL) {
+		st67w611_at(self, "AT+CWAUTOCONN=0\r\n", ST67W611_CMD_TIMEOUT_MS);
+	}
 
 	/* Query the module firmware version through the background-task command path now that it is up. */
 	char resp[ST67W611_RESP_MAX];

@@ -148,6 +148,10 @@ typedef struct {
 	bool time_sntp_cfg;
 	TickType_t time_attempt;
 
+	/* Time of the last station join attempt, the configuration of a station which is not connected is applied
+	 * again after the retry interval. */
+	TickType_t join_attempt;
+
 	/* Configuration subtree with the Wi-Fi settings. */
 	struct {
 		ConfiglibValue wifi;
