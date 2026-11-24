@@ -13,6 +13,7 @@ The design rules shared by all interfaces are described in [Interface concepts](
 nontrivial semantics have their own page:
 
 - [Power source/sink device](power.md)
+- [HTTP](http.md)
 - [Remote interface](remote-interface.md)
 
 
@@ -23,7 +24,7 @@ modern style, older ones are migrated when they are reworked.
 
 | Generation | Interfaces | Characteristics |
 |------------|------------|-----------------|
-| Modern (reference) | `block`, `remote-interface`, `notify`, `job` | `const struct x_vmt`, `X *self`, documented methods and return codes, threading and state rules stated |
+| Modern (reference) | `block`, `remote-interface`, `notify`, `job`, `http`, `tcp`, `tls`, `wifi` | `const struct x_vmt`, `X *self`, documented methods and return codes, threading and state rules stated |
 | Modern, less documented | `ble`, `pm`, `fs`, `conf`, `clock`, `ow`, `led`, `event`, `stream`, `flash`, `mux`, `can`, `beeper` | vmt layout is modern, per-method documentation is partial or missing |
 | Modern layout, undocumented | `adc`, `dac`, `sensor`, `datagram`, `gpio`, `pwm`, `spi`, `uart`, `i2c-bus`, `fb`, `painter`, `window`, `power`, `waveform-source`, `waveform-sink` | vmt layout is modern, methods carry no documentation |
 | Legacy | `servicelocator`, `radio`, `cellular`, `log`, `worn-log`, `lora`, `uxbbus`, `uxbdevice`, `uxbslot`, `measurement`, `clock/descriptor`, `radio-mac/*`, `plog/*` | `Interface` base from `interface.h`, `void *parent` as the first method argument, init/free helpers in a `.c` file |
