@@ -8,8 +8,9 @@ import time
 repo = Repo(".")
 v = "0.0.0"
 if str(repo.head.ref) == "develop":
-	# We are currently in the develop branch, find all dev tags (eg. 1.0.0-dev) and grab the last one
-	dev_tag = [str(tag) for tag in repo.tags if str(tag)[-3:] == "dev"][-1]
+	# We are currently in the develop branch, find the nearest dev tag (eg. 1.0.0-dev) reachable from HEAD.
+	# Tags are not compared by name, "0.10.0-dev" sorts before "0.9.0-dev".
+	dev_tag = repo.git.describe("--tags", "--match", "*-dev", "--abbrev=0")
 
 	# In the develop branch the version is identical to the dev tag name and a count of
 	# commits from the dev tag to the HEAD in the "dev.x" format
@@ -20,7 +21,7 @@ if str(repo.head.ref) == "develop":
 if str(repo.head.ref)[:8] == "feature/":
 	dev_branch = str(repo.head.ref)
 	dev_feature = dev_branch[8:]
-	dev_tag = [str(tag)[:-4] for tag in repo.tags if str(tag)[-3:] == "dev"][-1]
+	dev_tag = repo.git.describe("--tags", "--match", "*-dev", "--abbrev=0")[:-4]
 	try:
 		commits_from_develop = len(list(repo.iter_commits("develop..." + dev_branch)))
 	except:
