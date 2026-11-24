@@ -19,6 +19,11 @@
  * A response header longer than the buffer is skipped.
  *
  * A request body of an unknown length is sent with the chunked transfer coding. Chunked responses are decoded.
+ *
+ * If credentials are configured, a request without a body answered with "401 Unauthorized" and a Basic challenge
+ * is repeated once on a new connection with the Basic credentials. The request head is kept in the buffer until
+ * the response arrives for that, leaving less space for the response headers. A request with a body is not
+ * repeated, its 401 response is returned. The credentials are sent only when the server asks for them.
  */
 
 #pragma once
@@ -51,6 +56,11 @@ struct proto_http_conf {
 	/** TLS parameters of the https connections, server_name is usually NULL to use the target host. The strings
 	 *  are borrowed and must outlive the instance. */
 	struct tls_params tls_params;
+
+	/** Credentials for the HTTP Basic authentication, NULL username if none. The strings are borrowed and must
+	 *  outlive the instance. */
+	const char *username;
+	const char *password;
 };
 
 
@@ -80,8 +90,9 @@ struct proto_http_session {
 	bool used;
 	enum proto_http_state state;
 
-	/* The connection was made through Tls, it is closed through it. */
+	/* The connection was made through Tls, it is closed through it. The port is kept for a reconnection. */
 	bool tls;
+	uint16_t port;
 	Stream *stream;
 
 	/* Request body framing, req_left bytes remain to be written if the length is known. */
@@ -90,6 +101,12 @@ struct proto_http_session {
 
 	/* The request has no response body (HEAD). */
 	bool no_body;
+
+	/* Request body data was written, the request cannot be repeated. */
+	bool body_sent;
+
+	/* The response asks for the Basic authentication (WWW-Authenticate). */
+	bool basic_auth;
 
 	/* Response body framing. body_left is the remaining body length or the remaining length of the current
 	 * chunk. In a chunked body, chunk_crlf marks the CRLF following the chunk data still to be read and
@@ -100,9 +117,12 @@ struct proto_http_session {
 	bool trailers;
 	bool done;
 
-	/* Buffer layout: before get_response() the request data to be sent is in [0, tx_len). After it, the kept
-	 * response headers are NUL terminated lines in [hdr_pos, hdr_end) and the received data not processed yet is
-	 * in [rx_pos, rx_end), rx_pos >= hdr_end. */
+	/* Buffer layout: the NUL terminated host name is kept at the end in [limit, sizeof(buf)) for a reconnection.
+	 * Before get_response() the request data to be sent is in [0, tx_len). After it, the request head which may
+	 * be repeated stays in [0, base) (base is 0 if it is not), the kept response headers are NUL terminated lines
+	 * in [hdr_pos, hdr_end) and the received data not processed yet is in [rx_pos, rx_end), rx_pos >= hdr_end. */
+	size_t limit;
+	size_t base;
 	size_t tx_len;
 	size_t hdr_pos;
 	size_t hdr_end;

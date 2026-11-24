@@ -20,6 +20,8 @@
 #include <interfaces/tls.h>
 #include <interfaces/stream.h>
 
+#include <base64.h>
+
 #include "proto-http.h"
 
 #define MODULE_NAME "proto-http"
@@ -77,7 +79,7 @@ static struct proto_http_session *proto_http_session_get(ProtoHttp *self, void *
 /* Append @p len bytes to the request data buffered for sending, keeping @p reserve bytes free. Returns false if they
  * do not fit. */
 static bool proto_http_append(struct proto_http_session *s, const void *data, size_t len, size_t reserve) {
-	if (len + reserve > sizeof(s->buf) - s->tx_len) {
+	if (len + reserve > s->limit - s->tx_len) {
 		return false;
 	}
 	memcpy(s->buf + s->tx_len, data, len);
@@ -163,7 +165,7 @@ static http_ret_t proto_http_line(struct proto_http_session *s, char **line, boo
 			return HTTP_RET_OK;
 		}
 
-		if (s->rx_end == sizeof(s->buf)) {
+		if (s->rx_end == s->limit) {
 			if (!skip_long) {
 				return HTTP_RET_FAILED;
 			}
@@ -172,8 +174,8 @@ static http_ret_t proto_http_line(struct proto_http_session *s, char **line, boo
 			s->rx_end = s->rx_pos;
 		}
 		size_t len = 0;
-		stream_ret_t ret = s->stream->vmt->read_timeout(s->stream, s->buf + s->rx_end, sizeof(s->buf) - s->rx_end,
-		                                                &len, proto_http_left(start, timeout_ms));
+		stream_ret_t ret = s->stream->vmt->read_timeout(s->stream, s->buf + s->rx_end, s->limit - s->rx_end, &len,
+		                                                proto_http_left(start, timeout_ms));
 		if (ret != STREAM_RET_OK) {
 			return proto_http_stream_ret(ret);
 		}
@@ -183,13 +185,16 @@ static http_ret_t proto_http_line(struct proto_http_session *s, char **line, boo
 
 
 /* Receive the response status line and headers and set up the body framing. The framing and connection headers are
- * consumed, the others are kept for read_header() while they fit half of the buffer, the other half is left for
- * receiving the lines. Interim (1xx) responses are skipped. */
+ * consumed, the others are kept for read_header() while they fit half of the space after base, the other half is
+ * left for receiving the lines. Interim (1xx) responses are skipped. */
 static http_ret_t proto_http_response_head(struct proto_http_session *s, struct http_response *response,
                                            TickType_t start, uint32_t timeout_ms) {
+	s->rx_pos = s->base;
+	s->rx_end = s->base;
 	while (true) {
-		s->hdr_pos = 0;
-		s->hdr_end = 0;
+		s->hdr_pos = s->base;
+		s->hdr_end = s->base;
+		s->basic_auth = false;
 
 		/* "HTTP/1.x <status> <reason>" */
 		char *line = NULL;
@@ -228,8 +233,11 @@ static http_ret_t proto_http_response_head(struct proto_http_session *s, struct 
 			} else if (proto_http_name_is(line, name_len, "Transfer-Encoding")) {
 				chunked = (strstr(value, "chunked") != NULL);
 			} else if (!proto_http_name_is(line, name_len, "Connection")) {
+				if (proto_http_name_is(line, name_len, "WWW-Authenticate") && !strncasecmp(value, "Basic", 5)) {
+					s->basic_auth = true;
+				}
 				size_t len = strlen(line) + 1;
-				if (s->hdr_end + len <= sizeof(s->buf) / 2) {
+				if (s->hdr_end + len <= s->base + (s->limit - s->base) / 2) {
 					s->hdr_end += len;
 				}
 			}
@@ -311,6 +319,91 @@ static stream_ret_t proto_http_recv(struct proto_http_session *s, void *buf, siz
 
 
 /**********************************************************************************************************************
+ * Connection and authentication
+ **********************************************************************************************************************/
+
+/* Connect the session to the host kept at the end of its buffer. */
+static http_ret_t proto_http_connect(ProtoHttp *http, struct proto_http_session *s, uint32_t timeout_ms) {
+	const char *host = s->buf + s->limit;
+	bool connected = false;
+	bool timeout = false;
+	if (s->tls) {
+		tls_ret_t ret = http->conf.tls->vmt->connect(http->conf.tls, host, s->port, &http->conf.tls_params, NULL,
+		                                             &s->stream, timeout_ms);
+		connected = (ret == TLS_RET_OK);
+		timeout = (ret == TLS_RET_TIMEOUT);
+	} else {
+		tcp_ret_t ret = http->conf.tcp->vmt->connect(http->conf.tcp, host, s->port, NULL, &s->stream, timeout_ms);
+		connected = (ret == TCP_RET_OK);
+		timeout = (ret == TCP_RET_TIMEOUT);
+	}
+	if (!connected) {
+		s->stream = NULL;
+		return timeout ? HTTP_RET_TIMEOUT : HTTP_RET_CONNECT_FAILED;
+	}
+	return HTTP_RET_OK;
+}
+
+
+static void proto_http_disconnect(ProtoHttp *http, struct proto_http_session *s) {
+	if (s->stream == NULL) {
+		return;
+	}
+	if (s->tls) {
+		http->conf.tls->vmt->close(http->conf.tls, s->stream);
+	} else {
+		http->conf.tcp->vmt->close(http->conf.tcp, s->stream);
+	}
+	s->stream = NULL;
+}
+
+
+/* Repeat the request kept in [0, base) with the Basic credentials on a new connection. The CRLF terminating the
+ * request head is replaced by the Authorization header. The credentials are joined at the end of the usable buffer
+ * and encoded in front of them. If they do not fit, the 401 response is left to the caller. */
+static http_ret_t proto_http_auth_retry(ProtoHttp *http, struct proto_http_session *s, struct http_response *response,
+                                        TickType_t start, uint32_t timeout_ms) {
+	static const char auth[] = "Authorization: Basic ";
+	const char *password = (http->conf.password != NULL) ? http->conf.password : "";
+	size_t user_len = strlen(http->conf.username);
+	size_t cred_len = user_len + 1 + strlen(password);
+	size_t b64_len = (cred_len + 2) / 3 * 4;
+	size_t pos = s->base - 2;
+	if (pos + sizeof(auth) - 1 + b64_len + 4 + cred_len > s->limit) {
+		return HTTP_RET_OK;
+	}
+	char *cred = s->buf + s->limit - cred_len;
+	memcpy(cred, http->conf.username, user_len);
+	cred[user_len] = ':';
+	memcpy(cred + user_len + 1, password, cred_len - user_len - 1);
+	memcpy(s->buf + pos, auth, sizeof(auth) - 1);
+	pos += sizeof(auth) - 1;
+	base64_ret_t bret = base64encode(cred, cred_len, s->buf + pos, b64_len + 1);
+	memset(cred, 0, cred_len);
+	if (bret != BASE64_RET_OK) {
+		return HTTP_RET_FAILED;
+	}
+	pos += b64_len;
+	memcpy(s->buf + pos, "\r\n\r\n", 4);
+	pos += 4;
+
+	/* The server closes the connection after the response, the request is sent on a new one. */
+	proto_http_disconnect(http, s);
+	http_ret_t ret = proto_http_connect(http, s, proto_http_left(start, timeout_ms));
+	if (ret != HTTP_RET_OK) {
+		return ret;
+	}
+	s->tx_len = pos;
+	ret = proto_http_flush(s, proto_http_left(start, timeout_ms));
+	if (ret != HTTP_RET_OK) {
+		return ret;
+	}
+	s->base = 0;
+	return proto_http_response_head(s, response, start, timeout_ms);
+}
+
+
+/**********************************************************************************************************************
  * Http interface
  **********************************************************************************************************************/
 
@@ -385,7 +478,7 @@ static http_ret_t http_open(Http *self, const struct http_request *request, void
 		}
 		port = (uint16_t)p;
 	}
-	if (host_len == 0 || host_len >= CONFIG_SERVICE_PROTO_HTTP_BUF_SIZE) {
+	if (host_len == 0 || host_len >= CONFIG_SERVICE_PROTO_HTTP_BUF_SIZE / 2) {
 		return HTTP_RET_BAD_ARG;
 	}
 
@@ -405,25 +498,16 @@ static http_ret_t http_open(Http *self, const struct http_request *request, void
 		return HTTP_RET_TIMEOUT;
 	}
 
-	/* The buffer is free until the request head is assembled, use it for the NUL terminated host name. */
-	memcpy(s->buf, host, host_len);
-	s->buf[host_len] = '\0';
-	bool connected = false;
-	bool timeout = false;
+	/* The host name is kept at the end of the buffer for a reconnection. */
+	s->limit = sizeof(s->buf) - host_len - 1;
+	memcpy(s->buf + s->limit, host, host_len);
+	s->buf[sizeof(s->buf) - 1] = '\0';
 	s->tls = tls;
-	if (tls) {
-		tls_ret_t ret = http->conf.tls->vmt->connect(http->conf.tls, s->buf, port, &http->conf.tls_params, NULL,
-		                                             &s->stream, timeout_ms);
-		connected = (ret == TLS_RET_OK);
-		timeout = (ret == TLS_RET_TIMEOUT);
-	} else {
-		tcp_ret_t ret = http->conf.tcp->vmt->connect(http->conf.tcp, s->buf, port, NULL, &s->stream, timeout_ms);
-		connected = (ret == TCP_RET_OK);
-		timeout = (ret == TCP_RET_TIMEOUT);
-	}
-	if (!connected) {
+	s->port = port;
+	http_ret_t cret = proto_http_connect(http, s, timeout_ms);
+	if (cret != HTTP_RET_OK) {
 		s->used = false;
-		return timeout ? HTTP_RET_TIMEOUT : HTTP_RET_CONNECT_FAILED;
+		return cret;
 	}
 
 	/* Request line, Host and the body framing. A body of an unknown length is sent chunked, an empty body is
@@ -467,11 +551,7 @@ static http_ret_t http_close(Http *self, void *session) {
 	if (s == NULL) {
 		return HTTP_RET_BAD_ARG;
 	}
-	if (s->tls) {
-		http->conf.tls->vmt->close(http->conf.tls, s->stream);
-	} else {
-		http->conf.tcp->vmt->close(http->conf.tcp, s->stream);
-	}
+	proto_http_disconnect(http, s);
 	s->used = false;
 	return HTTP_RET_OK;
 }
@@ -529,6 +609,7 @@ static http_ret_t http_write(Http *self, void *session, const void *buf, size_t 
 		return HTTP_RET_OK;
 	}
 
+	s->body_sent = true;
 	TickType_t start = xTaskGetTickCount();
 	http_ret_t ret = HTTP_RET_OK;
 	if (s->req_framing == PROTO_HTTP_FRAMING_CHUNKED) {
@@ -572,15 +653,19 @@ static http_ret_t http_get_response(Http *self, void *session, struct http_respo
 	if (s->req_framing == PROTO_HTTP_FRAMING_CHUNKED) {
 		ret = proto_http_send(s, "0\r\n\r\n", 5, start, timeout_ms);
 	}
+
+	/* A request without a body is still whole in the buffer, keep it to be repeated with the credentials. */
+	ProtoHttp *http = (ProtoHttp *)self->parent;
+	s->base = (http->conf.username != NULL && !s->body_sent && s->req_framing == PROTO_HTTP_FRAMING_LENGTH) ?
+	          s->tx_len : 0;
 	if (ret == HTTP_RET_OK) {
 		ret = proto_http_flush(s, proto_http_left(start, timeout_ms));
 	}
 	if (ret == HTTP_RET_OK) {
-		s->hdr_pos = 0;
-		s->hdr_end = 0;
-		s->rx_pos = 0;
-		s->rx_end = 0;
 		ret = proto_http_response_head(s, response, start, timeout_ms);
+	}
+	if (ret == HTTP_RET_OK && response->status == 401 && s->base > 0 && s->basic_auth) {
+		ret = proto_http_auth_retry(http, s, response, start, timeout_ms);
 	}
 	s->state = (ret == HTTP_RET_OK) ? PROTO_HTTP_STATE_RESPONSE_HEAD : PROTO_HTTP_STATE_FAILED;
 	return ret;
@@ -639,6 +724,7 @@ static http_ret_t http_read(Http *self, void *session, void *buf, size_t size, s
 	if (s->state == PROTO_HTTP_STATE_RESPONSE_HEAD) {
 		/* The unread headers are dropped, their space is reused for the chunk lines. */
 		s->state = PROTO_HTTP_STATE_RESPONSE_BODY;
+		s->base = 0;
 		s->hdr_pos = 0;
 		s->hdr_end = 0;
 	}
