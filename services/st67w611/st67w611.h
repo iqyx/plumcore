@@ -159,6 +159,7 @@ typedef struct {
 		ConfiglibValue ssid;
 		ConfiglibValue security;
 		ConfiglibValue psk;
+		ConfiglibValue hostname;
 	} conf_tree;
 
 	/* Number of GATT services created so far, used as the next service index. */

@@ -1956,10 +1956,21 @@ static void st67w611_conf_init(St67w611 *self) {
 	});
 	configlib_set_description(&self->conf_tree.psk, "WPA passphrase", NULL);
 
+	configlib_init(&self->conf_tree.hostname, "hostname");
+	configlib_map_string(&self->conf_tree.hostname, self->wifi_settings.hostname,
+	                     sizeof(self->wifi_settings.hostname));
+	configlib_append(&self->conf_tree.hostname, &self->conf_tree.psk, CONF_DIR_NEXT);
+	configlib_set_constraint(&self->conf_tree.hostname, (union conf_constraint) {
+		.str = {.max_len = ST67W611_HOSTNAME_LEN_MAX},
+	});
+	configlib_set_description(&self->conf_tree.hostname, "Station host name",
+		"Name the station announces to the network in the sta mode, empty to keep the module default.");
+
 	self->conf_tree.mode.flags = CONF_READ | CONF_WRITE;
 	self->conf_tree.ssid.flags = CONF_READ | CONF_WRITE;
 	self->conf_tree.security.flags = CONF_READ | CONF_WRITE;
 	self->conf_tree.psk.flags = CONF_READ | CONF_WRITE;
+	self->conf_tree.hostname.flags = CONF_READ | CONF_WRITE;
 
 	st67w611_configlib_vmt = self->conf_tree.mode.conf.vmt;
 	st67w611_wifi_conf_vmt = *st67w611_configlib_vmt;
@@ -1968,6 +1979,7 @@ static void st67w611_conf_init(St67w611 *self) {
 	self->conf_tree.ssid.conf.vmt = &st67w611_wifi_conf_vmt;
 	self->conf_tree.security.conf.vmt = &st67w611_wifi_conf_vmt;
 	self->conf_tree.psk.conf.vmt = &st67w611_wifi_conf_vmt;
+	self->conf_tree.hostname.conf.vmt = &st67w611_wifi_conf_vmt;
 }
 
 
