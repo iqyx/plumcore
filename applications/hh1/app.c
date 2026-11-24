@@ -558,6 +558,9 @@ app_ret_t app_init(App *self) {
 	 * the hostname, which is known only after the configuration load. */
 	app_ble_init(self);
 
+	/* Start the Wi-Fi link with the stored configuration, also after the configuration load. */
+	app_wifi_init(self);
+
 	#if defined(CONFIG_APP_HH1_BAT_LOW_NOTIFY_ENABLE)
 		app_bat_low_init(self);
 	#endif

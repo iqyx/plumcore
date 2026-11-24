@@ -206,7 +206,7 @@ static void app_ble_event_handler(void *ctx, const struct ble_event *event) {
 
 /* Read the string leaf @p leaf, a direct child of the Conf tree advertised as @p root. The returned @p val
  * points to the node's own storage. Fails if the tree or the leaf does not exist or the leaf is not a string. */
-static conf_ret_t app_ble_conf_str(const char *root, const char *leaf, union conf_val *val) {
+conf_ret_t app_conf_str(const char *root, const char *leaf, union conf_val *val) {
 	Conf *node = NULL;
 	if (iservicelocator_query_name_type(locator, root, ISERVICELOCATOR_TYPE_CONF, (Interface **)&node) != ISERVICELOCATOR_RET_OK) {
 		return CONF_RET_FAILED;
@@ -240,7 +240,7 @@ static conf_ret_t app_ble_conf_str(const char *root, const char *leaf, union con
  * missing or empty. The port name is used when the hostname is missing or empty. */
 static app_ret_t app_ble_set_name(App *self) {
 	union conf_val hostname = {0};
-	if (app_ble_conf_str("system", "hostname", &hostname) != CONF_RET_OK || hostname.str.len == 0) {
+	if (app_conf_str("system", "hostname", &hostname) != CONF_RET_OK || hostname.str.len == 0) {
 		hostname.str.buf = PORT_NAME;
 		hostname.str.len = strlen(PORT_NAME);
 	}
@@ -248,7 +248,7 @@ static app_ret_t app_ble_set_name(App *self) {
 	/* Append the serial number in parentheses when the MIB holds a nonempty one. */
 	char name[64];
 	union conf_val sn = {0};
-	if (app_ble_conf_str("mib", "sn", &sn) == CONF_RET_OK && sn.str.len > 0) {
+	if (app_conf_str("mib", "sn", &sn) == CONF_RET_OK && sn.str.len > 0) {
 		snprintf(name, sizeof(name), "%.*s (%.*s)", (int)hostname.str.len, hostname.str.buf, (int)sn.str.len, sn.str.buf);
 	} else {
 		snprintf(name, sizeof(name), "%.*s", (int)hostname.str.len, hostname.str.buf);

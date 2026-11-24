@@ -25,6 +25,7 @@
 #include <interfaces/beeper.h>
 #include <interfaces/led.h>
 #include <interfaces/ble.h>
+#include <interfaces/wifi.h>
 #include <interfaces/pm.h>
 #include <services/fb-compositor/fb-compositor.h>
 #include <services/fb-painter/fb-painter.h>
@@ -122,6 +123,10 @@ typedef struct {
 
 	/* Generic BLE device advertised by the port and the GATT server built on top of it (see ble.c). */
 	Ble *ble;
+
+	/* Generic Wi-Fi device advertised by the port, configured through its "device wifi wifi0" Conf subtree (see
+	 * wifi.c). */
+	Wifi *wifi;
 
 	/* RemoteInterface transport owning the BLE device, exporting every advertised RemoteInterface. */
 	RemoteInterfaceBle ri_ble;
@@ -235,6 +240,31 @@ typedef struct {
  *         APP_RET_OK otherwise.
  */
 app_ret_t app_ble_init(App *self);
+
+/**
+ * @brief Discover the Wi-Fi device advertised by the port and start the Wi-Fi link.
+ *
+ * Sets up the event handler and the host name and starts the link with the mode, SSID and security stored in the
+ * device's configuration subtree. Implemented in wifi.c.
+ *
+ * @param self Instance of the application
+ * @return APP_RET_FAILED if the Wi-Fi device was not found or cannot be started,
+ *         APP_RET_OK otherwise.
+ */
+app_ret_t app_wifi_init(App *self);
+
+/**
+ * @brief Read a string leaf of a Conf tree advertised via the service locator.
+ *
+ * The leaf @p leaf must be a direct child of the tree advertised as @p root. Implemented in ble.c.
+ *
+ * @param root Name of the advertised Conf tree
+ * @param leaf Name of the string leaf
+ * @param val The value, pointing to the node's own storage
+ * @return CONF_RET_FAILED if the tree or the leaf does not exist or the leaf is not a string,
+ *         CONF_RET_OK otherwise.
+ */
+conf_ret_t app_conf_str(const char *root, const char *leaf, union conf_val *val);
 
 #if defined(CONFIG_APP_HH1_BAT_LOW_NOTIFY_ENABLE)
 /**
