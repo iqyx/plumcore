@@ -907,9 +907,11 @@ fb_compositor_ret_t fb_compositor_init(FbCompositor *self, Fb *out, Event *input
 		goto err;
 	}
 
-	/* Route input to the top-level window only when an event source was provided. */
+	/* Route input to the top-level window only when an event source was provided. The event source's listen()
+	 * runs in this task and may render (a window manager showing the launcher on a hotkey), so the task needs
+	 * a stack as large as a rendering task. */
 	if (self->input != NULL) {
-		if (xTaskCreate(fb_compositor_input_task, "fb-compositor-in", configMINIMAL_STACK_SIZE + 128, (void *)self, 1, &self->input_task) != pdPASS) {
+		if (xTaskCreate(fb_compositor_input_task, "fb-compositor-in", configMINIMAL_STACK_SIZE + 256, (void *)self, 1, &self->input_task) != pdPASS) {
 			/* The render task is already up; stop it before releasing its resources. */
 			self->can_run = false;
 			compositor_damage(self);
