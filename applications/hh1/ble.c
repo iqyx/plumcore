@@ -117,7 +117,7 @@ static void app_ble_notify_task(void *p) {
 		size_t index = 0;
 		gui_wm_fs_notify(&self->gui, connected ? NOTIFY_WINDOW_ICON_INFO : NOTIFY_WINDOW_ICON_WARNING,
 		                 connected ? "Bluetooth connection received" : "Bluetooth connection lost",
-		                 actions, sizeof(actions) / sizeof(actions[0]), APP_BLE_NOTIFY_TIMEOUT_MS, &index);
+		                 actions, sizeof(actions) / sizeof(actions[0]), APP_BLE_NOTIFY_TIMEOUT_MS, &index, NULL);
 	}
 }
 

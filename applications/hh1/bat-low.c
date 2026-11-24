@@ -47,7 +47,7 @@ static void app_bat_low_task(void *p) {
 		u_log(system_log, LOG_TYPE_WARN, U_LOG_MODULE_PREFIX("battery low"));
 		size_t index = 0;
 		gui_wm_fs_notify(&self->gui, NOTIFY_WINDOW_ICON_WARNING, "Battery low", actions,
-		                 sizeof(actions) / sizeof(actions[0]), APP_BAT_LOW_NOTIFY_TIMEOUT_MS, &index);
+		                 sizeof(actions) / sizeof(actions[0]), APP_BAT_LOW_NOTIFY_TIMEOUT_MS, &index, NULL);
 	}
 }
 

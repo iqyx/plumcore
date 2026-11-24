@@ -37,7 +37,7 @@ static void app_sd_notify(App *self, enum notify_window_icon icon, const char *m
 	};
 	size_t index = 0;
 	gui_wm_fs_notify(&self->gui, icon, message, actions, sizeof(actions) / sizeof(actions[0]),
-	                 APP_SD_NOTIFY_TIMEOUT_MS, &index);
+	                 APP_SD_NOTIFY_TIMEOUT_MS, &index, NULL);
 }
 
 
