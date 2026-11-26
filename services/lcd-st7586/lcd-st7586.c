@@ -82,8 +82,13 @@ static lcd_st7586_ret_t lcd_init_controller(LcdSt7586 *self) {
         lcd_send_data(self, 0x07);
         lcd_send_command(self, 0xD0); // Enable Analog Circuit
         lcd_send_data(self, 0x1D);
-        lcd_send_command(self, 0xB5); // N-Line = 0
-        lcd_send_data(self, 0x00);
+        lcd_send_command(self, 0xB5); // N-Line = 2, independent of frame
+        lcd_send_data(self, 0x81);
+        lcd_send_command(self, 0xF0); // Frame Rate (Gray Scale Mode) = 69 Hz in all temperature ranges
+        lcd_send_data(self, 0x0C);
+        lcd_send_data(self, 0x0C);
+        lcd_send_data(self, 0x0C);
+        lcd_send_data(self, 0x0C);
         lcd_send_command(self, 0x38); // Grayscale mode
         lcd_send_command(self, 0x3A); // Enable DDRAM Interface
         lcd_send_data(self, 0x02);
@@ -102,7 +107,7 @@ static lcd_st7586_ret_t lcd_init_controller(LcdSt7586 *self) {
         lcd_send_data(self, 0x00); // COM0 -> COM160
         lcd_send_data(self, 0x00);
         lcd_send_data(self, 0x00);
-        lcd_send_command(self, 0x9F);
+        lcd_send_data(self, 0x9F);
         lcd_send_command(self, 0x29); // Display ON
 
 	return LCD_ST7586_RET_OK;
